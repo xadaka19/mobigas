@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:contacts_service/contacts_service.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
@@ -43,14 +43,13 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
       return;
     }
 
-    final contacts = await ContactsService.getContacts(
-      withThumbnails: false,
-      orderByGivenName: true,
+    final contacts = await FlutterContacts.getContacts(
+      withProperties: true,
     );
 
     // Only contacts with at least one phone number
     final valid = contacts
-        .where((c) => c.phones != null && c.phones!.isNotEmpty)
+        .where((c) => c.phones.isNotEmpty)
         .toList();
 
     setState(() {
@@ -67,17 +66,17 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
           ? _contacts
           : _contacts.where((c) {
               final name =
-                  '${c.givenName ?? ''} ${c.familyName ?? ''}'.toLowerCase();
-              final phone = c.phones!.first.value ?? '';
+                  c.displayName.toLowerCase();
+              final phone = c.phones.first.number;
               return name.contains(q) || phone.contains(q);
             }).toList();
     });
   }
 
   void _toggleContact(Contact contact) {
-    final phone = _cleanPhone(contact.phones!.first.value ?? '');
+    final phone = _cleanPhone(contact.phones.first.number);
     final name =
-        '${contact.givenName ?? ''} ${contact.familyName ?? ''}'.trim();
+        contact.displayName;
 
     final alreadySelected = _selected.any((g) => g.phone == phone);
 
@@ -106,7 +105,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
   }
 
   bool _isSelected(Contact contact) {
-    final phone = _cleanPhone(contact.phones!.first.value ?? '');
+    final phone = _cleanPhone(contact.phones.first.number);
     return _selected.any((g) => g.phone == phone);
   }
 
@@ -399,9 +398,9 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
 
   Widget _contactTile(Contact contact) {
     final name =
-        '${contact.givenName ?? ''} ${contact.familyName ?? ''}'.trim();
+        contact.displayName;
     final phone =
-        _cleanPhone(contact.phones!.first.value ?? '');
+        _cleanPhone(contact.phones.first.number);
     final selected = _isSelected(contact);
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
 
