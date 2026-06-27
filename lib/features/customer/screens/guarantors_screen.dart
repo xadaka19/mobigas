@@ -43,11 +43,10 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
       return;
     }
 
-    final contacts = await FlutterContacts.getContacts(
-      withProperties: true,
+    final contacts = await FlutterContacts.getAll(
+      properties: {ContactProperty.phone},
     );
 
-    // Only contacts with at least one phone number
     final valid = contacts
         .where((c) => c.phones.isNotEmpty)
         .toList();
@@ -65,8 +64,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
       _filtered = q.isEmpty
           ? _contacts
           : _contacts.where((c) {
-              final name =
-                  c.displayName.toLowerCase();
+              final name = (c.displayName ?? '').toLowerCase();
               final phone = c.phones.first.number;
               return name.contains(q) || phone.contains(q);
             }).toList();
@@ -75,9 +73,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
 
   void _toggleContact(Contact contact) {
     final phone = _cleanPhone(contact.phones.first.number);
-    final name =
-        contact.displayName;
-
+    final name = contact.displayName ?? '';
     final alreadySelected = _selected.any((g) => g.phone == phone);
 
     if (alreadySelected) {
@@ -160,11 +156,8 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
         children: [
           GestureDetector(
             onTap: () => context.go('/register'),
-            child: const Icon(
-              Icons.arrow_back_ios_rounded,
-              color: AppColors.white,
-              size: 20,
-            ),
+            child: const Icon(Icons.arrow_back_ios_rounded,
+                color: AppColors.white, size: 20),
           ),
           const SizedBox(height: 16),
           Text(
@@ -183,10 +176,10 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
                 ),
           ),
           const SizedBox(height: 16),
-          // Progress indicator
           Row(
             children: [
-              _progressDot(filled: _selected.isNotEmpty, label: 'Guarantor 1'),
+              _progressDot(
+                  filled: _selected.isNotEmpty, label: 'Guarantor 1'),
               Expanded(
                 child: Container(
                   height: 2,
@@ -215,10 +208,6 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: filled ? AppColors.orange : AppColors.gray600,
-            border: Border.all(
-              color: filled ? AppColors.orange : AppColors.gray600,
-              width: 2,
-            ),
           ),
           child: filled
               ? const Icon(Icons.check_rounded,
@@ -229,7 +218,8 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
         Text(
           label,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: filled ? AppColors.orange : AppColors.gray400,
+                color:
+                    filled ? AppColors.orange : AppColors.gray400,
                 fontSize: 10,
               ),
         ),
@@ -256,9 +246,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _selected
-                .map((g) => _selectedBadge(g))
-                .toList(),
+            children: _selected.map((g) => _selectedBadge(g)).toList(),
           ),
           const SizedBox(height: 8),
         ],
@@ -272,7 +260,8 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
       decoration: BoxDecoration(
         color: AppColors.orange.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.orange.withValues(alpha: 0.4)),
+        border:
+            Border.all(color: AppColors.orange.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -312,8 +301,8 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            onTap: () =>
-                setState(() => _selected.removeWhere((s) => s.phone == g.phone)),
+            onTap: () => setState(
+                () => _selected.removeWhere((s) => s.phone == g.phone)),
             child: const Icon(Icons.close_rounded,
                 size: 16, color: AppColors.orange),
           ),
@@ -397,10 +386,8 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
   }
 
   Widget _contactTile(Contact contact) {
-    final name =
-        contact.displayName;
-    final phone =
-        _cleanPhone(contact.phones.first.number);
+    final name = contact.displayName ?? '';
+    final phone = _cleanPhone(contact.phones.first.number);
     final selected = _isSelected(contact);
     final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
 
@@ -416,9 +403,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
               : AppColors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected
-                ? AppColors.orange
-                : AppColors.gray200,
+            color: selected ? AppColors.orange : AppColors.gray200,
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -426,13 +411,13 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor: selected
-                  ? AppColors.orange
-                  : AppColors.gray200,
+              backgroundColor:
+                  selected ? AppColors.orange : AppColors.gray200,
               child: Text(
                 initial,
                 style: TextStyle(
-                  color: selected ? AppColors.white : AppColors.gray600,
+                  color:
+                      selected ? AppColors.white : AppColors.gray600,
                   fontWeight: FontWeight.w700,
                   fontSize: 16,
                 ),
@@ -445,14 +430,16 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
                 children: [
                   Text(
                     name.isEmpty ? 'Unknown' : name,
-                    style:
-                        Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontSize: 14,
-                              color: AppColors.navy,
-                              fontWeight: selected
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                            ),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(
+                          fontSize: 14,
+                          color: AppColors.navy,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -515,7 +502,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'MobiGas needs access to your contacts to select guarantors. This prevents fake phone numbers and protects the platform.',
+              'MobiGas needs access to your contacts to select guarantors. This prevents fake phone numbers.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.gray600,
                     height: 1.6,
@@ -574,7 +561,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    '${_selected[0].name} & ${_selected[1].name} selected as guarantors',
+                    '${_selected[0].name} & ${_selected[1].name} selected',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Color(0xFF166534),
                           fontWeight: FontWeight.w500,
