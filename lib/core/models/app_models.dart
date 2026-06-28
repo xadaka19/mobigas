@@ -1,22 +1,14 @@
-// ── Fee constants ─────────────────────────────────────────────────────
 class MobiGasFees {
-  // Charged to customer every order — added to repayment
-  static const double crbCheckFee = 60.0;
-
-  // MobiGas earns from bank per disbursement (1% of gas price)
-  static const double bankOriginationRate = 0.01;
-
-  // Bank charges customer (bank sets this — we show it for transparency)
-  // Typical SACCO/MFI rate: 8-15% per month on reducing balance
-  // We show an estimate only — actual set by bank
-  static const double estimatedBankInterestRate = 0.10; // 10% flat for display
+  // MobiGas earns 1% of disbursement from bank per order
+  static const double bankCommissionRate = 0.01;
+  // Bank charges customer (bank sets — we show for transparency)
+  static const double bankInterestRate = 0.08;
 }
 
-// ── Gas listing (vendor sets price) ──────────────────────────────────
 class GasListing {
   final String size;
   final int kg;
-  final double price; // vendor sets this
+  final double price;
   final bool available;
 
   const GasListing({
@@ -26,26 +18,16 @@ class GasListing {
     required this.available,
   });
 
-  // MobiGas origination fee (paid by bank to MobiGas)
-  double get originationFee => price * MobiGasFees.bankOriginationRate;
+  // Bank interest (8%) — bank charges customer
+  double get bankInterest => price * MobiGasFees.bankInterestRate;
 
-  // CRB fee paid by customer every order
-  double get crbFee => MobiGasFees.crbCheckFee;
+  // What customer repays to bank
+  double get customerRepayment => price + bankInterest;
 
-  // Total customer repays to bank (gas price + bank interest + crb fee)
-  // Bank interest is set by bank — we show estimate
-  double get estimatedBankInterest =>
-      price * MobiGasFees.estimatedBankInterestRate;
-
-  // What customer repays (gas + estimated bank interest + CRB fee)
-  double get estimatedTotalRepayment =>
-      price + estimatedBankInterest + crbFee;
-
-  // What MobiGas earns per order
-  double get mobigasEarning => originationFee + crbFee;
+  // MobiGas earns from bank (1%) — never shown to customer
+  double get mobigasCommission => price * MobiGasFees.bankCommissionRate;
 }
 
-// ── Vendor ────────────────────────────────────────────────────────────
 class VendorModel {
   final String id;
   final String businessName;
@@ -86,7 +68,8 @@ class VendorModel {
   });
 }
 
-// ── Customer ──────────────────────────────────────────────────────────
+enum BankApprovalStatus { pending, approved, rejected }
+
 class CustomerModel {
   final String id;
   final String name;
@@ -97,9 +80,10 @@ class CustomerModel {
   final String estate;
   final double latitude;
   final double longitude;
-  final CrbStatus crbStatus;
-  final double? bankApprovedLimit; // set by bank after their check
+  final double? bankApprovedLimit;
   final double bankCreditUsed;
+  final BankApprovalStatus bankStatus;
+  final String partnerBankName;
   final List<GuarantorModel> guarantors;
 
   const CustomerModel({
@@ -112,9 +96,10 @@ class CustomerModel {
     required this.estate,
     required this.latitude,
     required this.longitude,
-    required this.crbStatus,
     this.bankApprovedLimit,
     required this.bankCreditUsed,
+    required this.bankStatus,
+    required this.partnerBankName,
     required this.guarantors,
   });
 
@@ -122,13 +107,11 @@ class CustomerModel {
       (bankApprovedLimit ?? 0) - bankCreditUsed;
 
   bool get isBankApproved =>
-      crbStatus == CrbStatus.approved && bankApprovedLimit != null;
+      bankStatus == BankApprovalStatus.approved &&
+      bankApprovedLimit != null;
 
-  // Can customer afford this listing?
-  // Bank covers gas price, customer pays CRB fee separately
-  bool canAfford(GasListing listing) {
-    return bankCreditAvailable >= listing.price;
-  }
+  bool canAfford(GasListing listing) =>
+      bankCreditAvailable >= listing.price;
 }
 
 class GuarantorModel {
@@ -137,9 +120,6 @@ class GuarantorModel {
   const GuarantorModel({required this.name, required this.phone});
 }
 
-enum CrbStatus { unchecked, pending, approved, rejected }
-
-// ── Order ─────────────────────────────────────────────────────────────
 class OrderModel {
   final String orderId;
   final String customerId;
@@ -149,13 +129,12 @@ class OrderModel {
   final String customerName;
   final String customerArea;
   final GasListing listing;
-  final double crbFee;
-  final double bankDisbursementAmount; // bank pays vendor this
-  final double originationFeeToMobigas; // bank pays mobigas this
+  final double bankDisbursementAmount;
+  final double originationFeeToMobigas;
   final String pin;
   final OrderStatus status;
   final DateTime createdAt;
-  final DateTime? bankRepaymentDueDate; // set by bank
+  final DateTime? bankRepaymentDueDate;
   final String? riderName;
   final String? riderPhone;
   final String partnerBankName;
@@ -169,7 +148,6 @@ class OrderModel {
     required this.customerName,
     required this.customerArea,
     required this.listing,
-    required this.crbFee,
     required this.bankDisbursementAmount,
     required this.originationFeeToMobigas,
     required this.pin,
@@ -180,18 +158,10 @@ class OrderModel {
     this.riderPhone,
     required this.partnerBankName,
   });
-
-  // What customer owes bank (bank sets actual amount)
-  double get estimatedCustomerRepayment =>
-      listing.estimatedTotalRepayment;
-
-  // CRB fee customer pays MobiGas separately
-  double get customerCrbFee => crbFee;
 }
 
 enum OrderStatus {
   pending,
-  crbCheckPending,
   bankApprovalPending,
   accepted,
   outForDelivery,
@@ -201,12 +171,11 @@ enum OrderStatus {
   defaulted,
 }
 
-// ── Partner banks/SACCOs ──────────────────────────────────────────────
 class PartnerBank {
   final String id;
   final String name;
-  final String type; // 'bank', 'sacco', 'mfi'
-  final double interestRate; // monthly rate
+  final String type;
+  final double interestRate;
   final int maxRepaymentDays;
   final double minLoanAmount;
   final double maxLoanAmount;
@@ -222,7 +191,6 @@ class PartnerBank {
   });
 }
 
-// ── Mock data for pilot ───────────────────────────────────────────────
 class MockData {
   static List<VendorModel> get vendors => [
     VendorModel(
@@ -301,42 +269,10 @@ class MockData {
       id: 'b001',
       name: 'Stima SACCO',
       type: 'sacco',
-      interestRate: 0.12,
+      interestRate: 0.08,
       maxRepaymentDays: 30,
       minLoanAmount: 500,
       maxLoanAmount: 5000,
     ),
-    PartnerBank(
-      id: 'b002',
-      name: 'Kenya Women MFI',
-      type: 'mfi',
-      interestRate: 0.15,
-      maxRepaymentDays: 30,
-      minLoanAmount: 500,
-      maxLoanAmount: 3500,
-    ),
   ];
-
-  // MobiGas CRB check result (mock)
-  // Real: calls Metropol API with nationalId + phone
-  static Map<String, dynamic> mockCrbResult(String nationalId) {
-    return {
-      'score': 680,
-      'status': 'approved',
-      'hasDefaults': false,
-      'activeLoans': 0,
-      'reportRef': 'CRB-${DateTime.now().millisecondsSinceEpoch}',
-    };
-  }
-
-  // Bank pre-qualification (mock)
-  // Real: MobiGas sends CRB report to bank API
-  // Bank returns approved limit
-  static double mockBankApprovedLimit(Map<String, dynamic> crbResult) {
-    final score = crbResult['score'] as int;
-    if (score >= 700) return 5000;
-    if (score >= 600) return 3200;
-    if (score >= 500) return 1500;
-    return 0; // rejected
-  }
 }

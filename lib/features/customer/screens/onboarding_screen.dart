@@ -16,15 +16,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<_OnboardPage> _pages = [
     _OnboardPage(
       icon: Icons.local_fire_department_rounded,
-      title: 'Gas when you need it',
+      title: 'Cook now, pay later',
       subtitle:
           'Order 3kg, 6kg or 13kg cooking gas and get it delivered to your door — even when cash is tight.',
     ),
     _OnboardPage(
       icon: Icons.credit_score_rounded,
-      title: 'Pay later, cook now',
+      title: 'Cook now, pay later',
       subtitle:
-          'Qualify in seconds. Get gas on credit and repay within 30 days via M-Pesa at your own pace.',
+          'Our partner bank finances your gas. Order now and repay the bank within 30 days via M-Pesa.',
     ),
     _OnboardPage(
       icon: Icons.verified_user_rounded,
