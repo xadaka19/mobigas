@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
 
 enum AuthState { unauthenticated, loading, authenticated }
 
@@ -13,33 +16,52 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
   bool get isAuthenticated => _state == AuthState.authenticated;
 
+  AuthProvider() {
+    // Listen to Firebase auth state changes
+    FirebaseService.auth.authStateChanges().listen((user) async {
+      if (user == null) {
+        _state = AuthState.unauthenticated;
+        _customer = null;
+        notifyListeners();
+      } else {
+        // Load customer from Firestore
+        final customer = await FirestoreService.getUser(user.uid);
+        if (customer != null) {
+          _customer = customer;
+          _state = AuthState.authenticated;
+          notifyListeners();
+        }
+      }
+    });
+  }
+
   Future<void> login(String phone, String password) async {
     _state = AuthState.loading;
     _error = null;
     notifyListeners();
 
-    // TODO: replace with real Firebase auth
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      // Format phone to email format for Firebase Auth
+      // Firebase phone auth needs SMS — using email+phone workaround for now
+      // TODO: switch to Firebase Phone Auth (OTP) when ready
+      final email = '${phone.replaceAll(' ', '')}@mobigas.app';
 
-    // Mock successful login
-    _customer = CustomerModel(
-      id: 'c001',
-      name: 'Jane Wanjiku',
-      phone: phone,
-      nationalId: '12345678',
-      county: 'Nairobi',
-      area: 'Kasarani',
-      estate: 'Mirema Drive',
-      latitude: -1.2234,
-      longitude: 36.8901,
-      bankApprovedLimit: 3200,
-      bankCreditUsed: 0,
-      bankStatus: BankApprovalStatus.approved,
-      partnerBankName: 'Stima SACCO',
-      guarantors: [],
-    );
-    _state = AuthState.authenticated;
-    notifyListeners();
+      final credential =
+          await FirebaseService.auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final customer =
+          await FirestoreService.getUser(credential.user!.uid);
+      _customer = customer;
+      _state = AuthState.authenticated;
+      notifyListeners();
+    } on FirebaseAuthException catch (e) {
+      _error = _authError(e.code);
+      _state = AuthState.unauthenticated;
+      notifyListeners();
+    }
   }
 
   Future<void> register({
@@ -58,64 +80,110 @@ class AuthProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    // TODO: replace with real Firebase + backend call
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final email = '${phone.replaceAll(' ', '')}@mobigas.app';
 
-    // Mock: create customer and pass KYC to bank
-    _customer = CustomerModel(
-      id: 'c${DateTime.now().millisecondsSinceEpoch}',
-      name: name,
-      phone: phone,
-      nationalId: nationalId,
-      county: county,
-      area: area,
-      estate: estate,
-      latitude: latitude,
-      longitude: longitude,
-      bankApprovedLimit: null, // pending bank approval
-      bankCreditUsed: 0,
-      bankStatus: BankApprovalStatus.pending,
-      partnerBankName: '',
-      guarantors: guarantors,
-    );
-    _state = AuthState.authenticated;
-    notifyListeners();
+      final credential =
+          await FirebaseService.auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final uid = credential.user!.uid;
+
+      final customer = CustomerModel(
+        id: uid,
+        name: name,
+        phone: phone,
+        nationalId: nationalId,
+        county: county,
+        area: area,
+        estate: estate,
+        latitude: latitude,
+        longitude: longitude,
+        bankApprovedLimit: null,
+        bankCreditUsed: 0,
+        bankStatus: BankApprovalStatus.pending,
+        partnerBankName: '',
+        guarantors: guarantors,
+      );
+
+      // Save to Firestore
+      await FirestoreService.createUser(customer);
+
+      // Submit KYC to bank application queue
+      await FirestoreService.submitBankApplication(
+        customerId: uid,
+        name: name,
+        phone: phone,
+        nationalId: nationalId,
+        county: county,
+        area: area,
+        guarantors: guarantors
+            .map((g) => {'name': g.name, 'phone': g.phone})
+            .toList(),
+      );
+
+      _customer = customer;
+      _state = AuthState.authenticated;
+      notifyListeners();
+    } on FirebaseAuthException catch (e) {
+      _error = _authError(e.code);
+      _state = AuthState.unauthenticated;
+      notifyListeners();
+    }
   }
 
   Future<void> requestBankApproval() async {
     if (_customer == null) return;
 
-    // TODO: real bank API call
-    // 1. Send customer KYC to partner bank API
-    // 2. Bank runs their own CRB check
-    // 3. Bank returns approved limit + bank name via webhook
-    // 4. Update customer model with bank response
+    // Poll Firestore for bank response
+    // In real system: bank API calls our backend webhook
+    // Backend updates bank_applications collection
+    // We listen for changes here
 
-    await Future.delayed(const Duration(seconds: 1));
+    // TODO: real bank webhook integration
+    // For pilot: manual approval via admin dashboard
+    await Future.delayed(const Duration(seconds: 2));
 
-    // Mock bank response — replace with real API
-    _customer = CustomerModel(
-      id: _customer!.id,
-      name: _customer!.name,
-      phone: _customer!.phone,
-      nationalId: _customer!.nationalId,
-      county: _customer!.county,
-      area: _customer!.area,
-      estate: _customer!.estate,
-      latitude: _customer!.latitude,
-      longitude: _customer!.longitude,
-      bankApprovedLimit: 3200, // from bank API
-      bankCreditUsed: 0,
-      bankStatus: BankApprovalStatus.approved,
-      partnerBankName: 'Partner SACCO', // from bank API
-      guarantors: _customer!.guarantors,
-    );
-    notifyListeners();
+    // Check if bank has responded
+    final updated = await FirestoreService.getUser(_customer!.id);
+    if (updated != null) {
+      _customer = updated;
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshCustomer() async {
+    if (_customer == null) return;
+    final updated = await FirestoreService.getUser(_customer!.id);
+    if (updated != null) {
+      _customer = updated;
+      notifyListeners();
+    }
   }
 
   void logout() {
+    FirebaseService.auth.signOut();
     _state = AuthState.unauthenticated;
     _customer = null;
     notifyListeners();
+  }
+
+  String _authError(String code) {
+    switch (code) {
+      case 'user-not-found':
+        return 'No account found with this phone number';
+      case 'wrong-password':
+        return 'Incorrect password';
+      case 'email-already-in-use':
+        return 'An account already exists with this phone number';
+      case 'weak-password':
+        return 'Password must be at least 6 characters';
+      case 'network-request-failed':
+        return 'No internet connection';
+      default:
+        return 'Something went wrong. Please try again.';
+    }
   }
 }

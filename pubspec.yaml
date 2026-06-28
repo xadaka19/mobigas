@@ -47,6 +47,9 @@ dependencies:
   pin_code_fields: ^9.4.0
   lottie: ^3.4.0
   flutter_contacts: ^2.2.2
+  firebase_core: ^4.11.0
+  firebase_auth: ^6.5.4
+  cloud_firestore: ^6.6.0
 
 dev_dependencies:
   flutter_test:
