@@ -919,7 +919,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _profileAction(Icons.lock_outline_rounded, 'Change password',
                     onTap: () => _showChangePassword(context)),
                 _profileAction(Icons.people_outline_rounded, 'My guarantors',
-                    onTap: () => context.go('/credit-application')),
+                    onTap: () => _showGuarantors(context, customer)),
                 _profileAction(Icons.help_outline_rounded, 'Help & support',
                     onTap: () => _showHelp(context)),
                 _profileAction(Icons.info_outline_rounded, 'About MobiGas',
@@ -1069,6 +1069,170 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ── MODALS ────────────────────────────────────────────────────────
+  void _showGuarantors(BuildContext context, CustomerModel customer) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('My guarantors',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(color: AppColors.navy)),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.gray100,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('Read only',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                              color: AppColors.gray600, fontSize: 11)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Guarantors cannot be changed after submission.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: AppColors.gray400),
+            ),
+            const SizedBox(height: 20),
+            customer.guarantors.isEmpty
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: AppColors.gray100,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        const Icon(Icons.people_outline_rounded,
+                            color: AppColors.gray400, size: 36),
+                        const SizedBox(height: 8),
+                        Text('No guarantors added yet',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: AppColors.gray600)),
+                        const SizedBox(height: 4),
+                        Text(
+                            'Apply for gas credit to add guarantors',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppColors.gray400)),
+                      ],
+                    ),
+                  )
+                : Column(
+                    children: customer.guarantors
+                        .asMap()
+                        .entries
+                        .map((e) => Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppColors.gray100,
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: AppColors.gray200),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 22,
+                                    backgroundColor: AppColors.orange,
+                                    child: Text(
+                                      e.value.name.isNotEmpty
+                                          ? e.value.name[0].toUpperCase()
+                                          : '?',
+                                      style: const TextStyle(
+                                        color: AppColors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          e.value.name,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                color: AppColors.navy,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          e.value.phone,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                  color: AppColors.gray600),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.successLight,
+                                      borderRadius:
+                                          BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      'Guarantor ${e.key + 1}',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: AppColors.success,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                  ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showNotifications(BuildContext context) {
     showModalBottomSheet(
       context: context,
