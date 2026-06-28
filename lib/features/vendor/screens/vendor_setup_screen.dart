@@ -18,9 +18,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   int _step = 0; // 0=business, 1=location, 2=gas products
   bool _isSaving = false;
 
+  // Business type
+  String _businessType = 'sole'; // sole, registered, petrol_station
+
   // Step 1 - Business
   late TextEditingController _businessNameController;
   late TextEditingController _ownerNameController;
+  late TextEditingController _idOrBrnController; // National ID or BRN
   late TextEditingController _phoneController;
   String _paymentMethod = 'mpesa'; // mpesa, till, paybill
   late TextEditingController _tillController;
@@ -66,10 +70,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   void initState() {
     super.initState();
     final d = widget.existingData ?? {};
+    _businessType = d['businessType'] ?? 'sole';
     _businessNameController =
         TextEditingController(text: d['businessName'] ?? '');
     _ownerNameController =
         TextEditingController(text: d['ownerName'] ?? '');
+    _idOrBrnController = TextEditingController(
+        text: d['nationalId'] ?? d['businessRegNumber'] ?? '');
     _phoneController = TextEditingController(text: d['phone'] ?? '');
     _tillController = TextEditingController(text: d['tillNumber'] ?? '');
     _paybillController = TextEditingController(text: d['paybillNumber'] ?? '');
@@ -101,6 +108,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   void dispose() {
     _businessNameController.dispose();
     _ownerNameController.dispose();
+    _idOrBrnController.dispose();
     _phoneController.dispose();
     _tillController.dispose();
     _paybillController.dispose();
@@ -119,8 +127,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       FirebaseAuth.instance.currentUser?.uid ?? '';
 
   bool get _step0Valid {
-    if (_businessNameController.text.trim().isEmpty) return false;
-    if (_ownerNameController.text.trim().isEmpty) return false;
+    if (_businessNameController.text.trim().isEmpty) { return false; }
+    if (_ownerNameController.text.trim().isEmpty) { return false; }
+    if (_idOrBrnController.text.trim().isEmpty) { return false; }
     if (_paymentMethod == 'mpesa' &&
         _phoneController.text.trim().length < 9) { return false; }
     if (_paymentMethod == 'till' &&
@@ -183,6 +192,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       await FirebaseService.vendors.doc(_vendorId).set({
         'businessName': _businessNameController.text.trim(),
         'ownerName': _ownerNameController.text.trim(),
+        'businessType': _businessType,
+        if (_businessType == 'sole')
+          'nationalId': _idOrBrnController.text.trim()
+        else
+          'businessRegNumber': _idOrBrnController.text.trim(),
         'phone': _phoneController.text.trim(),
         'paymentMethod': _paymentMethod,
         'tillNumber': _tillController.text.trim(),
@@ -318,14 +332,59 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // ── STEP 0: BUSINESS ─────────────────────────────────────────────
   Widget _buildStep0() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Business type selector
+        Text('Business type',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            _bizTypeTab('sole', Icons.person_outline_rounded,
+                'Sole Proprietor'),
+            const SizedBox(width: 8),
+            _bizTypeTab('registered', Icons.business_outlined,
+                'Registered Biz'),
+            const SizedBox(width: 8),
+            _bizTypeTab('petrol_station', Icons.local_gas_station_outlined,
+                'Petrol Station'),
+          ],
+        ),
+        const SizedBox(height: 20),
         _field('Business name', _businessNameController,
             Icons.store_outlined,
-            hint: 'e.g. Kamau Gas Supplies'),
+            hint: _businessType == 'sole'
+                ? 'e.g. Kamau Gas Supplies'
+                : _businessType == 'registered'
+                    ? 'e.g. Kamau Gas Ltd'
+                    : 'e.g. Total Mirema Station'),
         const SizedBox(height: 16),
-        _field('Your full name', _ownerNameController,
-            Icons.person_outline_rounded,
-            hint: 'e.g. James Kamau'),
+        _field(
+          _businessType == 'sole' ? 'Owner full name' : 'Contact person',
+          _ownerNameController,
+          Icons.person_outline_rounded,
+          hint: 'e.g. James Kamau',
+        ),
+        const SizedBox(height: 16),
+        _field(
+          _businessType == 'sole'
+              ? 'National ID number'
+              : 'Business Registration Number',
+          _idOrBrnController,
+          _businessType == 'sole'
+              ? Icons.badge_outlined
+              : Icons.app_registration_rounded,
+          hint: _businessType == 'sole'
+              ? 'e.g. 12345678'
+              : 'e.g. BRN/2024/123456',
+          keyboardType: _businessType == 'sole'
+              ? TextInputType.number
+              : TextInputType.text,
+        ),
         const SizedBox(height: 16),
         _buildPaymentMethodSelector(),
       ],
@@ -773,6 +832,50 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _bizTypeTab(String type, IconData icon, String label) {
+    final selected = _businessType == type;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _businessType = type),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.orange
+                : AppColors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected
+                  ? AppColors.orange
+                  : AppColors.white.withValues(alpha: 0.1),
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(icon,
+                  color:
+                      selected ? AppColors.white : AppColors.gray400,
+                  size: 18),
+              const SizedBox(height: 4),
+              Text(label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: selected
+                        ? AppColors.white
+                        : AppColors.gray400,
+                    fontSize: 10,
+                    fontWeight: selected
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                  )),
+            ],
+          ),
+        ),
       ),
     );
   }
