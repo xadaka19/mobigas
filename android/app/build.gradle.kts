@@ -14,6 +14,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        resValues = true
+    }
+
     defaultConfig {
         minSdk = 23
         targetSdk = flutter.targetSdkVersion

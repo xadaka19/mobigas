@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
+import 'package:mobigas/core/providers/auth_provider.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -162,11 +164,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _submit() async {
     setState(() => _isLoading = true);
-    // TODO: call AuthProvider.register() with real data
-    // For now navigate to home — Firebase wiring next
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() => _isLoading = false);
-    if (mounted) context.go('/home');
+
+    try {
+      final auth = context.read<AuthProvider>();
+      await auth.register(
+        name: _nameController.text.trim(),
+        email: _emailController.text.trim().toLowerCase(),
+        phone: _phoneController.text.trim(),
+        nationalId: _idController.text.trim(),
+        county: _selectedCounty,
+        area: _areaController.text.trim(),
+        estate: _estateController.text.trim(),
+        latitude: _latitude ?? 0.0,
+        longitude: _longitude ?? 0.0,
+        password: _passwordController.text,
+        guarantors: [],
+      );
+
+      if (auth.error != null) {
+        _showError(auth.error!);
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      if (mounted) context.go('/home');
+    } catch (e) {
+      _showError('Registration failed. Please try again.');
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
