@@ -209,6 +209,32 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: () => context.go('/terms'),
+                          child: Text('Terms of Service',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.orange,
+                                    decoration: TextDecoration.underline,
+                                  )),
+                        ),
+                        Text('  ·  ',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.gray400,
+                                )),
+                        GestureDetector(
+                          onTap: () => context.go('/privacy'),
+                          child: Text('Privacy Policy',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.orange,
+                                    decoration: TextDecoration.underline,
+                                  )),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 32),
                     _buildInfoCard(),
                   ],

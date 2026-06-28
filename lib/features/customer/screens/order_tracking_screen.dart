@@ -1,8 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
-import 'package:mobigas/core/widgets/map_placeholder.dart';
+import 'package:mobigas/core/providers/order_provider.dart';
+import 'package:mobigas/core/providers/auth_provider.dart';
+import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/services/delivery_notification_service.dart';
 
 class OrderTrackingScreen extends StatefulWidget {
   const OrderTrackingScreen({super.key});
@@ -11,508 +17,343 @@ class OrderTrackingScreen extends StatefulWidget {
   State<OrderTrackingScreen> createState() => _OrderTrackingScreenState();
 }
 
-class _OrderTrackingScreenState extends State<OrderTrackingScreen>
-    with TickerProviderStateMixin {
-  late AnimationController _pulseController;
-
-  _TrackingStatus _status = _TrackingStatus.pending;
+class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
+  GoogleMapController? _mapController;
+  StreamSubscription? _orderSubscription;
+  
+  LatLng? _riderLocation;
+  LatLng? _customerLocation;
+  OrderModel? _order;
+  OrderStatus _status = OrderStatus.pending;
   bool _pinRevealed = false;
-
-  // Mock order data
-  final String _orderId = 'MG-2024-0001';
-  final String _vendorName = 'Kamau Gas Supplies';
-  final String _vendorPhone = '0722 123 456';
-  final String _riderName = 'John';
-  final String _riderPhone = '0733 456 789';
-  final String _gasSize = '6kg';
-  final String _deliveryAddress = 'Mirema Drive, Kasarani';
-  final double _totalDue = 1620;
-  final String _pin = '4829';
-  final String _dueDate = '27/07/2026';
-  bool _hasRider = false;
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
+    _initTracking();
+  }
 
+  Future<void> _initTracking() async {
+    final orders = context.read<OrderProvider>();
+    final auth = context.read<AuthProvider>();
+    final activeOrder = orders.activeOrder;
+    if (activeOrder == null) return;
 
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _status = _TrackingStatus.accepted);
-    });
-    Future.delayed(const Duration(seconds: 6), () {
-      if (mounted) {
+    // Set customer location
+    final customer = auth.customer;
+    if (customer != null) {
+      _customerLocation = LatLng(customer.latitude, customer.longitude);
+    }
+
+    // Listen to order updates in Firestore
+    final snap = await FirebaseService.orders
+        .where('orderId', isEqualTo: activeOrder.orderId)
+        .get();
+
+    if (snap.docs.isNotEmpty) {
+      _orderSubscription = snap.docs.first.reference
+          .snapshots()
+          .listen((doc) {
+        if (!mounted) return;
+        final data = doc.data() as Map<String, dynamic>;
+        
         setState(() {
-          _status = _TrackingStatus.outForDelivery;
-          _hasRider = true;
+          _status = OrderStatus.values.firstWhere(
+            (e) => e.name == data['status'],
+            orElse: () => OrderStatus.pending,
+          );
+
+          // Update rider location
+          final riderLoc = data['riderLocation'] as Map<String, dynamic>?;
+          if (riderLoc != null) {
+            _riderLocation = LatLng(
+              (riderLoc['lat'] as num).toDouble(),
+              (riderLoc['lng'] as num).toDouble(),
+            );
+          }
         });
-      }
+
+        _updateMap();
+
+        // Update persistent notification
+        DeliveryNotificationService.showDeliveryProgress(
+          vendorName: _order?.vendorName ?? '',
+          gasSize: _order?.listing.size ?? '',
+          status: _statusLabel(),
+        );
+
+        // Navigate to confirmed screen when delivered
+        if (_status == OrderStatus.delivered && mounted) {
+          DeliveryNotificationService.cancelDeliveryNotification();
+          DeliveryNotificationService.showDeliveryConfirmed(
+            gasSize: _order?.listing.size ?? '',
+            amount: _order?.listing.customerRepayment.toStringAsFixed(0) ?? '',
+          );
+          context.go('/delivery-confirmed');
+        }
+      });
+    }
+
+    setState(() {
+      _order = activeOrder;
     });
+    _updateMap();
+  }
+
+  void _updateMap() {
+    final markers = <Marker>{};
+    final polylines = <Polyline>{};
+
+    // Customer marker
+    if (_customerLocation != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('customer'),
+        position: _customerLocation!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueOrange),
+        infoWindow: const InfoWindow(title: 'Your location'),
+      ));
+    }
+
+    // Rider marker
+    if (_riderLocation != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('rider'),
+        position: _riderLocation!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueGreen),
+        infoWindow: const InfoWindow(title: 'Rider'),
+      ));
+
+      // Polyline from rider to customer
+      if (_customerLocation != null) {
+        polylines.add(Polyline(
+          polylineId: const PolylineId('route'),
+          points: [_riderLocation!, _customerLocation!],
+          color: AppColors.orange,
+          width: 4,
+          patterns: [
+            PatternItem.dash(20),
+            PatternItem.gap(10),
+          ],
+        ));
+
+        // Animate camera to show both points
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngBounds(
+            LatLngBounds(
+              southwest: LatLng(
+                _riderLocation!.latitude < _customerLocation!.latitude
+                    ? _riderLocation!.latitude
+                    : _customerLocation!.latitude,
+                _riderLocation!.longitude < _customerLocation!.longitude
+                    ? _riderLocation!.longitude
+                    : _customerLocation!.longitude,
+              ),
+              northeast: LatLng(
+                _riderLocation!.latitude > _customerLocation!.latitude
+                    ? _riderLocation!.latitude
+                    : _customerLocation!.latitude,
+                _riderLocation!.longitude > _customerLocation!.longitude
+                    ? _riderLocation!.longitude
+                    : _customerLocation!.longitude,
+              ),
+            ),
+            80,
+          ),
+        );
+      }
+    } else if (_customerLocation != null) {
+      // Just show customer location
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(_customerLocation!, 15),
+      );
+    }
+
+    if (mounted) {
+      setState(() {
+        _markers = markers;
+        _polylines = polylines;
+      });
+    }
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _orderSubscription?.cancel();
+    _mapController?.dispose();
     super.dispose();
-  }
-
-  void _revealPin() {
-    setState(() => _pinRevealed = true);
-  }
-
-  void _copyPin() {
-    Clipboard.setData(ClipboardData(text: _pin));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('PIN copied to clipboard'),
-        backgroundColor: AppColors.success,
-        behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  void _markDelivered() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _buildDeliveredSheet(),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.orangeWarm,
-      body: SafeArea(
-        child: Column(
+      body: Stack(
+        children: [
+          // Map
+          _buildMap(),
+          // Header
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildHeader(),
+          ),
+          // Bottom card
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: _buildBottomCard(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMap() {
+    if (_customerLocation == null) {
+      return Container(
+        color: AppColors.navy,
+        child: const Center(
+          child: CircularProgressIndicator(color: AppColors.orange),
+        ),
+      );
+    }
+
+    return GoogleMap(
+      initialCameraPosition: CameraPosition(
+        target: _customerLocation!,
+        zoom: 15,
+      ),
+      onMapCreated: (controller) {
+        _mapController = controller;
+        _updateMap();
+      },
+      markers: _markers,
+      polylines: _polylines,
+      myLocationEnabled: true,
+      myLocationButtonEnabled: false,
+      zoomControlsEnabled: false,
+      mapToolbarEnabled: false,
+    );
+  }
+
+  Widget _buildHeader() {
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.navy,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
           children: [
-            _buildHeader(),
+            GestureDetector(
+              onTap: () => context.go('/home'),
+              child: const Icon(Icons.arrow_back_ios_rounded,
+                  color: AppColors.white, size: 20),
+            ),
+            const SizedBox(width: 12),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    _buildStatusCard(),
-                    const SizedBox(height: 16),
-                    // Live map — shown when out for delivery
-                    if (_status == _TrackingStatus.outForDelivery) ...[
-                      MapPlaceholder(
-                        customerArea: _deliveryAddress,
-                        riderName: _hasRider ? _riderName : null,
-                        height: 240,
-                        showRiderDot: true,
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    _buildTrackingSteps(),
-                    const SizedBox(height: 16),
-                    // Rider card
-                    if (_status == _TrackingStatus.outForDelivery &&
-                        _hasRider)
-                      _buildRiderCard(),
-                    if (_status == _TrackingStatus.outForDelivery &&
-                        _hasRider)
-                      const SizedBox(height: 16),
-                    if (_status == _TrackingStatus.outForDelivery)
-                      _buildPinCard(),
-                    if (_status == _TrackingStatus.outForDelivery)
-                      const SizedBox(height: 16),
-                    _buildOrderDetails(),
-                    const SizedBox(height: 16),
-                    _buildVendorCard(),
-                    const SizedBox(height: 16),
-                    _buildRepaymentCard(),
-                    const SizedBox(height: 24),
-                  ],
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_statusLabel(),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(color: AppColors.white)),
+                  Text(_order?.vendorName ?? '',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.gray400)),
+                ],
               ),
             ),
-            if (_status == _TrackingStatus.outForDelivery)
-              _buildConfirmDeliveryButton(),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: _statusColor().withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: _statusColor(),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(_statusLabel(),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: _statusColor(),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          )),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-      decoration: const BoxDecoration(
-        color: AppColors.navy,
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => context.go('/home'),
-            child: const Icon(Icons.arrow_back_ios_rounded,
-                color: AppColors.white, size: 20),
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Order tracking',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.white,
-                      fontSize: 18,
-                    ),
-              ),
-              Text(
-                _orderId,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.orange,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          AnimatedBuilder(
-            animation: _pulseController,
-            builder: (context, child) {
-              return Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppColors.success.withValues(
-                      alpha: 0.1 + _pulseController.value * 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color:
-                          AppColors.success.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: AppColors.success.withValues(
-                            alpha:
-                                0.5 + _pulseController.value * 0.5),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      'Live',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                            color: AppColors.success,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusCard() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: _statusColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: _statusColor.withValues(alpha: 0.3), width: 1.5),
-      ),
-      child: Row(
-        children: [
-          AnimatedBuilder(
-            animation: _pulseController,
-            builder: (context, child) {
-              return Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: _statusColor.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child:
-                    Icon(_statusIcon, color: _statusColor, size: 28),
-              );
-            },
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _statusTitle,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(
-                        color: _statusColor,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _statusMessage,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray600,
-                        height: 1.4,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTrackingSteps() {
-    final steps = [
-      _TrackingStep(
-        title: 'Order placed',
-        subtitle: 'Your order has been sent to the vendor',
-        status: _TrackingStepStatus.done,
-      ),
-      _TrackingStep(
-        title: 'Vendor accepted',
-        subtitle: '$_vendorName confirmed your order',
-        status: _status.index >= _TrackingStatus.accepted.index
-            ? _TrackingStepStatus.done
-            : _TrackingStepStatus.pending,
-      ),
-      _TrackingStep(
-        title: 'Out for delivery',
-        subtitle: _hasRider
-            ? 'Rider $_riderName is on the way'
-            : 'Vendor is on the way to your location',
-        status: _status.index >= _TrackingStatus.outForDelivery.index
-            ? _TrackingStepStatus.done
-            : _status == _TrackingStatus.accepted
-                ? _TrackingStepStatus.active
-                : _TrackingStepStatus.pending,
-      ),
-      _TrackingStep(
-        title: 'Delivered',
-        subtitle: 'Share your PIN to confirm delivery',
-        status: _status == _TrackingStatus.delivered
-            ? _TrackingStepStatus.done
-            : _status == _TrackingStatus.outForDelivery
-                ? _TrackingStepStatus.active
-                : _TrackingStepStatus.pending,
-      ),
-    ];
+  Widget _buildBottomCard() {
+    final order = _order;
+    if (order == null) return const SizedBox.shrink();
 
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.gray200),
+        borderRadius:
+            const BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
       ),
+      padding: EdgeInsets.fromLTRB(
+          24, 20, 24, MediaQuery.of(context).padding.bottom + 24),
       child: Column(
-        children: steps.asMap().entries.map((entry) {
-          final i = entry.key;
-          final step = entry.value;
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Column(
-                children: [
-                  _stepDot(step.status),
-                  if (i < steps.length - 1)
-                    Container(
-                      width: 2,
-                      height: 36,
-                      color: step.status == _TrackingStepStatus.done
-                          ? AppColors.success
-                          : AppColors.gray200,
-                    ),
-                ],
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        step.title,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              fontSize: 14,
-                              color: step.status ==
-                                      _TrackingStepStatus.pending
-                                  ? AppColors.gray400
-                                  : AppColors.navy,
-                              fontWeight:
-                                  step.status ==
-                                          _TrackingStepStatus.active
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                            ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        step.subtitle,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color: step.status ==
-                                      _TrackingStepStatus.pending
-                                  ? AppColors.gray200
-                                  : AppColors.gray400,
-                              fontSize: 12,
-                            ),
-                      ),
-                      if (i < steps.length - 1)
-                        const SizedBox(height: 8),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _stepDot(_TrackingStepStatus status) {
-    switch (status) {
-      case _TrackingStepStatus.done:
-        return Container(
-          width: 24,
-          height: 24,
-          decoration: const BoxDecoration(
-            color: AppColors.success,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.check_rounded,
-              color: AppColors.white, size: 14),
-        );
-      case _TrackingStepStatus.active:
-        return AnimatedBuilder(
-          animation: _pulseController,
-          builder: (context, child) => Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: AppColors.orange.withValues(
-                  alpha: 0.5 + _pulseController.value * 0.5),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.radio_button_checked_rounded,
-                color: AppColors.white, size: 14),
-          ),
-        );
-      case _TrackingStepStatus.pending:
-        return Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: AppColors.white,
-            shape: BoxShape.circle,
-            border: Border.all(color: AppColors.gray200, width: 2),
-          ),
-        );
-    }
-  }
-
-  // ── RIDER CARD ────────────────────────────────────────────────────
-  Widget _buildRiderCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.navy,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
+          // Order info
           Row(
             children: [
-              const Icon(Icons.delivery_dining_rounded,
-                  color: AppColors.orange, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Your rider',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
-                  color: AppColors.success.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppColors.orange.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: const BoxDecoration(
-                        color: AppColors.success,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'On the way',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                            color: AppColors.success,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: AppColors.orange,
-                child: Text(
-                  _riderName[0],
-                  style: const TextStyle(
-                    color: AppColors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 18,
-                  ),
-                ),
+                child: const Icon(
+                    Icons.local_fire_department_rounded,
+                    color: AppColors.orange,
+                    size: 24),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -520,17 +361,16 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _riderName,
+                      '${order.listing.size} gas · ${order.vendorName}',
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium
-                          ?.copyWith(
-                            color: AppColors.white,
-                            fontSize: 15,
-                          ),
+                          ?.copyWith(color: AppColors.navy),
                     ),
                     Text(
-                      'Rider · $_riderPhone',
+                      _riderLocation != null
+                          ? 'Rider is on the way'
+                          : 'Preparing your order',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -539,393 +379,87 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                   ],
                 ),
               ),
-              GestureDetector(
-                onTap: () {},
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: AppColors.success.withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.phone_rounded,
-                      color: AppColors.success, size: 20),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline_rounded,
-                    color: AppColors.gray400, size: 14),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Share your PIN only when the rider arrives at your door with your gas cylinder.',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(
-                          color: AppColors.gray400,
-                          fontSize: 11,
-                          height: 1.4,
-                        ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── PIN CARD ──────────────────────────────────────────────────────
-  Widget _buildPinCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.navy,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.pin_outlined,
-                  color: AppColors.orange, size: 22),
-              const SizedBox(width: 10),
               Text(
-                'Your delivery PIN',
+                'KES ${order.listing.customerRepayment.toStringAsFixed(0)}',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.white,
+                      color: AppColors.orange,
                       fontWeight: FontWeight.w700,
                     ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Share this PIN ONLY when the ${_hasRider ? "rider" : "vendor"} is at your door with your gas.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400,
-                  height: 1.4,
-                ),
-          ),
           const SizedBox(height: 20),
-          GestureDetector(
-            onTap: _pinRevealed ? _copyPin : _revealPin,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              decoration: BoxDecoration(
-                color: AppColors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: AppColors.orange.withValues(alpha: 0.4)),
-              ),
-              child: _pinRevealed
-                  ? Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: _pin.split('').map((digit) {
-                            return Container(
-                              margin: const EdgeInsets.symmetric(
-                                  horizontal: 6),
-                              width: 52,
-                              height: 64,
-                              decoration: BoxDecoration(
-                                color: AppColors.orange
-                                    .withValues(alpha: 0.15),
-                                borderRadius:
-                                    BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: AppColors.orange,
-                                    width: 1.5),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  digit,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .displayLarge
-                                      ?.copyWith(
-                                        color: AppColors.orange,
-                                        fontSize: 32,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 14),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.copy_rounded,
-                                color: AppColors.gray400, size: 14),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Tap to copy PIN',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: AppColors.gray400,
-                                    fontSize: 12,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    )
-                  : Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: List.generate(
-                            4,
-                            (i) => Container(
-                              margin: const EdgeInsets.symmetric(
-                                  horizontal: 6),
-                              width: 52,
-                              height: 64,
-                              decoration: BoxDecoration(
-                                color: AppColors.white
-                                    .withValues(alpha: 0.05),
-                                borderRadius:
-                                    BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: AppColors.gray600,
-                                    width: 1),
-                              ),
-                              child: const Center(
-                                child: Icon(
-                                    Icons.remove_rounded,
-                                    color: AppColors.gray600,
-                                    size: 20),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.touch_app_rounded,
-                                color: AppColors.orange, size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Tap to reveal your PIN',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: AppColors.orange,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-            ),
-          ),
+          const Divider(color: AppColors.gray200),
           const SizedBox(height: 16),
+          // PIN section
           Container(
-            padding: const EdgeInsets.all(12),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppColors.error.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                  color: AppColors.error.withValues(alpha: 0.3)),
+              color: AppColors.navy,
+              borderRadius: BorderRadius.circular(16),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.warning_amber_rounded,
-                    color: AppColors.error, size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Never share this PIN before the ${_hasRider ? "rider" : "vendor"} arrives. The PIN triggers instant payment.',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(
-                          color: AppColors.error,
-                          fontSize: 11,
-                          height: 1.4,
-                        ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOrderDetails() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.gray200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Order details',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.navy,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          const SizedBox(height: 14),
-          _detailRow('Order ID', _orderId),
-          _detailRow('Gas size', _gasSize),
-          _detailRow('Delivery to', _deliveryAddress),
-          _detailRow('Total due',
-              'KES ${_totalDue.toStringAsFixed(0)}'),
-          _detailRow('Due date', _dueDate),
-        ],
-      ),
-    );
-  }
-
-  Widget _detailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.gray600,
-                ),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.navy,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVendorCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.gray200),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: AppColors.orange,
-            child: Text(
-              _vendorName[0],
-              style: const TextStyle(
-                color: AppColors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  children: [
+                    const Icon(Icons.pin_outlined,
+                        color: AppColors.orange, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Delivery PIN',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(color: AppColors.white),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () =>
+                          setState(() => _pinRevealed = !_pinRevealed),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color:
+                              AppColors.orange.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          _pinRevealed ? 'Hide' : 'Reveal',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: AppColors.orange,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 Text(
-                  _vendorName,
+                  _pinRevealed ? order.pin : '• • • •',
                   style: Theme.of(context)
                       .textTheme
-                      .titleMedium
+                      .displayLarge
                       ?.copyWith(
-                        fontSize: 14,
-                        color: AppColors.navy,
+                        color: AppColors.white,
+                        fontSize: 40,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 12,
                       ),
                 ),
+                const SizedBox(height: 8),
                 Text(
-                  _vendorPhone,
+                  'Show this PIN to the rider when gas is delivered',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray600,
+                        color: AppColors.gray400,
+                        fontSize: 11,
                       ),
-                ),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: () {},
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.successLight,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.phone_rounded,
-                  color: AppColors.success, size: 20),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRepaymentCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.orangeLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: AppColors.orange.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.account_balance_wallet_outlined,
-              color: AppColors.orange, size: 22),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Repayment due by $_dueDate',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontSize: 14,
-                        color: AppColors.navy,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                Text(
-                  'KES ${_totalDue.toStringAsFixed(0)} — pay anytime via M-Pesa',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray600,
-                      ),
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
@@ -935,177 +469,31 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     );
   }
 
-  Widget _buildConfirmDeliveryButton() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.navy.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: ElevatedButton.icon(
-        onPressed: _markDelivered,
-        icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-        label: const Text('I have received my gas'),
-      ),
-    );
-  }
-
-  Widget _buildDeliveredSheet() {
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-          24,
-          24,
-          24,
-          MediaQuery.of(context).viewInsets.bottom + 32),
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.gray200,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppColors.successLight,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.local_fire_department_rounded,
-                color: AppColors.success, size: 44),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Confirm delivery',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: AppColors.navy,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'By confirming, you acknowledge that you received your $_gasSize gas cylinder and shared your PIN with the ${_hasRider ? "rider" : "vendor"}.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.gray600,
-                  height: 1.5,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'The vendor will be paid KES ${_totalDue.toStringAsFixed(0)} immediately.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.orange,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() => _status = _TrackingStatus.delivered);
-              Future.delayed(const Duration(milliseconds: 500), () {
-                if (mounted) context.go('/delivery-confirmed');
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.success,
-            ),
-            child: const Text('Yes, I received my gas'),
-          ),
-          const SizedBox(height: 12),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Not yet',
-              style: TextStyle(color: AppColors.gray600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color get _statusColor {
+  String _statusLabel() {
     switch (_status) {
-      case _TrackingStatus.pending:
-        return AppColors.warning;
-      case _TrackingStatus.accepted:
-        return AppColors.navy;
-      case _TrackingStatus.outForDelivery:
-        return AppColors.orange;
-      case _TrackingStatus.delivered:
-        return AppColors.success;
-    }
-  }
-
-  IconData get _statusIcon {
-    switch (_status) {
-      case _TrackingStatus.pending:
-        return Icons.hourglass_top_rounded;
-      case _TrackingStatus.accepted:
-        return Icons.store_rounded;
-      case _TrackingStatus.outForDelivery:
-        return Icons.delivery_dining_rounded;
-      case _TrackingStatus.delivered:
-        return Icons.check_circle_rounded;
-    }
-  }
-
-  String get _statusTitle {
-    switch (_status) {
-      case _TrackingStatus.pending:
-        return 'Waiting for vendor';
-      case _TrackingStatus.accepted:
+      case OrderStatus.pending:
+        return 'Order placed';
+      case OrderStatus.accepted:
         return 'Order accepted';
-      case _TrackingStatus.outForDelivery:
-        return _hasRider ? 'Rider on the way' : 'Out for delivery';
-      case _TrackingStatus.delivered:
+      case OrderStatus.outForDelivery:
+        return 'On the way';
+      case OrderStatus.delivered:
         return 'Delivered';
+      default:
+        return 'Processing';
     }
   }
 
-  String get _statusMessage {
+  Color _statusColor() {
     switch (_status) {
-      case _TrackingStatus.pending:
-        return 'Sending your order to $_vendorName...';
-      case _TrackingStatus.accepted:
-        return '$_vendorName has accepted your order and is preparing delivery.';
-      case _TrackingStatus.outForDelivery:
-        return _hasRider
-            ? 'Rider $_riderName is heading to $_deliveryAddress. Reveal your PIN when they arrive.'
-            : 'Vendor is heading to $_deliveryAddress. Reveal your PIN when they arrive.';
-      case _TrackingStatus.delivered:
-        return 'Your gas has been delivered. Remember to repay by $_dueDate.';
+      case OrderStatus.outForDelivery:
+        return AppColors.orange;
+      case OrderStatus.delivered:
+        return AppColors.success;
+      case OrderStatus.pending:
+        return AppColors.warning;
+      default:
+        return AppColors.gray400;
     }
   }
-}
-
-enum _TrackingStatus { pending, accepted, outForDelivery, delivered }
-enum _TrackingStepStatus { pending, active, done }
-
-class _TrackingStep {
-  final String title;
-  final String subtitle;
-  final _TrackingStepStatus status;
-  const _TrackingStep({
-    required this.title,
-    required this.subtitle,
-    required this.status,
-  });
 }

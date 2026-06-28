@@ -10,6 +10,7 @@ import 'package:mobigas/features/customer/screens/order_tracking_screen.dart';
 import 'package:mobigas/features/customer/screens/delivery_confirmed_screen.dart';
 import 'package:mobigas/features/customer/screens/login_screen.dart';
 import 'package:mobigas/features/customer/screens/credit_application_screen.dart';
+import 'package:mobigas/features/customer/screens/terms_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_splash_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_onboarding_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_pending_screen.dart';
@@ -38,6 +39,14 @@ class AppRouter {
       GoRoute(
         path: '/credit-application',
         builder: (context, state) => const CreditApplicationScreen(),
+      ),
+      GoRoute(
+        path: '/terms',
+        builder: (context, state) => const TermsScreen(),
+      ),
+      GoRoute(
+        path: '/privacy',
+        builder: (context, state) => const TermsScreen(isPrivacyPolicy: true),
       ),
       GoRoute(
         path: '/login',

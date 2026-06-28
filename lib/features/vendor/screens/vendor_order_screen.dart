@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/services/location_service.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class VendorOrderScreen extends StatefulWidget {
   final OrderModel order;
@@ -21,6 +23,8 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   final _riderPhoneController = TextEditingController();
   bool _riderAssigned = false;
   bool _useRider = false;
+  double? _vendorLat;
+  double? _vendorLng;
 
   @override
   void dispose() {
@@ -74,6 +78,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
       });
       // TODO: Backend webhook triggered here to instruct bank to pay vendor
 
+      LocationService.stopTracking();
       setState(() {
         _step = _DeliveryStep.confirmed;
         _isVerifying = false;
@@ -271,34 +276,53 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         // Rider assignment
         _riderSection(),
         const SizedBox(height: 20),
-        // Map placeholder
+        // Live Google Map
         Container(
-          height: 200,
+          height: 220,
           decoration: BoxDecoration(
-            color: AppColors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
                 color: AppColors.white.withValues(alpha: 0.1)),
           ),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.map_outlined,
-                    color: AppColors.orange, size: 48),
-                const SizedBox(height: 8),
-                Text('Live map — coming soon',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.gray400,
-                        )),
-              ],
-            ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: _vendorLat != null
+                ? GoogleMap(
+                    initialCameraPosition: CameraPosition(
+                      target: LatLng(_vendorLat!, _vendorLng!),
+                      zoom: 15,
+                    ),
+                    onMapCreated: (_) {},
+                    markers: {
+                      Marker(
+                        markerId: const MarkerId('vendor'),
+                        position: LatLng(_vendorLat!, _vendorLng!),
+                        icon: BitmapDescriptor.defaultMarkerWithHue(
+                            BitmapDescriptor.hueOrange),
+                        infoWindow: InfoWindow(
+                            title: 'You',
+                            snippet: widget.order.customerArea),
+                      ),
+                    },
+                    myLocationEnabled: true,
+                    zoomControlsEnabled: false,
+                    mapToolbarEnabled: false,
+                  )
+                : Container(
+                    color: AppColors.white.withValues(alpha: 0.05),
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                          color: AppColors.orange),
+                    ),
+                  ),
           ),
         ),
         const SizedBox(height: 24),
         ElevatedButton(
           onPressed: () async {
             await _updateOrderStatus(OrderStatus.outForDelivery);
+            // Start live location tracking
+            await LocationService.startTracking(widget.order.orderId);
             setState(() => _step = _DeliveryStep.arrived);
           },
           child: const Text('I have arrived at customer'),

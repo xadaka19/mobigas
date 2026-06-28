@@ -115,7 +115,7 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
                           color: AppColors.orange,
                           borderRadius: BorderRadius.circular(28),
                         ),
-                        child: const Icon(Icons.store_rounded,
+                        child: const Icon(Icons.local_fire_department_rounded,
                             color: AppColors.white, size: 56),
                       ),
                       const SizedBox(height: 24),
@@ -164,13 +164,10 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    // Google G logo
-                                    SizedBox(
+                                    Image.asset(
+                                      'assets/icon/google_logo.png',
                                       width: 24,
                                       height: 24,
-                                      child: CustomPaint(
-                                        painter: _GoogleLogoPainter(),
-                                      ),
                                     ),
                                     const SizedBox(width: 12),
                                     Text(
@@ -231,58 +228,4 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
       ],
     );
   }
-}
-
-class _GoogleLogoPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double w = size.width;
-    final double h = size.height;
-
-    // Blue segment
-    final paintBlue = Paint()..color = const Color(0xFF4285F4);
-    // Red segment  
-    final paintRed = Paint()..color = const Color(0xFFEA4335);
-    // Yellow segment
-    final paintYellow = Paint()..color = const Color(0xFFFBBC05);
-    // Green segment
-    final paintGreen = Paint()..color = const Color(0xFF34A853);
-    // White center
-    final paintWhite = Paint()..color = const Color(0xFFFFFFFF);
-
-    // Draw colored circle segments for G logo
-    final center = Offset(w / 2, h / 2);
-    final radius = w / 2;
-
-    // Full circle background - blue
-    canvas.drawCircle(center, radius, paintBlue);
-
-    // Red (top-left)
-    final rectFull = Rect.fromCircle(center: center, radius: radius);
-    canvas.drawArc(rectFull, -2.36, 1.57, true, paintRed);
-
-    // Yellow (bottom-left)
-    canvas.drawArc(rectFull, 2.36, 0.79, true, paintYellow);
-
-    // Green (bottom-right)
-    canvas.drawArc(rectFull, 3.14, 1.05, true, paintGreen);
-
-    // White inner circle
-    canvas.drawCircle(center, radius * 0.6, paintWhite);
-
-    // Blue G bar (right side)
-    final barPaint = Paint()..color = const Color(0xFF4285F4);
-    final barRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(w * 0.5, h * 0.35, w * 0.5, h * 0.3),
-      Radius.circular(w * 0.05),
-    );
-    canvas.drawRRect(barRect, barPaint);
-
-    // Blue G inner dot
-    canvas.drawCircle(
-        Offset(w * 0.5, h * 0.5), radius * 0.25, paintBlue);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
