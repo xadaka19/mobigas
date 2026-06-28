@@ -197,7 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         GestureDetector(
                           onTap: () => context.go('/register'),
                           child: Text(
-                            'Sign up',
+                            'Create account',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium

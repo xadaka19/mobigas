@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -20,7 +22,7 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1000),
     );
     _fadeAnim = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeIn),
@@ -29,9 +31,29 @@ class _SplashScreenState extends State<SplashScreen>
       CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
     );
     _controller.forward();
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) context.go('/onboarding');
-    });
+    _navigate();
+  }
+
+  Future<void> _navigate() async {
+    await Future.delayed(const Duration(milliseconds: 1800));
+    if (!mounted) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (!mounted) return;
+    if (user != null) {
+      context.go('/home');
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      final seenOnboarding = prefs.getBool('seen_onboarding') ?? false;
+      if (!mounted) return;
+      if (seenOnboarding) {
+        context.go('/login');
+      } else {
+        await prefs.setBool('seen_onboarding', true);
+        if (!mounted) return;
+        context.go('/onboarding');
+      }
+    }
   }
 
   @override
@@ -44,11 +66,11 @@ class _SplashScreenState extends State<SplashScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.navy,
-      body: Center(
-        child: FadeTransition(
-          opacity: _fadeAnim,
-          child: ScaleTransition(
-            scale: _scaleAnim,
+      body: FadeTransition(
+        opacity: _fadeAnim,
+        child: ScaleTransition(
+          scale: _scaleAnim,
+          child: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -68,7 +90,10 @@ class _SplashScreenState extends State<SplashScreen>
                 const SizedBox(height: 24),
                 Text(
                   'MobiGas',
-                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                  style: Theme.of(context)
+                      .textTheme
+                      .displayLarge
+                      ?.copyWith(
                         color: AppColors.white,
                         fontSize: 36,
                         fontWeight: FontWeight.w800,
@@ -76,19 +101,10 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Gas on credit. Delivered.',
+                  'Cook now, pay later',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: AppColors.gray400,
                       ),
-                ),
-                const SizedBox(height: 60),
-                const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.orange,
-                  ),
                 ),
               ],
             ),

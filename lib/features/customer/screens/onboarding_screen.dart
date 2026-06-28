@@ -41,7 +41,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         curve: Curves.easeInOut,
       );
     } else {
-      context.go('/register');
+      context.go('/login');
     }
   }
 
@@ -61,7 +61,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             Align(
               alignment: Alignment.topRight,
               child: TextButton(
-                onPressed: () => context.go('/register'),
+                onPressed: () => context.go('/login'),
                 child: Text(
                   'Skip',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
