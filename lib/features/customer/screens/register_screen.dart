@@ -23,8 +23,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _areaController = TextEditingController();
 
   String _selectedCounty = 'Nairobi';
-  bool _obscurePassword = true;
-  bool _obscureConfirm = true;
   bool _isLoading = false;
   bool _isLocating = false;
   int _currentStep = 0;
@@ -416,155 +414,189 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _locationPicker() {
-    final bool hasLocation = _latitude != null && _longitude != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onTap: _isLocating ? null : _detectLocation,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: hasLocation
-                  ? AppColors.successLight
-                  : AppColors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: hasLocation
-                    ? AppColors.success
-                    : AppColors.gray200,
-                width: hasLocation ? 1.5 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: hasLocation
-                        ? AppColors.success.withValues(alpha: 0.15)
-                        : AppColors.orange.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: _isLocating
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.orange,
-                          ),
-                        )
-                      : Icon(
-                          hasLocation
-                              ? Icons.location_on_rounded
-                              : Icons.my_location_rounded,
-                          color: hasLocation
-                              ? AppColors.success
-                              : AppColors.orange,
-                          size: 22,
-                        ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        hasLocation
-                            ? 'Location pinned'
-                            : 'Tap to detect my location',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              fontSize: 14,
-                              color: hasLocation
-                                  ? AppColors.success
-                                  : AppColors.navy,
-                            ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        hasLocation
-                            ? '${_latitude!.toStringAsFixed(5)}, ${_longitude!.toStringAsFixed(5)}'
-                            : 'Used to match you with nearby vendors',
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: hasLocation
-                                      ? AppColors.success
-                                      : AppColors.gray400,
-                                ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (hasLocation)
-                  GestureDetector(
-                    onTap: _detectLocation,
-                    child: const Icon(
-                      Icons.refresh_rounded,
-                      color: AppColors.gray400,
-                      size: 18,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        if (_locationStatus.isNotEmpty &&
-            !(_latitude != null && _longitude != null))
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              _locationStatus,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.error,
-                  ),
-            ),
-          ),
-        const SizedBox(height: 8),
-        _infoCard(
-          icon: Icons.info_outline_rounded,
-          text:
-              'Your GPS coordinates are saved so vendors closest to you are shown first. Your exact location is never shared publicly.',
-        ),
-      ],
-    );
-  }
 
   Widget _buildStep3() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _label('Password'),
-        _passwordInput(
+        TextFormField(
           controller: _passwordController,
-          hint: 'At least 6 characters',
-          obscure: _obscurePassword,
-          onToggle: () =>
-              setState(() => _obscurePassword = !_obscurePassword),
+          obscureText: true,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w500,
+              ),
+          decoration: const InputDecoration(
+            hintText: 'At least 6 characters',
+            prefixIcon: Icon(Icons.lock_outline_rounded,
+                color: AppColors.gray400, size: 20),
+          ),
         ),
         const SizedBox(height: 20),
         _label('Confirm password'),
-        _passwordInput(
+        TextFormField(
           controller: _confirmPasswordController,
-          hint: 'Re-enter your password',
-          obscure: _obscureConfirm,
-          onToggle: () =>
-              setState(() => _obscureConfirm = !_obscureConfirm),
+          obscureText: true,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w500,
+              ),
+          decoration: const InputDecoration(
+            hintText: 'Re-enter your password',
+            prefixIcon: Icon(Icons.lock_outline_rounded,
+                color: AppColors.gray400, size: 20),
+          ),
         ),
         const SizedBox(height: 20),
         _infoCard(
           icon: Icons.shield_outlined,
           text:
-              'After creating your account, you will add 2 guarantors from your contacts. This is required to qualify for gas credit.',
+              'After creating your account you can immediately explore the app. Apply for gas credit when you are ready to place your first order.',
         ),
       ],
     );
   }
+
+
+  Widget _locationPicker() {
+    final bool hasLocation = _latitude != null && _longitude != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: hasLocation
+                ? AppColors.successLight
+                : _locationStatus.isNotEmpty
+                    ? AppColors.errorLight
+                    : AppColors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: hasLocation
+                  ? AppColors.success
+                  : _locationStatus.isNotEmpty
+                      ? AppColors.error
+                      : AppColors.gray200,
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: hasLocation
+                      ? AppColors.success.withValues(alpha: 0.15)
+                      : _locationStatus.isNotEmpty
+                          ? AppColors.error.withValues(alpha: 0.1)
+                          : AppColors.orange.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: _isLocating
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.orange,
+                        ),
+                      )
+                    : Icon(
+                        hasLocation
+                            ? Icons.location_on_rounded
+                            : _locationStatus.isNotEmpty
+                                ? Icons.location_off_rounded
+                                : Icons.my_location_rounded,
+                        color: hasLocation
+                            ? AppColors.success
+                            : _locationStatus.isNotEmpty
+                                ? AppColors.error
+                                : AppColors.orange,
+                        size: 22,
+                      ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      hasLocation
+                          ? 'Location detected'
+                          : _isLocating
+                              ? 'Detecting your location...'
+                              : _locationStatus.isNotEmpty
+                                  ? 'Location failed'
+                                  : 'Detecting location...',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontSize: 14,
+                            color: hasLocation
+                                ? AppColors.success
+                                : _locationStatus.isNotEmpty
+                                    ? AppColors.error
+                                    : AppColors.navy,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hasLocation
+                          ? 'GPS coordinates saved for vendor matching'
+                          : _isLocating
+                              ? 'Please wait...'
+                              : _locationStatus.isNotEmpty
+                                  ? _locationStatus
+                                  : 'Used to find nearest vendors',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: hasLocation
+                                ? AppColors.success
+                                : _locationStatus.isNotEmpty
+                                    ? AppColors.error
+                                    : AppColors.gray400,
+                            height: 1.4,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!hasLocation)
+                GestureDetector(
+                  onTap: _isLocating ? null : _detectLocation,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.orange,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Retry',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                          ),
+                    ),
+                  ),
+                ),
+              if (hasLocation)
+                const Icon(Icons.check_circle_rounded,
+                    color: AppColors.success, size: 20),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        _infoCard(
+          icon: Icons.info_outline_rounded,
+          text:
+              'Your GPS location is saved automatically to match you with the nearest gas vendors.',
+        ),
+      ],
+    );
+  }
+
 
   Widget _label(String text) {
     return Padding(
@@ -604,36 +636,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _passwordInput({
-    required TextEditingController controller,
-    required String hint,
-    required bool obscure,
-    required VoidCallback onToggle,
-  }) {
-    return TextFormField(
-      controller: controller,
-      obscureText: obscure,
-      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-            color: AppColors.navy,
-            fontWeight: FontWeight.w500,
-          ),
-      decoration: InputDecoration(
-        hintText: hint,
-        prefixIcon: const Icon(Icons.lock_outline_rounded,
-            color: AppColors.gray400, size: 20),
-        suffixIcon: IconButton(
-          onPressed: onToggle,
-          icon: Icon(
-            obscure
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            color: AppColors.gray400,
-            size: 20,
-          ),
-        ),
-      ),
-    );
-  }
+
 
   Widget _countyDropdown() {
     return Container(
