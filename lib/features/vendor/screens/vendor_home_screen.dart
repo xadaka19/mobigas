@@ -31,18 +31,28 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   }
 
   Future<void> _loadVendorData() async {
-    if (_vendorId.isEmpty) return;
+    if (_vendorId.isEmpty) {
+      setState(() => _isLoadingVendor = false);
+      return;
+    }
     try {
       final doc = await FirebaseService.vendors.doc(_vendorId).get();
-      if (doc.exists && mounted) {
+      if (!mounted) return;
+      if (doc.exists) {
         setState(() {
           _vendorData = doc.data() as Map<String, dynamic>;
           _isOnline = _vendorData?['isOnline'] ?? false;
           _isLoadingVendor = false;
         });
+      } else {
+        // New vendor — no profile yet, show setup banner
+        setState(() {
+          _vendorData = null;
+          _isLoadingVendor = false;
+        });
       }
     } catch (e) {
-      setState(() => _isLoadingVendor = false);
+      if (mounted) setState(() => _isLoadingVendor = false);
     }
   }
 
