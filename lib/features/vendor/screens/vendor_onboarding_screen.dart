@@ -139,7 +139,7 @@ class _VendorOnboardingScreenState extends State<VendorOnboardingScreen> {
     setState(() => _isLoading = true);
     await Future.delayed(const Duration(seconds: 2));
     setState(() => _isLoading = false);
-    if (mounted) context.go('/vendor-pending');
+    if (mounted) context.go('/vendor-home');
   }
 
   @override

@@ -45,6 +45,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   }
 
   Future<void> _toggleOnline() async {
+    if (_vendorData?['isVerified'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'Your account is pending approval. You cannot go online yet.'),
+          backgroundColor: AppColors.warning,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
     final newStatus = !_isOnline;
     setState(() => _isOnline = newStatus);
     await FirebaseService.vendors.doc(_vendorId).update({
@@ -180,6 +193,56 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       child: Column(
         children: [
           _buildVendorHeader(),
+          // Pending approval banner
+          if (_vendorData?['isVerified'] != true)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: AppColors.warning.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.hourglass_top_rounded,
+                      color: AppColors.warning, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Account pending approval',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                color: AppColors.warning,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Our team will verify your details within 24 hours. You will be notified once approved.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: AppColors.warning,
+                                height: 1.4,
+                                fontSize: 11,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
