@@ -1,0 +1,355 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/services/firebase_service.dart';
+
+class VendorEditProfileScreen extends StatefulWidget {
+  final Map<String, dynamic> vendorData;
+  const VendorEditProfileScreen({super.key, required this.vendorData});
+
+  @override
+  State<VendorEditProfileScreen> createState() =>
+      _VendorEditProfileScreenState();
+}
+
+class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
+  File? _newPhoto;
+  bool _isUploading = false;
+  bool _isSaving = false;
+  late TextEditingController _businessNameController;
+  late TextEditingController _ownerNameController;
+  late TextEditingController _phoneController;
+  late TextEditingController _estateController;
+
+  @override
+  void initState() {
+    super.initState();
+    _businessNameController = TextEditingController(
+        text: widget.vendorData['businessName'] ?? '');
+    _ownerNameController =
+        TextEditingController(text: widget.vendorData['ownerName'] ?? '');
+    _phoneController =
+        TextEditingController(text: widget.vendorData['phone'] ?? '');
+    _estateController =
+        TextEditingController(text: widget.vendorData['estate'] ?? '');
+  }
+
+  @override
+  void dispose() {
+    _businessNameController.dispose();
+    _ownerNameController.dispose();
+    _phoneController.dispose();
+    _estateController.dispose();
+    super.dispose();
+  }
+
+  String get _vendorId =>
+      FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  Future<void> _showPhotoOptions() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Business photo',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppColors.navy,
+                    )),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined,
+                  color: AppColors.orange),
+              title: const Text('Take photo / selfie'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickPhoto(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: AppColors.orange),
+              title: const Text('Upload business logo'),
+              subtitle: const Text('From gallery'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickPhoto(ImageSource.gallery);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    final picker = ImagePicker();
+    final photo = await picker.pickImage(
+      source: source,
+      preferredCameraDevice: CameraDevice.front,
+      imageQuality: 80,
+      maxWidth: 800,
+    );
+    if (photo != null) {
+      setState(() => _newPhoto = File(photo.path));
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    setState(() => _isSaving = true);
+
+    try {
+      String? photoUrl;
+
+      if (_newPhoto != null) {
+        setState(() => _isUploading = true);
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('vendor_photos')
+            .child(_vendorId);
+        await ref.putFile(_newPhoto!);
+        photoUrl = await ref.getDownloadURL();
+        setState(() => _isUploading = false);
+      }
+
+      final updates = <String, dynamic>{
+        'businessName': _businessNameController.text.trim(),
+        'ownerName': _ownerNameController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'estate': _estateController.text.trim(),
+      };
+      if (photoUrl != null) updates['photoUrl'] = photoUrl;
+
+      await FirebaseService.vendors.doc(_vendorId).update(updates);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Profile updated successfully'),
+            backgroundColor: AppColors.success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+        Navigator.pop(context, true); // return true to trigger reload
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Failed to update. Try again.'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+    setState(() => _isSaving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentPhoto = widget.vendorData['photoUrl'] as String?;
+    final user = FirebaseAuth.instance.currentUser;
+
+    return Scaffold(
+      backgroundColor: AppColors.navy,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: const Icon(Icons.arrow_back_ios_rounded,
+                        color: AppColors.white, size: 20),
+                  ),
+                  const SizedBox(width: 16),
+                  Text('Edit profile',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(color: AppColors.white)),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    // Photo section
+                    Center(
+                      child: Stack(
+                        children: [
+                          GestureDetector(
+                            onTap: _showPhotoOptions,
+                            child: Container(
+                              width: 120,
+                              height: 120,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: AppColors.orange, width: 3),
+                              ),
+                              child: ClipOval(
+                                child: _newPhoto != null
+                                    ? Image.file(_newPhoto!,
+                                        fit: BoxFit.cover)
+                                    : currentPhoto != null
+                                        ? Image.network(currentPhoto,
+                                            fit: BoxFit.cover)
+                                        : user?.photoURL != null
+                                            ? Image.network(
+                                                user!.photoURL!,
+                                                fit: BoxFit.cover)
+                                            : Container(
+                                                color: AppColors.orange,
+                                                child: Center(
+                                                  child: Text(
+                                                    (widget.vendorData[
+                                                                    'businessName']
+                                                                as String?
+                                                            ??
+                                                            'V')[0]
+                                                        .toUpperCase(),
+                                                    style: const TextStyle(
+                                                      color: AppColors.white,
+                                                      fontSize: 48,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: GestureDetector(
+                              onTap: _showPhotoOptions,
+                              child: Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: AppColors.orange,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: AppColors.navy, width: 2),
+                                ),
+                                child: const Icon(
+                                    Icons.camera_alt_rounded,
+                                    color: AppColors.white,
+                                    size: 18),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tap to update photo or upload logo',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.gray400),
+                    ),
+                    if (_isUploading) ...[
+                      const SizedBox(height: 8),
+                      const LinearProgressIndicator(
+                          color: AppColors.orange),
+                    ],
+                    const SizedBox(height: 28),
+                    _buildField('Business name',
+                        _businessNameController, Icons.store_outlined),
+                    const SizedBox(height: 16),
+                    _buildField('Owner name', _ownerNameController,
+                        Icons.person_outline_rounded),
+                    const SizedBox(height: 16),
+                    _buildField('M-Pesa number', _phoneController,
+                        Icons.phone_outlined,
+                        keyboardType: TextInputType.phone),
+                    const SizedBox(height: 16),
+                    _buildField('Estate / Area', _estateController,
+                        Icons.location_on_outlined),
+                    const SizedBox(height: 32),
+                    ElevatedButton(
+                      onPressed: _isSaving ? null : _saveProfile,
+                      child: _isSaving
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: AppColors.white),
+                            )
+                          : const Text('Save changes'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildField(
+    String label,
+    TextEditingController controller,
+    IconData icon, {
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          style: const TextStyle(color: AppColors.white),
+          decoration: InputDecoration(
+            prefixIcon:
+                Icon(icon, color: AppColors.gray400, size: 20),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                  color: AppColors.white.withValues(alpha: 0.2)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.orange),
+            ),
+            filled: true,
+            fillColor: AppColors.white.withValues(alpha: 0.05),
+          ),
+        ),
+      ],
+    );
+  }
+}

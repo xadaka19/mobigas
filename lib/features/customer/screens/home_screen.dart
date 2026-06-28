@@ -895,6 +895,34 @@ class _HomeScreenState extends State<HomeScreen> {
                         .textTheme
                         .titleLarge
                         ?.copyWith(color: AppColors.white)),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () => context.go('/edit-profile'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.orange.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.edit_rounded,
+                            color: AppColors.orange, size: 14),
+                        const SizedBox(width: 6),
+                        Text('Edit profile',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: AppColors.orange,
+                                  fontWeight: FontWeight.w600,
+                                )),
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Text(customer.phone,
                     style: Theme.of(context)

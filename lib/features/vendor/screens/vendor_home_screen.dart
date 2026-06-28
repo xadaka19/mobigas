@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
 
 class VendorHomeScreen extends StatefulWidget {
@@ -946,10 +947,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 CircleAvatar(
                   radius: 40,
                   backgroundColor: AppColors.orange,
-                  backgroundImage: user?.photoURL != null
-                      ? NetworkImage(user!.photoURL!)
+                  backgroundImage: (_vendorData?['photoUrl'] ?? user?.photoURL) != null
+                      ? NetworkImage(_vendorData?['photoUrl'] ?? user!.photoURL!)
                       : null,
-                  child: user?.photoURL == null
+                  child: (_vendorData?['photoUrl'] ?? user?.photoURL) == null
                       ? Text(
                           (_vendorData?['businessName'] ?? 'V')[0],
                           style: const TextStyle(
@@ -967,6 +968,43 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       .textTheme
                       .titleLarge
                       ?.copyWith(color: AppColors.white),
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () async {
+                    final updated = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VendorEditProfileScreen(
+                            vendorData: _vendorData ?? {}),
+                      ),
+                    );
+                    if (updated == true) _loadVendorData();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.orange.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.edit_rounded,
+                            color: AppColors.orange, size: 14),
+                        const SizedBox(width: 6),
+                        Text('Edit profile',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: AppColors.orange,
+                                  fontWeight: FontWeight.w600,
+                                )),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(

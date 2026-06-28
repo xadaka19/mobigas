@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:io';
 import 'package:mobigas/core/models/app_models.dart';
@@ -26,13 +27,18 @@ class AuthProvider extends ChangeNotifier {
         _customer = null;
         notifyListeners();
       } else {
-        // Load customer from Firestore
+        // Load full customer data from Firestore (includes guarantors)
         final customer = await FirestoreService.getUser(user.uid);
         if (customer != null) {
           _customer = customer;
           _state = AuthState.authenticated;
-          notifyListeners();
+        } else {
+          // User exists in Auth but not Firestore
+          // Could be deleted account - sign out
+          _state = AuthState.unauthenticated;
+          _customer = null;
         }
+        notifyListeners();
       }
     });
   }
@@ -80,6 +86,26 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Check for duplicate phone or national ID
+      final duplicates = await FirestoreService.checkDuplicates(
+        phone: phone.trim(),
+        nationalId: nationalId.trim(),
+      );
+
+      if (duplicates['phoneTaken'] == true) {
+        _error = 'An account already exists with this phone number. Please sign in instead.';
+        _state = AuthState.unauthenticated;
+        notifyListeners();
+        return;
+      }
+
+      if (duplicates['idTaken'] == true) {
+        _error = 'An account already exists with this National ID. Please sign in instead.';
+        _state = AuthState.unauthenticated;
+        notifyListeners();
+        return;
+      }
+
       // Use email for Firebase Auth
       // Phone is stored in Firestore profile
       final credential =
@@ -170,11 +196,14 @@ class AuthProvider extends ChangeNotifier {
       guarantors: guarantors,
     );
 
-    // Save guarantors to Firestore
-    await FirestoreService.updateUserBankStatus(
-      uid: _customer!.id,
-      status: BankApprovalStatus.pending,
-    );
+    // Save guarantors to Firestore user document
+    await FirebaseService.users.doc(_customer!.id).update({
+      'guarantors': guarantors
+          .map((g) => {'name': g.name, 'phone': g.phone})
+          .toList(),
+      'bankStatus': BankApprovalStatus.pending.name,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
 
     // Submit KYC to bank application queue
     await FirestoreService.submitBankApplication(

@@ -4,6 +4,38 @@ import 'package:mobigas/core/models/app_models.dart';
 
 class FirestoreService {
   // ── USERS ─────────────────────────────────────────────────────────
+  // Check if phone or national ID already registered
+  static Future<Map<String, bool>> checkDuplicates({
+    required String phone,
+    required String nationalId,
+  }) async {
+    final phoneSnap = await FirebaseService.users
+        .where('phone', isEqualTo: phone)
+        .limit(1)
+        .get();
+
+    final idSnap = await FirebaseService.users
+        .where('nationalId', isEqualTo: nationalId)
+        .limit(1)
+        .get();
+
+    return {
+      'phoneTaken': phoneSnap.docs.isNotEmpty,
+      'idTaken': idSnap.docs.isNotEmpty,
+    };
+  }
+
+  // Load full customer data including guarantors from Firestore
+  static Future<CustomerModel?> getUserByPhone(String phone) async {
+    final snap = await FirebaseService.users
+        .where('phone', isEqualTo: phone)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    final data = snap.docs.first.data() as Map<String, dynamic>;
+    return _customerFromMap(snap.docs.first.id, data);
+  }
+
   static Future<void> createUser(CustomerModel customer) async {
     await FirebaseService.users.doc(customer.id).set({
       'id': customer.id,

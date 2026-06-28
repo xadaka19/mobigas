@@ -11,6 +11,7 @@ import 'package:mobigas/features/customer/screens/delivery_confirmed_screen.dart
 import 'package:mobigas/features/customer/screens/login_screen.dart';
 import 'package:mobigas/features/customer/screens/credit_application_screen.dart';
 import 'package:mobigas/features/customer/screens/terms_screen.dart';
+import 'package:mobigas/features/customer/screens/edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_splash_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_login_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_onboarding_screen.dart';
@@ -40,6 +41,10 @@ class AppRouter {
       GoRoute(
         path: '/credit-application',
         builder: (context, state) => const CreditApplicationScreen(),
+      ),
+      GoRoute(
+        path: '/edit-profile',
+        builder: (context, state) => const EditProfileScreen(),
       ),
       GoRoute(
         path: '/terms',
