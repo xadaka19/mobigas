@@ -18,6 +18,10 @@ import 'package:mobigas/flavors/flavor_config.dart';
 class AppRouter {
   static final router = GoRouter(
     initialLocation: '/',
+    redirect: (context, state) {
+      // TODO: check auth state here when Firebase is wired
+      return null;
+    },
     routes: [
       GoRoute(
         path: '/',
@@ -31,6 +35,10 @@ class AppRouter {
         builder: (context, state) => const OnboardingScreen(),
       ),
       GoRoute(
+        path: '/login',
+        builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
       ),
@@ -39,7 +47,7 @@ class AppRouter {
         builder: (context, state) => const GuarantorsScreen(),
       ),
       GoRoute(
-        path: '/crb-check',
+        path: '/bank-approval',
         builder: (context, state) => const CrbCheckScreen(),
       ),
       GoRoute(
@@ -57,10 +65,6 @@ class AppRouter {
       GoRoute(
         path: '/delivery-confirmed',
         builder: (context, state) => const DeliveryConfirmedScreen(),
-      ),
-      GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginScreen(),
       ),
       // ── Vendor routes ──
       GoRoute(

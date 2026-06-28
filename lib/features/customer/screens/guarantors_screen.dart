@@ -122,7 +122,7 @@ class _GuarantorsScreenState extends State<GuarantorsScreen> {
       _showError('Please select exactly 2 guarantors to continue');
       return;
     }
-    context.go('/crb-check');
+    context.go('/bank-approval');
   }
 
   @override

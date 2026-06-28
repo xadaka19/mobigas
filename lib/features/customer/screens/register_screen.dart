@@ -279,7 +279,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String _stepSubtitle() {
     switch (_currentStep) {
       case 0:
-        return 'We use your ID for credit verification';
+        return 'Your ID is used for bank credit approval';
       case 1:
         return 'Your location helps us find the nearest gas vendor';
       case 2:
@@ -347,7 +347,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _infoCard(
           icon: Icons.info_outline_rounded,
           text:
-              'Your National ID is used to run a CRB credit check. We do not share your data with third parties.',
+              'Your details are shared securely with our partner bank for credit approval. We do not sell your data.',
         ),
       ],
     );

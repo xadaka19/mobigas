@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/providers/auth_provider.dart';
+import 'package:mobigas/core/providers/order_provider.dart';
+import 'package:mobigas/core/models/app_models.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,18 +16,18 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0;
 
-  // Mock data
-  final String _customerName = 'Jane Wanjiku';
-  final double _creditLimit = 1500;
-  final double _creditUsed = 0;
-  final List<_RecentOrder> _recentOrders = [];
-
-  double get _creditAvailable => _creditLimit - _creditUsed;
-  double get _creditUsedPercent =>
-      _creditLimit > 0 ? _creditUsed / _creditLimit : 0;
-
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    final orders = context.watch<OrderProvider>();
+    final customer = auth.customer;
+
+    if (customer == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.orangeWarm,
       body: SafeArea(
@@ -33,10 +37,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: IndexedStack(
                 index: _currentTab,
                 children: [
-                  _buildHomeTab(),
-                  _buildOrdersTab(),
+                  _buildHomeTab(customer, orders),
+                  _buildOrdersTab(orders),
                   _buildRepaymentsTab(),
-                  _buildProfileTab(),
+                  _buildProfileTab(customer, auth),
                 ],
               ),
             ),
@@ -47,23 +51,22 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── HOME TAB ──────────────────────────────────────────────────────
-  Widget _buildHomeTab() {
+  Widget _buildHomeTab(CustomerModel customer, OrderProvider orders) {
     return SingleChildScrollView(
       child: Column(
         children: [
-          _buildHomeHeader(),
+          _buildHomeHeader(customer),
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                _buildCreditCard(),
+                _buildCreditCard(customer),
                 const SizedBox(height: 20),
-                _buildOrderButton(),
+                _buildOrderButton(customer),
                 const SizedBox(height: 20),
                 _buildHowItWorks(),
                 const SizedBox(height: 20),
-                _buildRecentOrdersSection(),
+                _buildRecentOrdersSection(orders),
               ],
             ),
           ),
@@ -72,7 +75,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHomeHeader() {
+  Widget _buildHomeHeader(CustomerModel customer) {
+    final hour = DateTime.now().hour;
+    final greeting = hour < 12
+        ? 'Good morning 👋'
+        : hour < 17
+            ? 'Good afternoon 👋'
+            : 'Good evening 👋';
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
@@ -89,14 +99,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Good morning 👋',
+                    greeting,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: AppColors.gray400,
                         ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    _customerName.split(' ').first,
+                    customer.name.split(' ').first,
                     style: Theme.of(context)
                         .textTheme
                         .displayMedium
@@ -123,29 +133,18 @@ class _HomeScreenState extends State<HomeScreen> {
                       size: 22,
                     ),
                   ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppColors.orange,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 20),
-          // Credit summary row
           Row(
             children: [
               _headerStat(
                 label: 'Credit limit',
-                value: 'KES ${_creditLimit.toStringAsFixed(0)}',
+                value: customer.bankApprovedLimit != null
+                    ? 'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'
+                    : 'Pending',
               ),
               Container(
                 width: 1,
@@ -155,7 +154,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               _headerStat(
                 label: 'Available',
-                value: 'KES ${_creditAvailable.toStringAsFixed(0)}',
+                value: customer.isBankApproved
+                    ? 'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}'
+                    : 'Pending',
                 valueColor: AppColors.success,
               ),
               Container(
@@ -166,7 +167,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               _headerStat(
                 label: 'Used',
-                value: 'KES ${_creditUsed.toStringAsFixed(0)}',
+                value:
+                    'KES ${customer.bankCreditUsed.toStringAsFixed(0)}',
               ),
             ],
           ),
@@ -195,7 +197,7 @@ class _HomeScreenState extends State<HomeScreen> {
           value,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: valueColor ?? AppColors.white,
-                fontSize: 15,
+                fontSize: 14,
                 fontWeight: FontWeight.w700,
               ),
         ),
@@ -203,7 +205,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildCreditCard() {
+  Widget _buildCreditCard(CustomerModel customer) {
+    final usedPercent = customer.bankApprovedLimit != null &&
+            customer.bankApprovedLimit! > 0
+        ? customer.bankCreditUsed / customer.bankApprovedLimit!
+        : 0.0;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -221,10 +228,12 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.success.withValues(alpha: 0.2),
+                  color: customer.isBankApproved
+                      ? AppColors.success.withValues(alpha: 0.2)
+                      : AppColors.warning.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -232,16 +241,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     Container(
                       width: 6,
                       height: 6,
-                      decoration: const BoxDecoration(
-                        color: AppColors.success,
+                      decoration: BoxDecoration(
+                        color: customer.isBankApproved
+                            ? AppColors.success
+                            : AppColors.warning,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'Credit active',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.success,
+                      customer.isBankApproved
+                          ? 'Credit active'
+                          : 'Pending approval',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: customer.isBankApproved
+                                ? AppColors.success
+                                : AppColors.warning,
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                           ),
@@ -250,11 +268,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const Spacer(),
-              const Icon(
-                Icons.local_fire_department_rounded,
-                color: AppColors.orange,
-                size: 28,
-              ),
+              const Icon(Icons.local_fire_department_rounded,
+                  color: AppColors.orange, size: 28),
             ],
           ),
           const SizedBox(height: 20),
@@ -267,22 +282,23 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'KES ${_creditAvailable.toStringAsFixed(0)}',
+            customer.isBankApproved
+                ? 'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}'
+                : 'Awaiting bank approval',
             style: Theme.of(context).textTheme.displayLarge?.copyWith(
                   color: AppColors.white,
-                  fontSize: 38,
+                  fontSize: customer.isBankApproved ? 36 : 22,
                   fontWeight: FontWeight.w800,
                 ),
           ),
           const SizedBox(height: 16),
-          // Credit usage bar
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: _creditUsedPercent,
+              value: usedPercent,
               backgroundColor: AppColors.white.withValues(alpha: 0.1),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(AppColors.orange),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppColors.orange),
               minHeight: 6,
             ),
           ),
@@ -290,52 +306,49 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               Text(
-                'KES ${_creditUsed.toStringAsFixed(0)} used',
+                'KES ${customer.bankCreditUsed.toStringAsFixed(0)} used',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppColors.gray400,
                       fontSize: 11,
                     ),
               ),
               const Spacer(),
-              Text(
-                'Limit: KES ${_creditLimit.toStringAsFixed(0)}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.gray400,
-                      fontSize: 11,
-                    ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _customerName,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400,
-                  fontSize: 11,
-                  letterSpacing: 1,
+              if (customer.partnerBankName.isNotEmpty)
+                Text(
+                  'via ${customer.partnerBankName}',
+                  style:
+                      Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.orange,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
                 ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildOrderButton() {
+  Widget _buildOrderButton(CustomerModel customer) {
+    final canOrder = customer.isBankApproved;
     return GestureDetector(
-      onTap: () => context.go('/order'),
+      onTap: canOrder ? () => context.go('/order') : null,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: AppColors.orange,
+          color: canOrder ? AppColors.orange : AppColors.gray400,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.orange.withValues(alpha: 0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          boxShadow: canOrder
+              ? [
+                  BoxShadow(
+                    color: AppColors.orange.withValues(alpha: 0.4),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           children: [
@@ -358,15 +371,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Order gas now',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 18,
-                        ),
+                    canOrder ? 'Order gas now' : 'Awaiting bank approval',
+                    style:
+                        Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: AppColors.white,
+                              fontSize: 18,
+                            ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Delivered to your door · Pay later',
+                    canOrder
+                        ? 'Delivered to your door · Bank pays vendor'
+                        : 'You will be notified once approved',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.white.withValues(alpha: 0.8),
                           fontSize: 12,
@@ -375,11 +391,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            const Icon(
-              Icons.arrow_forward_ios_rounded,
-              color: AppColors.white,
-              size: 18,
-            ),
+            if (canOrder)
+              const Icon(Icons.arrow_forward_ios_rounded,
+                  color: AppColors.white, size: 18),
           ],
         ),
       ),
@@ -388,30 +402,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildHowItWorks() {
     final steps = [
-      _HowItWorksStep(
-        icon: Icons.shopping_cart_outlined,
-        title: 'Order',
-        subtitle: 'Pick size & vendor',
-        color: AppColors.orange,
-      ),
-      _HowItWorksStep(
-        icon: Icons.local_shipping_outlined,
-        title: 'Delivery',
-        subtitle: 'Vendor brings gas',
-        color: AppColors.navy,
-      ),
-      _HowItWorksStep(
-        icon: Icons.pin_outlined,
-        title: 'Confirm PIN',
-        subtitle: 'Share PIN on delivery',
-        color: AppColors.success,
-      ),
-      _HowItWorksStep(
-        icon: Icons.payment_outlined,
-        title: 'Repay',
-        subtitle: 'Via M-Pesa',
-        color: AppColors.warning,
-      ),
+      _HowStep(Icons.shopping_cart_outlined, 'Order', 'Pick size & vendor',
+          AppColors.orange),
+      _HowStep(Icons.local_shipping_outlined, 'Delivery',
+          'Bank pays vendor', AppColors.navy),
+      _HowStep(Icons.pin_outlined, 'PIN', 'Confirm delivery',
+          AppColors.success),
+      _HowStep(Icons.payment_outlined, 'Repay', 'Via M-Pesa',
+          AppColors.warning),
     ];
 
     return Column(
@@ -426,9 +424,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 12),
         Row(
-          children: steps.asMap().entries.map((entry) {
-            final i = entry.key;
-            final step = entry.value;
+          children: steps.asMap().entries.map((e) {
+            final i = e.key;
+            final step = e.value;
             return Expanded(
               child: Row(
                 children: [
@@ -446,29 +444,25 @@ class _HomeScreenState extends State<HomeScreen> {
                               color: step.color, size: 22),
                         ),
                         const SizedBox(height: 6),
-                        Text(
-                          step.title,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: AppColors.navy,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 11,
-                              ),
-                          textAlign: TextAlign.center,
-                        ),
-                        Text(
-                          step.subtitle,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: AppColors.gray400,
-                                fontSize: 10,
-                              ),
-                          textAlign: TextAlign.center,
-                        ),
+                        Text(step.title,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: AppColors.navy,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                            textAlign: TextAlign.center),
+                        Text(step.subtitle,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: AppColors.gray400,
+                                  fontSize: 10,
+                                ),
+                            textAlign: TextAlign.center),
                       ],
                     ),
                   ),
@@ -484,7 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRecentOrdersSection() {
+  Widget _buildRecentOrdersSection(OrderProvider orders) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -511,10 +505,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        _recentOrders.isEmpty
+        orders.orders.isEmpty
             ? _buildEmptyOrders()
             : Column(
-                children: _recentOrders
+                children: orders.orders
+                    .take(3)
                     .map((o) => _orderTile(o))
                     .toList(),
               ),
@@ -536,19 +531,15 @@ class _HomeScreenState extends State<HomeScreen> {
           const Icon(Icons.receipt_long_outlined,
               size: 48, color: AppColors.gray400),
           const SizedBox(height: 12),
-          Text(
-            'No orders yet',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.gray600,
-                ),
-          ),
+          Text('No orders yet',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: AppColors.gray600,
+                  )),
           const SizedBox(height: 4),
-          Text(
-            'Your first gas order will appear here',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400,
-                ),
-          ),
+          Text('Your first gas order will appear here',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400,
+                  )),
           const SizedBox(height: 20),
           OutlinedButton(
             onPressed: () => context.go('/order'),
@@ -559,7 +550,33 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _orderTile(_RecentOrder order) {
+  Widget _orderTile(OrderModel order) {
+    Color statusColor;
+    IconData statusIcon;
+    String statusLabel;
+
+    switch (order.status) {
+      case OrderStatus.delivered:
+        statusColor = AppColors.success;
+        statusIcon = Icons.check_circle_rounded;
+        statusLabel = 'Delivered';
+        break;
+      case OrderStatus.outForDelivery:
+        statusColor = AppColors.orange;
+        statusIcon = Icons.local_shipping_rounded;
+        statusLabel = 'On the way';
+        break;
+      case OrderStatus.pending:
+        statusColor = AppColors.warning;
+        statusIcon = Icons.hourglass_top_rounded;
+        statusLabel = 'Pending';
+        break;
+      default:
+        statusColor = AppColors.gray400;
+        statusIcon = Icons.receipt_outlined;
+        statusLabel = 'Processing';
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -574,11 +591,10 @@ class _HomeScreenState extends State<HomeScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: order.statusColor.withValues(alpha: 0.1),
+              color: statusColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(order.statusIcon,
-                color: order.statusColor, size: 22),
+            child: Icon(statusIcon, color: statusColor, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -586,14 +602,14 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  order.title,
+                  '${order.listing.size} — ${order.vendorName}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontSize: 14,
                         color: AppColors.navy,
                       ),
                 ),
                 Text(
-                  order.date,
+                  order.orderId,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                       ),
@@ -605,7 +621,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                'KES ${order.amount}',
+                'KES ${order.listing.customerRepayment.toStringAsFixed(0)}',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,
                       color: AppColors.navy,
@@ -613,16 +629,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: order.statusColor.withValues(alpha: 0.1),
+                  color: statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  order.status,
+                  statusLabel,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: order.statusColor,
+                        color: statusColor,
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),
@@ -636,7 +652,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ── ORDERS TAB ────────────────────────────────────────────────────
-  Widget _buildOrdersTab() {
+  Widget _buildOrdersTab(OrderProvider orders) {
     return Column(
       children: [
         Container(
@@ -644,47 +660,45 @@ class _HomeScreenState extends State<HomeScreen> {
           color: AppColors.navy,
           child: Row(
             children: [
-              Text(
-                'My Orders',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.white,
-                    ),
-              ),
+              Text('My Orders',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: AppColors.white,
+                      )),
             ],
           ),
         ),
         Expanded(
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.receipt_long_outlined,
-                    size: 64, color: AppColors.gray400),
-                const SizedBox(height: 16),
-                Text(
-                  'No orders yet',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.gray600,
+          child: orders.orders.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.receipt_long_outlined,
+                          size: 64, color: AppColors.gray400),
+                      const SizedBox(height: 16),
+                      Text('No orders yet',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(color: AppColors.gray600)),
+                      const SizedBox(height: 24),
+                      Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 48),
+                        child: ElevatedButton(
+                          onPressed: () => context.go('/order'),
+                          child: const Text('Order gas now'),
+                        ),
                       ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Your gas orders will appear here',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.gray400,
-                      ),
-                ),
-                const SizedBox(height: 24),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 48),
-                  child: ElevatedButton(
-                    onPressed: () => context.go('/order'),
-                    child: const Text('Order gas now'),
+                    ],
                   ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: orders.orders.length,
+                  itemBuilder: (context, i) =>
+                      _orderTile(orders.orders[i]),
                 ),
-              ],
-            ),
-          ),
         ),
       ],
     );
@@ -699,12 +713,10 @@ class _HomeScreenState extends State<HomeScreen> {
           color: AppColors.navy,
           child: Row(
             children: [
-              Text(
-                'Repayments',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.white,
-                    ),
-              ),
+              Text('Repayments',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: AppColors.white,
+                      )),
             ],
           ),
         ),
@@ -716,15 +728,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 const Icon(Icons.account_balance_wallet_outlined,
                     size: 64, color: AppColors.gray400),
                 const SizedBox(height: 16),
-                Text(
-                  'No repayments due',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.gray600,
-                      ),
-                ),
+                Text('No repayments due',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(color: AppColors.gray600)),
                 const SizedBox(height: 8),
                 Text(
-                  'Repayment schedules appear here after you order',
+                  'Repayments appear here after you order',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.gray400,
@@ -739,7 +750,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ── PROFILE TAB ───────────────────────────────────────────────────
-  Widget _buildProfileTab() {
+  Widget _buildProfileTab(CustomerModel customer, AuthProvider auth) {
     return SingleChildScrollView(
       child: Column(
         children: [
@@ -757,7 +768,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   radius: 40,
                   backgroundColor: AppColors.orange,
                   child: Text(
-                    _customerName[0],
+                    customer.name[0],
                     style: const TextStyle(
                       color: AppColors.white,
                       fontSize: 32,
@@ -766,31 +777,34 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  _customerName,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.white,
-                      ),
-                ),
+                Text(customer.name,
+                    style:
+                        Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: AppColors.white,
+                            )),
                 const SizedBox(height: 4),
-                Text(
-                  '0712 345 678',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.gray400,
-                      ),
-                ),
+                Text(customer.phone,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.gray400,
+                        )),
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 6),
                   decoration: BoxDecoration(
-                    color: AppColors.success.withValues(alpha: 0.2),
+                    color: customer.isBankApproved
+                        ? AppColors.success.withValues(alpha: 0.2)
+                        : AppColors.warning.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    'CRB Verified ✓',
+                    customer.isBankApproved
+                        ? 'Bank Approved ✓'
+                        : 'Pending bank approval',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.success,
+                          color: customer.isBankApproved
+                              ? AppColors.success
+                              : AppColors.warning,
                           fontWeight: FontWeight.w600,
                         ),
                   ),
@@ -803,14 +817,19 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 _profileTile(
-                    Icons.badge_outlined, 'National ID', '12345678'),
-                _profileTile(
-                    Icons.location_on_outlined, 'Location', 'Westlands, Nairobi'),
-                _profileTile(
-                    Icons.people_outline_rounded, 'Guarantors', '2 added'),
-                _profileTile(
-                    Icons.credit_score_rounded, 'Credit limit',
-                    'KES 1,500'),
+                    Icons.badge_outlined, 'National ID', customer.nationalId),
+                _profileTile(Icons.location_on_outlined, 'Location',
+                    '${customer.estate}, ${customer.county}'),
+                _profileTile(Icons.people_outline_rounded, 'Guarantors',
+                    '${customer.guarantors.length} added'),
+                if (customer.partnerBankName.isNotEmpty)
+                  _profileTile(Icons.account_balance_outlined,
+                      'Partner bank', customer.partnerBankName),
+                if (customer.bankApprovedLimit != null)
+                  _profileTile(
+                      Icons.credit_score_rounded,
+                      'Credit limit',
+                      'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'),
                 const SizedBox(height: 8),
                 _profileAction(
                     Icons.lock_outline_rounded, 'Change password'),
@@ -820,7 +839,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     Icons.info_outline_rounded, 'About MobiGas'),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
-                  onPressed: () => context.go('/'),
+                  onPressed: () {
+                    auth.logout();
+                    context.go('/');
+                  },
                   icon: const Icon(Icons.logout_rounded, size: 18),
                   label: const Text('Sign out'),
                   style: OutlinedButton.styleFrom(
@@ -849,20 +871,16 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Icon(icon, color: AppColors.orange, size: 20),
           const SizedBox(width: 12),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.gray600,
-                ),
-          ),
+          Text(label,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.gray600,
+                  )),
           const Spacer(),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.navy,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
+          Text(value,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w600,
+                  )),
         ],
       ),
     );
@@ -880,12 +898,10 @@ class _HomeScreenState extends State<HomeScreen> {
           side: const BorderSide(color: AppColors.gray200),
         ),
         leading: Icon(icon, color: AppColors.navy, size: 20),
-        title: Text(
-          label,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppColors.navy,
-              ),
-        ),
+        title: Text(label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.navy,
+                )),
         trailing: const Icon(Icons.arrow_forward_ios_rounded,
             size: 14, color: AppColors.gray400),
         onTap: () {},
@@ -893,14 +909,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── BOTTOM NAV ────────────────────────────────────────────────────
   Widget _buildBottomNav() {
     final items = [
       _NavItem(Icons.home_outlined, Icons.home_rounded, 'Home'),
-      _NavItem(Icons.receipt_long_outlined, Icons.receipt_long_rounded, 'Orders'),
+      _NavItem(Icons.receipt_long_outlined, Icons.receipt_long_rounded,
+          'Orders'),
       _NavItem(Icons.account_balance_wallet_outlined,
           Icons.account_balance_wallet_rounded, 'Repayments'),
-      _NavItem(Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
+      _NavItem(
+          Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
     ];
 
     return Container(
@@ -919,9 +936,9 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
-            children: items.asMap().entries.map((entry) {
-              final i = entry.key;
-              final item = entry.value;
+            children: items.asMap().entries.map((e) {
+              final i = e.key;
+              final item = e.value;
               final isActive = _currentTab == i;
               return Expanded(
                 child: GestureDetector(
@@ -940,16 +957,18 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 4),
                       Text(
                         item.label,
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: isActive
-                                      ? AppColors.orange
-                                      : AppColors.gray400,
-                                  fontSize: 10,
-                                  fontWeight: isActive
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              color: isActive
+                                  ? AppColors.orange
+                                  : AppColors.gray400,
+                              fontSize: 10,
+                              fontWeight: isActive
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
                       ),
                     ],
                   ),
@@ -963,42 +982,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _RecentOrder {
-  final String title;
-  final String date;
-  final String amount;
-  final String status;
-  final Color statusColor;
-  final IconData statusIcon;
-
-  const _RecentOrder({
-    required this.title,
-    required this.date,
-    required this.amount,
-    required this.status,
-    required this.statusColor,
-    required this.statusIcon,
-  });
-}
-
-class _HowItWorksStep {
+class _HowStep {
   final IconData icon;
   final String title;
   final String subtitle;
   final Color color;
-
-  const _HowItWorksStep({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.color,
-  });
+  const _HowStep(this.icon, this.title, this.subtitle, this.color);
 }
 
 class _NavItem {
   final IconData icon;
   final IconData activeIcon;
   final String label;
-
   const _NavItem(this.icon, this.activeIcon, this.label);
 }
