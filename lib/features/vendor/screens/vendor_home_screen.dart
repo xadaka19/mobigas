@@ -6,6 +6,7 @@ import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
+import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
 
 class VendorHomeScreen extends StatefulWidget {
@@ -194,8 +195,71 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       child: Column(
         children: [
           _buildVendorHeader(),
-          // Pending approval banner
-          if (_vendorData?['isVerified'] != true)
+          // Setup incomplete banner
+          if (_vendorData == null || (_vendorData?['businessName'] ?? '').isEmpty)
+            GestureDetector(
+              onTap: () async {
+                final done = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VendorSetupScreen(
+                        existingData: _vendorData),
+                  ),
+                );
+                if (done == true) _loadVendorData();
+              },
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: AppColors.orange.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.store_outlined,
+                        color: AppColors.orange, size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Complete your business setup',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  color: AppColors.orange,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Add your business details and gas prices to start receiving orders',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: AppColors.orange,
+                                  height: 1.4,
+                                  fontSize: 11,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded,
+                        color: AppColors.orange, size: 14),
+                  ],
+                ),
+              ),
+            )
+          else if (_vendorData?['isVerified'] != true)
             Container(
               width: double.infinity,
               margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -216,7 +280,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Account pending approval',
+                          'Pending verification',
                           style: Theme.of(context)
                               .textTheme
                               .titleMedium
@@ -228,7 +292,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Our team will verify your details within 24 hours. You will be notified once approved.',
+                          'Our team will verify your business within 24 hours.',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
@@ -239,6 +303,35 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                               ),
                         ),
                       ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () async {
+                      final done = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => VendorSetupScreen(
+                              existingData: _vendorData),
+                        ),
+                      );
+                      if (done == true) _loadVendorData();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color:
+                            AppColors.warning.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text('Edit',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: AppColors.warning,
+                                fontWeight: FontWeight.w600,
+                              )),
                     ),
                   ),
                 ],
@@ -1048,6 +1141,27 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 _profileTile(Icons.local_gas_station_outlined,
                     'Brands',
                     (_vendorData?['brands'] as List?)?.join(', ') ?? ''),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final done = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            VendorSetupScreen(existingData: _vendorData),
+                      ),
+                    );
+                    if (done == true) _loadVendorData();
+                  },
+                  icon: const Icon(Icons.edit_rounded, size: 16),
+                  label: const Text('Edit business & gas prices'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        AppColors.orange.withValues(alpha: 0.15),
+                    foregroundColor: AppColors.orange,
+                    elevation: 0,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
                   onPressed: () async {

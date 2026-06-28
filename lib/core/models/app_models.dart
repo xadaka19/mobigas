@@ -1,3 +1,63 @@
+// All gas product types
+enum GasProductType {
+  refill,           // Gas refill only (most common)
+  fullKit,          // Gas + New cylinder
+  grillKit,         // 6kg Gas + Cylinder + Stove/Grill + Regulator + Pipe
+}
+
+extension GasProductTypeExt on GasProductType {
+  String get label {
+    switch (this) {
+      case GasProductType.refill:
+        return 'Refill';
+      case GasProductType.fullKit:
+        return 'Full Kit (Gas + Cylinder)';
+      case GasProductType.grillKit:
+        return 'Grill Kit (Gas + Cylinder + Stove + Grill)';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case GasProductType.refill:
+        return 'Gas refill only — exchange your empty cylinder';
+      case GasProductType.fullKit:
+        return 'New gas cylinder + gas — no empty cylinder needed';
+      case GasProductType.grillKit:
+        return '6kg gas + cylinder + LPG stove + grill — complete package';
+    }
+  }
+
+  bool isAvailableForSize(String size) {
+    if (this == GasProductType.grillKit) return size == '6kg';
+    return true;
+  }
+}
+
+// All Kenyan gas brands
+class KenyanGasBrands {
+  static const List<String> all = [
+    'Total',
+    'K-Gas',
+    'Hashi',
+    'Afrigaz',
+    'Orion',
+    'Pro Gas',
+    'Shell',
+    'Lake Gas',
+    'Taifa Gas',
+    'Hass Gas',
+    'Top Gas',
+    'Supa Gas',
+    'Safe Gas',
+    'Rubis Gas',
+    'Mengas',
+    'Salama Gas',
+    'Sea Gas',
+    'Raha Gas',
+  ];
+}
+
 class MobiGasFees {
   // MobiGas earns 1% of disbursement from bank per order
   static const double bankCommissionRate = 0.01;
@@ -10,12 +70,14 @@ class GasListing {
   final int kg;
   final double price;
   final bool available;
+  final GasProductType productType;
 
   const GasListing({
     required this.size,
     required this.kg,
     required this.price,
     required this.available,
+    this.productType = GasProductType.refill,
   });
 
   // Bank interest (8%) — bank charges customer

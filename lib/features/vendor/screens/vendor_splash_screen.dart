@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
-import 'package:mobigas/core/services/firebase_service.dart';
 
 class VendorSplashScreen extends StatefulWidget {
   const VendorSplashScreen({super.key});
@@ -35,25 +34,13 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
   }
 
   Future<void> _navigate() async {
-    await Future.delayed(const Duration(milliseconds: 2000));
+    await Future.delayed(const Duration(milliseconds: 1800));
     if (!mounted) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      // Already signed in — check if vendor profile exists
-      final vendorDoc =
-          await FirebaseService.vendors.doc(user.uid).get();
-      if (!mounted) return;
-      if (vendorDoc.exists) {
-        final data = vendorDoc.data() as Map<String, dynamic>;
-        if (data['isVerified'] == true) {
-          context.go('/vendor-home');
-        } else {
-          context.go('/vendor-pending');
-        }
-      } else {
-        context.go('/vendor-onboarding');
-      }
+      // Already signed in — go straight to home
+      context.go('/vendor-home');
     } else {
       context.go('/vendor-login');
     }
@@ -105,9 +92,10 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
                 const SizedBox(height: 8),
                 Text(
                   'Deliver gas. Get paid instantly.',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.gray400,
-                      ),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyLarge
+                      ?.copyWith(color: AppColors.gray400),
                 ),
                 const SizedBox(height: 48),
                 const CircularProgressIndicator(

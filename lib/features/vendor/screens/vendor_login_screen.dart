@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/google_auth_service.dart';
-import 'package:mobigas/core/services/firebase_service.dart';
 
 class VendorLoginScreen extends StatefulWidget {
   const VendorLoginScreen({super.key});
@@ -35,23 +34,10 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
       return;
     }
 
-    // Check if vendor profile exists
-    final uid = credential.user!.uid;
-    final vendorDoc = await FirebaseService.vendors.doc(uid).get();
-
     setState(() => _isLoading = false);
     if (!mounted) return;
-
-    if (vendorDoc.exists) {
-      final data = vendorDoc.data() as Map<String, dynamic>;
-      if (data['isVerified'] == true) {
-        context.go('/vendor-home');
-      } else {
-        context.go('/vendor-pending');
-      }
-    } else {
-      context.go('/vendor-onboarding');
-    }
+    // Always go to home — setup happens inside the dashboard
+    context.go('/vendor-home');
   }
 
   @override
