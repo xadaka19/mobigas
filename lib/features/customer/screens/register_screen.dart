@@ -18,6 +18,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _emailController = TextEditingController();
   final _estateController = TextEditingController();
   final _areaController = TextEditingController();
 
@@ -48,6 +49,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _emailController.dispose();
     _estateController.dispose();
     _areaController.dispose();
     super.dispose();
@@ -57,6 +59,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (_currentStep == 0) {
       if (_nameController.text.trim().isEmpty) {
         _showError('Please enter your full name');
+        return;
+      }
+      if (!_emailController.text.contains('@')) {
+        _showError('Please enter a valid email address');
         return;
       }
       if (_idController.text.trim().length < 7) {
@@ -158,9 +164,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _submit() async {
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
+    // TODO: call AuthProvider.register() with real data
+    // For now navigate to home — Firebase wiring next
+    await Future.delayed(const Duration(seconds: 1));
     setState(() => _isLoading = false);
-    if (mounted) context.go('/guarantors');
+    if (mounted) context.go('/home');
   }
 
   @override
@@ -332,6 +340,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
           textCapitalization: TextCapitalization.words,
         ),
         const SizedBox(height: 20),
+        _label('Email address'),
+        _input(
+          controller: _emailController,
+          hint: 'e.g. jane@gmail.com',
+          icon: Icons.email_outlined,
+          keyboardType: TextInputType.emailAddress,
+        ),
+        const SizedBox(height: 20),
         _label('National ID number'),
         _input(
           controller: _idController,
@@ -347,7 +363,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _infoCard(
           icon: Icons.info_outline_rounded,
           text:
-              'Your details are shared securely with our partner bank for credit approval. We do not sell your data.',
+              'Your details are used to create your MobiGas account. We do not sell your data.',
         ),
       ],
     );

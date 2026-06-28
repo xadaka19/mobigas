@@ -41,14 +41,9 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Format phone to email format for Firebase Auth
-      // Firebase phone auth needs SMS — using email+phone workaround for now
-      // TODO: switch to Firebase Phone Auth (OTP) when ready
-      final email = '${phone.replaceAll(' ', '')}@mobigas.app';
-
       final credential =
           await FirebaseService.auth.signInWithEmailAndPassword(
-        email: email,
+        email: phone.trim().toLowerCase(),
         password: password,
       );
 
@@ -66,6 +61,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> register({
     required String name,
+    required String email,
     required String phone,
     required String nationalId,
     required String county,
@@ -81,11 +77,11 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final email = '${phone.replaceAll(' ', '')}@mobigas.app';
-
+      // Use email for Firebase Auth
+      // Phone is stored in Firestore profile
       final credential =
           await FirebaseService.auth.createUserWithEmailAndPassword(
-        email: email,
+        email: email.trim().toLowerCase(),
         password: password,
       );
 
@@ -132,6 +128,10 @@ class AuthProvider extends ChangeNotifier {
       _state = AuthState.unauthenticated;
       notifyListeners();
     }
+  }
+
+  Future<void> resetPassword(String email) async {
+    await FirebaseService.auth.sendPasswordResetEmail(email: email);
   }
 
   Future<void> requestBankApproval() async {
