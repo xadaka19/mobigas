@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/providers/order_provider.dart';
+import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/customer/screens/repayments_screen.dart';
 
@@ -16,6 +17,21 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final auth = context.read<AuthProvider>();
+      context.read<VendorProvider>().loadVendors(
+            lat: auth.customer?.latitude,
+            lng: auth.customer?.longitude,
+          );
+      if (auth.customer != null) {
+        context.read<OrderProvider>().watchOrders(auth.customer!.id);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   _buildHomeTab(customer, orders),
                   _buildOrdersTab(orders),
-                  _buildRepaymentsTab(),
+                  const RepaymentsScreen(),
                   _buildProfileTab(customer, auth),
                 ],
               ),
@@ -52,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ── HOME TAB ──────────────────────────────────────────────────────
   Widget _buildHomeTab(CustomerModel customer, OrderProvider orders) {
     return SingleChildScrollView(
       child: Column(
@@ -67,7 +84,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 20),
                 _buildHowItWorks(),
                 const SizedBox(height: 20),
-                _buildRecentOrdersSection(orders),
+                _buildVendorPreview(),
+                const SizedBox(height: 20),
+                _buildRecentOrders(orders),
               ],
             ),
           ),
@@ -99,78 +118,76 @@ class _HomeScreenState extends State<HomeScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    greeting,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.gray400,
-                        ),
-                  ),
-                  const SizedBox(height: 2),
+                  Text(greeting,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.gray400,
+                          )),
                   Text(
                     customer.name.split(' ').first,
                     style: Theme.of(context)
                         .textTheme
                         .displayMedium
-                        ?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 22,
-                        ),
+                        ?.copyWith(color: AppColors.white, fontSize: 22),
                   ),
                 ],
               ),
               const Spacer(),
-              Stack(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.orange.withValues(alpha: 0.2),
-                      shape: BoxShape.circle,
+              GestureDetector(
+                onTap: () => _showNotifications(context),
+                child: Stack(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppColors.orange.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.notifications_outlined,
+                          color: AppColors.orange, size: 22),
                     ),
-                    child: const Icon(
-                      Icons.notifications_outlined,
-                      color: AppColors.orange,
-                      size: 22,
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: AppColors.orange,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
           const SizedBox(height: 20),
           Row(
             children: [
-              _headerStat(
-                label: 'Credit limit',
-                value: customer.bankApprovedLimit != null
-                    ? 'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'
-                    : 'Pending',
-              ),
+              _headerStat('Credit limit',
+                  customer.bankApprovedLimit != null
+                      ? 'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'
+                      : 'Pending'),
               Container(
-                width: 1,
-                height: 36,
-                color: AppColors.gray600,
-                margin: const EdgeInsets.symmetric(horizontal: 20),
-              ),
+                  width: 1,
+                  height: 36,
+                  color: AppColors.gray600,
+                  margin: const EdgeInsets.symmetric(horizontal: 20)),
               _headerStat(
-                label: 'Available',
-                value: customer.isBankApproved
-                    ? 'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}'
-                    : 'Pending',
-                valueColor: AppColors.success,
-              ),
+                  'Available',
+                  customer.isBankApproved
+                      ? 'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}'
+                      : 'Pending',
+                  valueColor: AppColors.success),
               Container(
-                width: 1,
-                height: 36,
-                color: AppColors.gray600,
-                margin: const EdgeInsets.symmetric(horizontal: 20),
-              ),
-              _headerStat(
-                label: 'Used',
-                value:
-                    'KES ${customer.bankCreditUsed.toStringAsFixed(0)}',
-              ),
+                  width: 1,
+                  height: 36,
+                  color: AppColors.gray600,
+                  margin: const EdgeInsets.symmetric(horizontal: 20)),
+              _headerStat('Used',
+                  'KES ${customer.bankCreditUsed.toStringAsFixed(0)}'),
             ],
           ),
         ],
@@ -178,39 +195,31 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _headerStat({
-    required String label,
-    required String value,
-    Color? valueColor,
-  }) {
+  Widget _headerStat(String label, String value, {Color? valueColor}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: AppColors.gray400,
-                fontSize: 11,
-              ),
-        ),
+        Text(label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.gray400,
+                  fontSize: 11,
+                )),
         const SizedBox(height: 4),
-        Text(
-          value,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: valueColor ?? AppColors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
-        ),
+        Text(value,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: valueColor ?? AppColors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                )),
       ],
     );
   }
 
   Widget _buildCreditCard(CustomerModel customer) {
-    final usedPercent = customer.bankApprovedLimit != null &&
-            customer.bankApprovedLimit! > 0
-        ? customer.bankCreditUsed / customer.bankApprovedLimit!
-        : 0.0;
+    final usedPercent =
+        customer.bankApprovedLimit != null && customer.bankApprovedLimit! > 0
+            ? customer.bankCreditUsed / customer.bankApprovedLimit!
+            : 0.0;
 
     return Container(
       width: double.infinity,
@@ -229,8 +238,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: customer.isBankApproved
                       ? AppColors.success.withValues(alpha: 0.2)
@@ -254,10 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       customer.isBankApproved
                           ? 'Credit active'
                           : 'Pending approval',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: customer.isBankApproved
                                 ? AppColors.success
                                 : AppColors.warning,
@@ -274,13 +280,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          Text(
-            'Available credit',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400,
-                  fontSize: 12,
-                ),
-          ),
+          Text('Available credit',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400,
+                    fontSize: 12,
+                  )),
           const SizedBox(height: 4),
           Text(
             customer.isBankApproved
@@ -288,7 +292,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 : 'Awaiting bank approval',
             style: Theme.of(context).textTheme.displayLarge?.copyWith(
                   color: AppColors.white,
-                  fontSize: customer.isBankApproved ? 36 : 22,
+                  fontSize: customer.isBankApproved ? 36 : 20,
                   fontWeight: FontWeight.w800,
                 ),
           ),
@@ -298,8 +302,8 @@ class _HomeScreenState extends State<HomeScreen> {
             child: LinearProgressIndicator(
               value: usedPercent,
               backgroundColor: AppColors.white.withValues(alpha: 0.1),
-              valueColor: const AlwaysStoppedAnimation<Color>(
-                  AppColors.orange),
+              valueColor:
+                  const AlwaysStoppedAnimation<Color>(AppColors.orange),
               minHeight: 6,
             ),
           ),
@@ -317,12 +321,11 @@ class _HomeScreenState extends State<HomeScreen> {
               if (customer.partnerBankName.isNotEmpty)
                 Text(
                   'via ${customer.partnerBankName}',
-                  style:
-                      Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.orange,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.orange,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
                 ),
             ],
           ),
@@ -334,12 +337,18 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildOrderButton(CustomerModel customer) {
     final canOrder = customer.isBankApproved;
     return GestureDetector(
-      onTap: canOrder ? () => context.go('/order') : null,
+      onTap: () {
+        if (canOrder) {
+          context.go('/order');
+        } else {
+          context.go('/credit-application');
+        }
+      },
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: canOrder ? AppColors.orange : AppColors.gray400,
+          color: canOrder ? AppColors.orange : AppColors.navy,
           borderRadius: BorderRadius.circular(20),
           boxShadow: canOrder
               ? [
@@ -360,11 +369,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: AppColors.white.withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.local_fire_department_rounded,
-                color: AppColors.white,
-                size: 28,
-              ),
+              child: const Icon(Icons.local_fire_department_rounded,
+                  color: AppColors.white, size: 28),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -372,18 +378,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    canOrder ? 'Order gas now' : 'Awaiting bank approval',
-                    style:
-                        Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: AppColors.white,
-                              fontSize: 18,
-                            ),
+                    canOrder ? 'Order gas now' : 'Apply for gas credit',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: AppColors.white,
+                          fontSize: 18,
+                        ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     canOrder
                         ? 'Delivered to your door · Bank pays vendor'
-                        : 'You will be notified once approved',
+                        : 'Add guarantors to get your credit limit',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.white.withValues(alpha: 0.8),
                           fontSize: 12,
@@ -392,9 +397,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            if (canOrder)
-              const Icon(Icons.arrow_forward_ios_rounded,
-                  color: AppColors.white, size: 18),
+            const Icon(Icons.arrow_forward_ios_rounded,
+                color: AppColors.white, size: 18),
           ],
         ),
       ),
@@ -405,24 +409,22 @@ class _HomeScreenState extends State<HomeScreen> {
     final steps = [
       _HowStep(Icons.shopping_cart_outlined, 'Order', 'Pick size & vendor',
           AppColors.orange),
-      _HowStep(Icons.local_shipping_outlined, 'Delivery',
-          'Bank pays vendor', AppColors.navy),
-      _HowStep(Icons.pin_outlined, 'PIN', 'Confirm delivery',
-          AppColors.success),
-      _HowStep(Icons.payment_outlined, 'Repay', 'Via M-Pesa',
-          AppColors.warning),
+      _HowStep(Icons.local_shipping_outlined, 'Delivery', 'Bank pays vendor',
+          AppColors.navy),
+      _HowStep(
+          Icons.pin_outlined, 'PIN', 'Confirm delivery', AppColors.success),
+      _HowStep(
+          Icons.payment_outlined, 'Repay', 'Via M-Pesa', AppColors.warning),
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'How it works',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w700,
-              ),
-        ),
+        Text('How it works',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.navy,
+                  fontWeight: FontWeight.w700,
+                )),
         const SizedBox(height: 12),
         Row(
           children: steps.asMap().entries.map((e) {
@@ -441,8 +443,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: step.color.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: Icon(step.icon,
-                              color: step.color, size: 22),
+                          child:
+                              Icon(step.icon, color: step.color, size: 22),
                         ),
                         const SizedBox(height: 6),
                         Text(step.title,
@@ -479,75 +481,225 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRecentOrdersSection(OrderProvider orders) {
+  Widget _buildVendorPreview() {
+    final vendors = context.watch<VendorProvider>().onlineVendors;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text(
-              'Recent orders',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.navy,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
+            Text('Gas vendors near you',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w700,
+                    )),
             const Spacer(),
-            GestureDetector(
-              onTap: () => setState(() => _currentTab = 1),
-              child: Text(
-                'See all',
+            Text('${vendors.length} online',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.orange,
+                      color: AppColors.success,
                       fontWeight: FontWeight.w600,
-                    ),
-              ),
-            ),
+                    )),
           ],
         ),
         const SizedBox(height: 12),
-        orders.orders.isEmpty
-            ? _buildEmptyOrders()
-            : Column(
-                children: orders.orders
-                    .take(3)
-                    .map((o) => _orderTile(o))
-                    .toList(),
-              ),
+        SizedBox(
+          height: 185,
+          child: vendors.isEmpty
+              ? Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.gray200),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.store_outlined,
+                          size: 36, color: AppColors.gray400),
+                      const SizedBox(height: 8),
+                      Text('No vendors online yet',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: AppColors.gray400)),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: vendors.length,
+                  itemBuilder: (_, i) => _vendorCard(vendors[i]),
+                ),
+        ),
       ],
     );
   }
 
-  Widget _buildEmptyOrders() {
+  Widget _vendorCard(VendorModel vendor) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(32),
+      width: 190,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.gray200),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.receipt_long_outlined,
-              size: 48, color: AppColors.gray400),
-          const SizedBox(height: 12),
-          Text('No orders yet',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.gray600,
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: AppColors.orange,
+                child: Text(vendor.businessName[0],
+                    style: const TextStyle(
+                        color: AppColors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(vendor.businessName,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              color: AppColors.navy,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                            ),
+                        overflow: TextOverflow.ellipsis),
+                    Text(vendor.distance,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                                color: AppColors.gray400, fontSize: 10)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Divider(height: 1, color: AppColors.gray200),
+          const SizedBox(height: 8),
+          ...vendor.listings
+              .where((l) => l.available)
+              .map((l) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.local_fire_department_rounded,
+                            color: AppColors.orange, size: 11),
+                        const SizedBox(width: 4),
+                        Text(l.size,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 11)),
+                        const Spacer(),
+                        Text('KES ${l.price.toStringAsFixed(0)}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                    color: AppColors.orange,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 11)),
+                      ],
+                    ),
                   )),
-          const SizedBox(height: 4),
-          Text('Your first gas order will appear here',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400,
-                  )),
-          const SizedBox(height: 20),
-          OutlinedButton(
-            onPressed: () => context.go('/order'),
-            child: const Text('Place first order'),
+          const Spacer(),
+          Row(
+            children: [
+              const Icon(Icons.star_rounded,
+                  color: AppColors.warning, size: 11),
+              const SizedBox(width: 2),
+              Text('${vendor.rating}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.navy,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600)),
+              const Spacer(),
+              const Icon(Icons.access_time_rounded,
+                  color: AppColors.gray400, size: 10),
+              const SizedBox(width: 2),
+              Text(vendor.deliveryTime,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray400, fontSize: 10)),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildRecentOrders(OrderProvider orders) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('Recent orders',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w700,
+                    )),
+            const Spacer(),
+            GestureDetector(
+              onTap: () => setState(() => _currentTab = 1),
+              child: Text('See all',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.orange,
+                        fontWeight: FontWeight.w600,
+                      )),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        orders.orders.isEmpty
+            ? Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.gray200),
+                ),
+                child: Column(
+                  children: [
+                    const Icon(Icons.receipt_long_outlined,
+                        size: 48, color: AppColors.gray400),
+                    const SizedBox(height: 12),
+                    Text('No orders yet',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: AppColors.gray600)),
+                    const SizedBox(height: 4),
+                    Text('Your gas orders will appear here',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.gray400)),
+                  ],
+                ),
+              )
+            : Column(
+                children: orders.orders
+                    .take(3)
+                    .map((o) => _orderTile(o))
+                    .toList()),
+      ],
     );
   }
 
@@ -555,7 +707,6 @@ class _HomeScreenState extends State<HomeScreen> {
     Color statusColor;
     IconData statusIcon;
     String statusLabel;
-
     switch (order.status) {
       case OrderStatus.delivered:
         statusColor = AppColors.success;
@@ -567,17 +718,11 @@ class _HomeScreenState extends State<HomeScreen> {
         statusIcon = Icons.local_shipping_rounded;
         statusLabel = 'On the way';
         break;
-      case OrderStatus.pending:
+      default:
         statusColor = AppColors.warning;
         statusIcon = Icons.hourglass_top_rounded;
         statusLabel = 'Pending';
-        break;
-      default:
-        statusColor = AppColors.gray400;
-        statusIcon = Icons.receipt_outlined;
-        statusLabel = 'Processing';
     }
-
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -602,19 +747,14 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '${order.listing.size} — ${order.vendorName}',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontSize: 14,
-                        color: AppColors.navy,
-                      ),
-                ),
-                Text(
-                  order.orderId,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray400,
-                      ),
-                ),
+                Text('${order.listing.size} — ${order.vendorName}',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontSize: 14, color: AppColors.navy)),
+                Text(order.orderId,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: AppColors.gray400)),
               ],
             ),
           ),
@@ -622,28 +762,23 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                'KES ${order.listing.customerRepayment.toStringAsFixed(0)}',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  'KES ${order.listing.customerRepayment.toStringAsFixed(0)}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,
                       color: AppColors.navy,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
+                      fontWeight: FontWeight.w700)),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
-                  statusLabel,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                child: Text(statusLabel,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: statusColor,
                         fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
+                        fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -659,14 +794,12 @@ class _HomeScreenState extends State<HomeScreen> {
         Container(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
           color: AppColors.navy,
-          child: Row(
-            children: [
-              Text('My Orders',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.white,
-                      )),
-            ],
-          ),
+          child: Row(children: [
+            Text('My Orders',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppColors.white,
+                    )),
+          ]),
         ),
         Expanded(
           child: orders.orders.isEmpty
@@ -684,8 +817,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ?.copyWith(color: AppColors.gray600)),
                       const SizedBox(height: 24),
                       Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 48),
+                        padding: const EdgeInsets.symmetric(horizontal: 48),
                         child: ElevatedButton(
                           onPressed: () => context.go('/order'),
                           child: const Text('Order gas now'),
@@ -697,17 +829,11 @@ class _HomeScreenState extends State<HomeScreen> {
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
                   itemCount: orders.orders.length,
-                  itemBuilder: (context, i) =>
-                      _orderTile(orders.orders[i]),
+                  itemBuilder: (_, i) => _orderTile(orders.orders[i]),
                 ),
         ),
       ],
     );
-  }
-
-  // ── REPAYMENTS TAB ────────────────────────────────────────────────
-  Widget _buildRepaymentsTab() {
-    return const RepaymentsScreen();
   }
 
   // ── PROFILE TAB ───────────────────────────────────────────────────
@@ -728,26 +854,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 CircleAvatar(
                   radius: 40,
                   backgroundColor: AppColors.orange,
-                  child: Text(
-                    customer.name[0],
-                    style: const TextStyle(
-                      color: AppColors.white,
-                      fontSize: 32,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                  child: Text(customer.name[0],
+                      style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.w700)),
                 ),
                 const SizedBox(height: 12),
                 Text(customer.name,
-                    style:
-                        Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: AppColors.white,
-                            )),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(color: AppColors.white)),
                 const SizedBox(height: 4),
                 Text(customer.phone,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.gray400,
-                        )),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: AppColors.gray400)),
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -777,8 +901,8 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                _profileTile(
-                    Icons.badge_outlined, 'National ID', customer.nationalId),
+                _profileTile(Icons.badge_outlined, 'National ID',
+                    customer.nationalId),
                 _profileTile(Icons.location_on_outlined, 'Location',
                     '${customer.estate}, ${customer.county}'),
                 _profileTile(Icons.people_outline_rounded, 'Guarantors',
@@ -792,12 +916,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       'Credit limit',
                       'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'),
                 const SizedBox(height: 8),
-                _profileAction(
-                    Icons.lock_outline_rounded, 'Change password'),
-                _profileAction(
-                    Icons.help_outline_rounded, 'Help & support'),
-                _profileAction(
-                    Icons.info_outline_rounded, 'About MobiGas'),
+                _profileAction(Icons.lock_outline_rounded, 'Change password',
+                    onTap: () => _showChangePassword(context)),
+                _profileAction(Icons.people_outline_rounded, 'My guarantors',
+                    onTap: () => context.go('/credit-application')),
+                _profileAction(Icons.help_outline_rounded, 'Help & support',
+                    onTap: () => _showHelp(context)),
+                _profileAction(Icons.info_outline_rounded, 'About MobiGas',
+                    onTap: () => _showAbout(context)),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
                   onPressed: () {
@@ -833,21 +959,21 @@ class _HomeScreenState extends State<HomeScreen> {
           Icon(icon, color: AppColors.orange, size: 20),
           const SizedBox(width: 12),
           Text(label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.gray600,
-                  )),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: AppColors.gray600)),
           const Spacer(),
           Text(value,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.navy,
-                    fontWeight: FontWeight.w600,
-                  )),
+                  color: AppColors.navy, fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
 
-  Widget _profileAction(IconData icon, String label) {
+  Widget _profileAction(IconData icon, String label,
+      {VoidCallback? onTap}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
@@ -860,16 +986,18 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         leading: Icon(icon, color: AppColors.navy, size: 20),
         title: Text(label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.navy,
-                )),
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: AppColors.navy)),
         trailing: const Icon(Icons.arrow_forward_ios_rounded,
             size: 14, color: AppColors.gray400),
-        onTap: () {},
+        onTap: onTap ?? () {},
       ),
     );
   }
 
+  // ── BOTTOM NAV ────────────────────────────────────────────────────
   Widget _buildBottomNav() {
     final items = [
       _NavItem(Icons.home_outlined, Icons.home_rounded, 'Home'),
@@ -916,27 +1044,234 @@ class _HomeScreenState extends State<HomeScreen> {
                         size: 24,
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        item.label,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color: isActive
-                                  ? AppColors.orange
-                                  : AppColors.gray400,
-                              fontSize: 10,
-                              fontWeight: isActive
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                            ),
-                      ),
+                      Text(item.label,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: isActive
+                                    ? AppColors.orange
+                                    : AppColors.gray400,
+                                fontSize: 10,
+                                fontWeight: isActive
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              )),
                     ],
                   ),
                 ),
               );
             }).toList(),
           ),
+        ),
+      ),
+    );
+  }
+
+  // ── MODALS ────────────────────────────────────────────────────────
+  void _showNotifications(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        height: MediaQuery.of(context).size.height * 0.6,
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('Notifications',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(color: AppColors.navy)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Close',
+                      style: TextStyle(color: AppColors.orange)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.notifications_none_rounded,
+                        size: 64, color: AppColors.gray400),
+                    const SizedBox(height: 12),
+                    Text('No notifications yet',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: AppColors.gray600)),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Order updates and payment reminders\nwill appear here',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.gray400),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showChangePassword(BuildContext context) {
+    final controller = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Padding(
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Change password',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(color: AppColors.navy)),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: controller,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  hintText: 'New password',
+                  prefixIcon: Icon(Icons.lock_outline_rounded,
+                      color: AppColors.gray400, size: 20),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Update password'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showHelp(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Help & support',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(color: AppColors.navy)),
+            const SizedBox(height: 16),
+            ListTile(
+              leading:
+                  const Icon(Icons.phone_outlined, color: AppColors.orange),
+              title: const Text('Call us'),
+              subtitle: const Text('0800 000 000'),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.email_outlined, color: AppColors.orange),
+              title: const Text('Email us'),
+              subtitle: const Text('support@mobigas.co.ke'),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.chat_outlined, color: AppColors.orange),
+              title: const Text('WhatsApp'),
+              subtitle: const Text('+254 700 000 000'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAbout(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: AppColors.orange,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.local_fire_department_rounded,
+                  color: AppColors.white, size: 34),
+            ),
+            const SizedBox(height: 16),
+            Text('MobiGas',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: AppColors.navy, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Text('Cook now, pay later',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: AppColors.gray600)),
+            const SizedBox(height: 4),
+            Text('Version 1.0.0',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppColors.gray400)),
+            const SizedBox(height: 16),
+            Text(
+              'MobiGas connects you with local gas vendors and partner banks to get cooking gas on credit. Cook now, repay within 30 days via M-Pesa.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: AppColors.gray600, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
       ),
     );

@@ -130,6 +130,51 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> submitCreditApplication({
+    required List<GuarantorModel> guarantors,
+  }) async {
+    if (_customer == null) return;
+
+    // Update customer with guarantors
+    _customer = CustomerModel(
+      id: _customer!.id,
+      name: _customer!.name,
+      phone: _customer!.phone,
+      nationalId: _customer!.nationalId,
+      county: _customer!.county,
+      area: _customer!.area,
+      estate: _customer!.estate,
+      latitude: _customer!.latitude,
+      longitude: _customer!.longitude,
+      bankApprovedLimit: _customer!.bankApprovedLimit,
+      bankCreditUsed: _customer!.bankCreditUsed,
+      bankStatus: BankApprovalStatus.pending,
+      partnerBankName: _customer!.partnerBankName,
+      guarantors: guarantors,
+    );
+
+    // Save guarantors to Firestore
+    await FirestoreService.updateUserBankStatus(
+      uid: _customer!.id,
+      status: BankApprovalStatus.pending,
+    );
+
+    // Submit KYC to bank application queue
+    await FirestoreService.submitBankApplication(
+      customerId: _customer!.id,
+      name: _customer!.name,
+      phone: _customer!.phone,
+      nationalId: _customer!.nationalId,
+      county: _customer!.county,
+      area: _customer!.area,
+      guarantors: guarantors
+          .map((g) => {'name': g.name, 'phone': g.phone})
+          .toList(),
+    );
+
+    notifyListeners();
+  }
+
   Future<void> resetPassword(String email) async {
     await FirebaseService.auth.sendPasswordResetEmail(email: email);
   }
