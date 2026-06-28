@@ -35,6 +35,7 @@ android {
         release {
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
+            isShrinkResources = false
         }
         debug {
             signingConfig = signingConfigs.getByName("debug")
