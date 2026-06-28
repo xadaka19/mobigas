@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:io';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
@@ -63,6 +65,7 @@ class AuthProvider extends ChangeNotifier {
     required String name,
     required String email,
     required String phone,
+    File? selfieFile,
     required String nationalId,
     required String county,
     required String area,
@@ -104,8 +107,22 @@ class AuthProvider extends ChangeNotifier {
         guarantors: guarantors,
       );
 
+      // Upload selfie to Firebase Storage
+      String? selfieUrl;
+      if (selfieFile != null) {
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('selfies')
+            .child(uid);
+        await ref.putFile(selfieFile);
+        selfieUrl = await ref.getDownloadURL();
+      }
+
       // Save to Firestore
       await FirestoreService.createUser(customer);
+      if (selfieUrl != null) {
+        await FirebaseService.users.doc(uid).update({'selfieUrl': selfieUrl});
+      }
 
       // Submit KYC to bank application queue
       await FirestoreService.submitBankApplication(

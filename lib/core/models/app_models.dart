@@ -85,6 +85,7 @@ class CustomerModel {
   final BankApprovalStatus bankStatus;
   final String partnerBankName;
   final List<GuarantorModel> guarantors;
+  final String? selfieUrl;
 
   const CustomerModel({
     required this.id,
@@ -101,6 +102,7 @@ class CustomerModel {
     required this.bankStatus,
     required this.partnerBankName,
     required this.guarantors,
+    this.selfieUrl,
   });
 
   double get bankCreditAvailable =>

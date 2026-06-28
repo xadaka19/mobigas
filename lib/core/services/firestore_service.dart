@@ -81,6 +81,7 @@ class FirestoreService {
                 phone: g['phone'] ?? '',
               ))
           .toList(),
+      selfieUrl: data['selfieUrl'],
     );
   }
 

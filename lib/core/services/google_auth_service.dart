@@ -5,9 +5,14 @@ import 'package:mobigas/core/services/firebase_service.dart';
 
 class GoogleAuthService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+  static const String _serverClientId =
+      '370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com';
 
   static Future<UserCredential?> signInWithGoogle() async {
     try {
+      await _googleSignIn.initialize(
+        serverClientId: _serverClientId,
+      );
       final GoogleSignInAccount googleUser =
           await _googleSignIn.authenticate();
 

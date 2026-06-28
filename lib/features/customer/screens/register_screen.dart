@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import 'package:provider/provider.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
 
@@ -21,6 +23,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _emailController = TextEditingController();
+  File? _selfie;
+  bool _isCapturingSelfie = false;
   final _estateController = TextEditingController();
   final _areaController = TextEditingController();
 
@@ -69,6 +73,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _showError('Please enter a valid National ID number');
         return;
       }
+      if (_selfie == null) {
+        _showError('Please take a selfie for identity verification');
+        return;
+      }
     }
     if (_currentStep == 1) {
       if (_phoneController.text.trim().length < 9) {
@@ -112,6 +120,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
+  }
+
+  Future<void> _captureSelfie() async {
+    setState(() => _isCapturingSelfie = true);
+    try {
+      final picker = ImagePicker();
+      final photo = await picker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.front,
+        imageQuality: 80,
+        maxWidth: 800,
+        maxHeight: 800,
+      );
+      if (photo != null) {
+        setState(() => _selfie = File(photo.path));
+      }
+    } catch (e) {
+      _showError('Could not access camera. Please allow camera access.');
+    }
+    setState(() => _isCapturingSelfie = false);
   }
 
   Future<void> _detectLocation() async {
@@ -179,6 +207,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         longitude: _longitude ?? 0.0,
         password: _passwordController.text,
         guarantors: [],
+        selfieFile: _selfie,
       );
 
       if (auth.error != null) {
@@ -382,13 +411,143 @@ class _RegisterScreenState extends State<RegisterScreen> {
             LengthLimitingTextInputFormatter(8),
           ],
         ),
+        const SizedBox(height: 20),
+        _label('Selfie photo'),
+        _buildSelfieCapture(),
         const SizedBox(height: 16),
         _infoCard(
           icon: Icons.info_outline_rounded,
           text:
-              'Your details are used to create your MobiGas account. We do not sell your data.',
+              'Your selfie is used for identity verification only. It is stored securely and never shared.',
         ),
       ],
+    );
+  }
+
+  Widget _buildSelfieCapture() {
+    return GestureDetector(
+      onTap: _isCapturingSelfie ? null : _captureSelfie,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: double.infinity,
+        height: 160,
+        decoration: BoxDecoration(
+          color: _selfie != null
+              ? Colors.transparent
+              : AppColors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: _selfie != null
+                ? AppColors.success
+                : AppColors.gray200,
+            width: _selfie != null ? 2 : 1,
+          ),
+        ),
+        child: _selfie != null
+            ? Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.file(
+                      _selfie!,
+                      width: double.infinity,
+                      height: 160,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: _captureSelfie,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.navy.withValues(alpha: 0.7),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.refresh_rounded,
+                            color: AppColors.white, size: 18),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle_rounded,
+                              color: AppColors.white, size: 14),
+                          const SizedBox(width: 4),
+                          Text('Selfie captured',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: AppColors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : _isCapturingSelfie
+                ? const Center(
+                    child: CircularProgressIndicator(
+                        color: AppColors.orange),
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: AppColors.orange.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.camera_alt_outlined,
+                          color: AppColors.orange,
+                          size: 32,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Take a selfie',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(
+                              color: AppColors.navy,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Front camera · Make sure your face is clearly visible',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              color: AppColors.gray400,
+                              fontSize: 11,
+                            ),
+                      ),
+                    ],
+                  ),
+      ),
     );
   }
 

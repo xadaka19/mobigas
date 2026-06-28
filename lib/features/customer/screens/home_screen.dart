@@ -851,14 +851,43 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             child: Column(
               children: [
-                CircleAvatar(
-                  radius: 40,
-                  backgroundColor: AppColors.orange,
-                  child: Text(customer.name[0],
-                      style: const TextStyle(
-                          color: AppColors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.w700)),
+                GestureDetector(
+                  onTap: customer.selfieUrl != null
+                      ? () => _showSelfie(context, customer.selfieUrl!)
+                      : null,
+                  child: Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 40,
+                        backgroundColor: AppColors.orange,
+                        backgroundImage: customer.selfieUrl != null
+                            ? NetworkImage(customer.selfieUrl!)
+                            : null,
+                        child: customer.selfieUrl == null
+                            ? Text(customer.name[0],
+                                style: const TextStyle(
+                                    color: AppColors.white,
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.w700))
+                            : null,
+                      ),
+                      if (customer.selfieUrl != null)
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              color: AppColors.success,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.verified_rounded,
+                                color: AppColors.white, size: 14),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Text(customer.name,
@@ -1069,6 +1098,64 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ── MODALS ────────────────────────────────────────────────────────
+  void _showSelfie(BuildContext context, String selfieUrl) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                selfieUrl,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) =>
+                    progress == null
+                        ? child
+                        : const Center(
+                            child: CircularProgressIndicator(
+                                color: AppColors.orange)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.verified_rounded,
+                      color: AppColors.white, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Identity verified',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: AppColors.white,
+                            fontWeight: FontWeight.w600,
+                          )),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close',
+                  style: TextStyle(color: AppColors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showGuarantors(BuildContext context, CustomerModel customer) {
     showModalBottomSheet(
       context: context,
