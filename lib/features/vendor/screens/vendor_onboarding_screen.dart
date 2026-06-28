@@ -34,6 +34,7 @@ class _VendorOnboardingScreenState extends State<VendorOnboardingScreen> {
   final List<String> _availableBrands = [
     'Total', 'K-Gas', 'Afrigaz', 'Orion', 'Pro Gas', 'Hashi'
   ];
+  final TextEditingController _customBrandController = TextEditingController();
 
   final List<String> _selectedSizes = [];
   final List<String> _availableSizes = ['3kg', '6kg', '13kg'];
@@ -48,6 +49,7 @@ class _VendorOnboardingScreenState extends State<VendorOnboardingScreen> {
     _idController.dispose();
     _areaController.dispose();
     _estateController.dispose();
+    _customBrandController.dispose();
     super.dispose();
   }
 
@@ -530,6 +532,47 @@ class _VendorOnboardingScreenState extends State<VendorOnboardingScreen> {
               ),
             );
           }).toList(),
+        ),
+        const SizedBox(height: 12),
+        // Custom brand input
+        Row(
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _customBrandController,
+                textCapitalization: TextCapitalization.words,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: AppColors.navy,
+                    ),
+                decoration: const InputDecoration(
+                  hintText: 'Add other brand...',
+                  prefixIcon: Icon(Icons.add_rounded,
+                      color: AppColors.gray400, size: 20),
+                  contentPadding: EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () {
+                final brand = _customBrandController.text.trim();
+                if (brand.isNotEmpty &&
+                    !_selectedBrands.contains(brand) &&
+                    !_availableBrands.contains(brand)) {
+                  setState(() {
+                    _selectedBrands.add(brand);
+                    _customBrandController.clear();
+                  });
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(60, 50),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              child: const Text('Add'),
+            ),
+          ],
         ),
         const SizedBox(height: 28),
         _label('Cylinder sizes you stock'),
