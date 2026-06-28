@@ -29,5 +29,4 @@ ios/Flutter/Flutter.podspec
 # Environment
 .env
 *.env
-google-services.json
 GoogleService-Info.plist
