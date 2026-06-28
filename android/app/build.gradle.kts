@@ -14,6 +14,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = System.getenv("MYAPP_UPLOAD_KEY_ALIAS") ?: "mobigaskey"
+            keyPassword = System.getenv("MYAPP_UPLOAD_KEY_PASSWORD") ?: ""
+            storeFile = file(System.getenv("MYAPP_UPLOAD_STORE_FILE") ?: "mobigas-release-key.jks")
+            storePassword = System.getenv("MYAPP_UPLOAD_STORE_PASSWORD") ?: ""
+        }
+    }
+
     defaultConfig {
         applicationId = "com.mobigas.mobigas"
         minSdk = 23
@@ -24,6 +33,10 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+        }
+        debug {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
