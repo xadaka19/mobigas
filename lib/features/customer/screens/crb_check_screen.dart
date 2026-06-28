@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/providers/auth_provider.dart';
 
 class CrbCheckScreen extends StatefulWidget {
   const CrbCheckScreen({super.key});
@@ -17,8 +19,6 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
 
   _ApprovalState _state = _ApprovalState.checking;
   int _currentStep = 0;
-  double _bankApprovedLimit = 0;
-  String _approvedBank = '';
 
   @override
   void initState() {
@@ -41,6 +41,8 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
   }
 
   Future<void> _runCheck() async {
+    final auth = context.read<AuthProvider>();
+
     await Future.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
     setState(() => _currentStep = 1);
@@ -56,13 +58,13 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
     await Future.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
 
-    // TODO: real bank API call
-    _bankApprovedLimit = 3200;
-    _approvedBank = 'Stima SACCO';
+    // Call bank approval via AuthProvider
+    // TODO: real bank API — for now uses mock in provider
+    await auth.requestBankApproval();
 
     _pulseController.stop();
 
-    if (_bankApprovedLimit > 0) {
+    if (auth.customer?.isBankApproved == true) {
       setState(() => _state = _ApprovalState.approved);
       _checkController.forward();
     } else {
@@ -79,6 +81,8 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
 
   @override
   Widget build(BuildContext context) {
+    final customer = context.watch<AuthProvider>().customer;
+
     return Scaffold(
       backgroundColor: AppColors.navy,
       body: SafeArea(
@@ -86,8 +90,11 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
           padding: const EdgeInsets.all(32),
           child: _state == _ApprovalState.checking
               ? _buildChecking()
-              : _state == _ApprovalState.approved
-                  ? _buildApproved()
+              : _state == _ApprovalState.approved && customer != null
+                  ? _buildApproved(
+                      customer.partnerBankName,
+                      customer.bankApprovedLimit ?? 0,
+                    )
                   : _buildRejected(),
         ),
       ),
@@ -152,8 +159,8 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
           return AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             margin: const EdgeInsets.only(bottom: 12),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: isDone
                   ? AppColors.success.withValues(alpha: 0.1)
@@ -195,14 +202,16 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
                 Expanded(
                   child: Text(
                     steps[i],
-                    style:
-                        Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: isDone
-                                  ? AppColors.success
-                                  : isActive
-                                      ? AppColors.white
-                                      : AppColors.gray600,
-                            ),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(
+                          color: isDone
+                              ? AppColors.success
+                              : isActive
+                                  ? AppColors.white
+                                  : AppColors.gray600,
+                        ),
                   ),
                 ),
               ],
@@ -213,7 +222,7 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
     );
   }
 
-  Widget _buildApproved() {
+  Widget _buildApproved(String bankName, double limit) {
     return SingleChildScrollView(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -242,7 +251,7 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            '$_approvedBank has approved your gas credit.',
+            '$bankName has approved your gas credit.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: AppColors.gray400,
@@ -269,7 +278,7 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'KES ${_bankApprovedLimit.toStringAsFixed(0)}',
+                  'KES ${limit.toStringAsFixed(0)}',
                   style: Theme.of(context)
                       .textTheme
                       .displayLarge
@@ -281,16 +290,16 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'financed by $_approvedBank',
+                  'financed by $bankName',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                       ),
                 ),
                 const Divider(height: 24, color: Colors.white12),
                 _approvalRow(Icons.account_balance_outlined,
-                    'Financed by', _approvedBank),
+                    'Financed by', bankName),
                 _approvalRow(Icons.payments_outlined,
-                    'Bank pays vendor directly', 'On delivery'),
+                    '$bankName pays vendor directly', 'On delivery'),
                 _approvalRow(Icons.trending_up_rounded,
                     'Limit grows', 'As you repay on time'),
               ],
@@ -310,7 +319,10 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
               children: [
                 Text(
                   'How it works',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(
                         color: AppColors.white,
                         fontWeight: FontWeight.w700,
                       ),
@@ -318,11 +330,11 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
                 const SizedBox(height: 12),
                 _howRow('1', 'You order gas on the MobiGas app'),
                 _howRow('2',
-                    '$_approvedBank pays the vendor when you confirm delivery with your PIN'),
+                    '$bankName pays the vendor when you confirm delivery with your PIN'),
                 _howRow('3',
-                    'You repay $_approvedBank within 30 days via M-Pesa'),
+                    'You repay $bankName within 30 days via M-Pesa'),
                 _howRow('4',
-                    'Your limit grows automatically as you repay on time'),
+                    'Your limit grows as you repay on time'),
               ],
             ),
           ),
@@ -343,12 +355,13 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
         children: [
           Icon(icon, color: AppColors.orange, size: 16),
           const SizedBox(width: 8),
-          Text(label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400,
-                    fontSize: 12,
-                  )),
-          const Spacer(),
+          Expanded(
+            child: Text(label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray400,
+                      fontSize: 12,
+                    )),
+          ),
           Text(value,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppColors.white,
@@ -420,7 +433,7 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
         ),
         const SizedBox(height: 12),
         Text(
-          'Our partner banks could not approve your application at this time. You can try again after 3 months.',
+          'Our partner banks could not approve your application at this time.',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 color: AppColors.gray400,
@@ -430,8 +443,8 @@ class _CrbCheckScreenState extends State<CrbCheckScreen>
         const SizedBox(height: 40),
         ElevatedButton(
           onPressed: () => context.go('/'),
-          style:
-              ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+          style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error),
           child: const Text('Back to home'),
         ),
       ],

@@ -82,6 +82,37 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> requestBankApproval() async {
+    if (_customer == null) return;
+
+    // TODO: real bank API call
+    // 1. Send customer KYC to partner bank API
+    // 2. Bank runs their own CRB check
+    // 3. Bank returns approved limit + bank name via webhook
+    // 4. Update customer model with bank response
+
+    await Future.delayed(const Duration(seconds: 1));
+
+    // Mock bank response — replace with real API
+    _customer = CustomerModel(
+      id: _customer!.id,
+      name: _customer!.name,
+      phone: _customer!.phone,
+      nationalId: _customer!.nationalId,
+      county: _customer!.county,
+      area: _customer!.area,
+      estate: _customer!.estate,
+      latitude: _customer!.latitude,
+      longitude: _customer!.longitude,
+      bankApprovedLimit: 3200, // from bank API
+      bankCreditUsed: 0,
+      bankStatus: BankApprovalStatus.approved,
+      partnerBankName: 'Partner SACCO', // from bank API
+      guarantors: _customer!.guarantors,
+    );
+    notifyListeners();
+  }
+
   void logout() {
     _state = AuthState.unauthenticated;
     _customer = null;
