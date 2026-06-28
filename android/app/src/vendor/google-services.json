@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "370382275180",
+    "project_id": "mobigas-prod",
+    "storage_bucket": "mobigas-prod.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:370382275180:android:f9b489e0e75dc3ef230e49",
+        "android_client_info": {
+          "package_name": "com.mobigas.vendor"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBbNZ3NtqlahFPNHXDKxoaMNcLA43jX2U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

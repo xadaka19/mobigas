@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.mobigas.mobigas"
+    namespace = "com.mobigas.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,11 +15,25 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.mobigas.mobigas"
         minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    flavorDimensions += "app"
+
+    productFlavors {
+        create("customer") {
+            dimension = "app"
+            applicationId = "com.mobigas.customer"
+            resValue("string", "app_name", "MobiGas")
+        }
+        create("vendor") {
+            dimension = "app"
+            applicationId = "com.mobigas.vendor"
+            resValue("string", "app_name", "MobiGas Vendor")
+        }
     }
 
     buildTypes {
