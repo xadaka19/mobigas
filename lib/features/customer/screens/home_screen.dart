@@ -5,6 +5,7 @@ import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/features/customer/screens/repayments_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -706,47 +707,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── REPAYMENTS TAB ────────────────────────────────────────────────
   Widget _buildRepaymentsTab() {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-          color: AppColors.navy,
-          child: Row(
-            children: [
-              Text('Repayments',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.white,
-                      )),
-            ],
-          ),
-        ),
-        Expanded(
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.account_balance_wallet_outlined,
-                    size: 64, color: AppColors.gray400),
-                const SizedBox(height: 16),
-                Text('No repayments due',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(color: AppColors.gray600)),
-                const SizedBox(height: 8),
-                Text(
-                  'Repayments appear here after you order',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.gray400,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
+    return const RepaymentsScreen();
   }
 
   // ── PROFILE TAB ───────────────────────────────────────────────────
