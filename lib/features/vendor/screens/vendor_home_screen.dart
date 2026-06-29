@@ -985,7 +985,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       _buildStockBoostCard(orders.length, orders),
                     if (FeatureFlags.stockBoostLoan)
                       const SizedBox(height: 20),
-                    Text('\${orders.length} deliveries completed',
+                    Text('${orders.length} deliveries completed',
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -1082,7 +1082,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           Text(
             isEligible
                 ? 'You qualify! Get funding to buy more gas stock and grow your business.'
-                : 'Get a loan to buy bulk gas stock. Repay from delivery earnings.',
+                : 'Deliver consistently for 3 months to unlock a stock loan. '
+                  'Use the app actively — every delivery brings you closer!',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppColors.white.withValues(alpha: 0.85),
                   height: 1.4, fontSize: 12)),
@@ -1121,7 +1122,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
               elevation: 0,
             ),
             child: Text(
-              isEligible ? 'Apply for stock loan' : 'Not yet eligible',
+              isEligible
+                  ? 'Apply for stock loan'
+                  : monthsOnPlatform == 0
+                      ? 'Start delivering to unlock'
+                      : 'Keep delivering — ${3 - monthsOnPlatform} month${(3 - monthsOnPlatform) == 1 ? '' : 's'} to go',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
