@@ -63,6 +63,9 @@ class _StockLoanScreenState extends State<StockLoanScreen> {
     } catch (_) {}
   }
 
+  bool _idConfirmed = false;
+  bool _termsAccepted = false;
+
   Future<void> _submitApplication() async {
     final amount = double.tryParse(_amountController.text);
     if (amount == null || amount <= 0) {
@@ -385,9 +388,136 @@ class _StockLoanScreenState extends State<StockLoanScreen> {
             )),
         const SizedBox(height: 20),
         _infoCard(),
+        const SizedBox(height: 20),
+        // What we share with bank
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: AppColors.white.withValues(alpha: 0.1)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Information shared with partner bank',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      )),
+              const SizedBox(height: 10),
+              _shareRow('Business name',
+                  widget.vendorData['businessName'] ?? ''),
+              _shareRow('Owner name',
+                  widget.vendorData['ownerName'] ?? ''),
+              _shareRow(
+                  widget.vendorData['businessType'] == 'sole'
+                      ? 'National ID'
+                      : 'Business Reg No.',
+                  widget.vendorData['nationalId'] ??
+                      widget.vendorData['businessRegNumber'] ??
+                      ''),
+              _shareRow('M-Pesa number',
+                  widget.vendorData['phone'] ?? ''),
+              _shareRow('Months on platform',
+                  '${widget.monthsOnPlatform} months'),
+              _shareRow('Total deliveries',
+                  '${widget.totalDeliveries}'),
+              _shareRow('Avg monthly revenue',
+                  'KES ${widget.averageMonthlyRevenue.toStringAsFixed(0)}'),
+              _shareRow('Business certificate',
+                  widget.vendorData['certificateUrl'] != null
+                      ? 'Uploaded ✓'
+                      : 'Not uploaded'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Consent checkboxes
+        GestureDetector(
+          onTap: () => setState(() => _idConfirmed = !_idConfirmed),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: _idConfirmed
+                      ? AppColors.orange
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: _idConfirmed
+                        ? AppColors.orange
+                        : AppColors.gray400,
+                  ),
+                ),
+                child: _idConfirmed
+                    ? const Icon(Icons.check_rounded,
+                        color: AppColors.white, size: 14)
+                    : null,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'I confirm my business details and ID information are accurate and I consent to sharing them with MobiGas partner banks for credit assessment.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.gray400,
+                        height: 1.4,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        GestureDetector(
+          onTap: () => setState(() => _termsAccepted = !_termsAccepted),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: _termsAccepted
+                      ? AppColors.orange
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: _termsAccepted
+                        ? AppColors.orange
+                        : AppColors.gray400,
+                  ),
+                ),
+                child: _termsAccepted
+                    ? const Icon(Icons.check_rounded,
+                        color: AppColors.white, size: 14)
+                    : null,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'I understand this is a loan that must be repaid. MobiGas is only a connector — the loan is provided by a partner bank.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.gray400,
+                        height: 1.4,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: _isSubmitting ? null : _submitApplication,
+          onPressed: _isSubmitting || !_idConfirmed || !_termsAccepted
+              ? null
+              : _submitApplication,
           style: ElevatedButton.styleFrom(
               minimumSize: const Size(double.infinity, 52)),
           child: _isSubmitting
@@ -400,6 +530,25 @@ class _StockLoanScreenState extends State<StockLoanScreen> {
               : const Text('Submit application'),
         ),
       ],
+    );
+  }
+
+  Widget _shareRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Text(label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400, fontSize: 12)),
+          const Spacer(),
+          Text(value,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 
