@@ -55,6 +55,25 @@ class GoogleAuthService {
     }
   }
 
+  // Silent sign-in for returning vendors (keeps them logged in)
+  static Future<UserCredential?> signInSilently() async {
+    try {
+      await _ensureInitialized();
+      // Try lightweight auth first (no UI)
+      final future = _googleSignIn.attemptLightweightAuthentication();
+      if (future == null) return null;
+      final googleUser = await future;
+      if (googleUser == null) return null;
+      final googleAuth = googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        idToken: googleAuth.idToken,
+      );
+      return await FirebaseService.auth.signInWithCredential(credential);
+    } catch (e) {
+      return null;
+    }
+  }
+
   static Future<void> signOut() async {
     await _googleSignIn.signOut();
     await FirebaseService.auth.signOut();

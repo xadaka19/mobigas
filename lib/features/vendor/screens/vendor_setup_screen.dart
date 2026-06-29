@@ -62,7 +62,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // Grill kit (6kg only: gas + cylinder + stove + grill)
   final TextEditingController _grillKitPriceController = TextEditingController();
   bool _grillKitAvailable = false;
-  final List<String> _availableBrands = KenyanGasBrands.all;
+  final List<String> _availableBrands = List<String>.from(KenyanGasBrands.all);
   final List<String> _selectedBrands = [];
   final TextEditingController _customBrandController = TextEditingController();
 
@@ -147,9 +147,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   bool get _step2Valid =>
       _selectedBrands.isNotEmpty &&
-      _sizeAvailable.entries
-          .where((e) => e.value)
-          .any((e) => _priceControllers[e.key]!.text.isNotEmpty);
+      _priceControllers.entries
+          .any((e) => _sizeAvailable[e.key] == true && e.value.text.isNotEmpty);
 
   Future<void> _save() async {
     setState(() => _isSaving = true);
@@ -524,10 +523,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             ElevatedButton(
               onPressed: () {
                 final brand = _customBrandController.text.trim();
-                if (brand.isNotEmpty &&
-                    !_selectedBrands.contains(brand)) {
+                if (brand.isNotEmpty) {
                   setState(() {
-                    _selectedBrands.add(brand);
+                    if (!_availableBrands.contains(brand)) {
+                      _availableBrands.add(brand);
+                    }
+                    if (!_selectedBrands.contains(brand)) {
+                      _selectedBrands.add(brand);
+                    }
                     _customBrandController.clear();
                   });
                 }

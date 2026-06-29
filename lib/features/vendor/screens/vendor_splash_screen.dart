@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 
 class VendorSplashScreen extends StatefulWidget {
@@ -37,12 +38,18 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     await Future.delayed(const Duration(milliseconds: 1800));
     if (!mounted) return;
 
+    // Request location permission early
+    final permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      await Geolocator.requestPermission();
+    }
+
+    if (!mounted) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      // Already signed in — go straight to home
-      context.go('/vendor-home');
+      if (mounted) context.go('/vendor-home');
     } else {
-      context.go('/vendor-login');
+      if (mounted) context.go('/vendor-login');
     }
   }
 

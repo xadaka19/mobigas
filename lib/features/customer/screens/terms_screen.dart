@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 
 class TermsScreen extends StatelessWidget {
@@ -7,11 +8,31 @@ class TermsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        } else {
+          context.go('/login');
+        }
+      },
+      child: Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
         backgroundColor: AppColors.navy,
         foregroundColor: AppColors.white,
+        leading: BackButton(
+          color: AppColors.white,
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              context.go('/login');
+            }
+          },
+        ),
         title: Text(
           isPrivacyPolicy ? 'Privacy Policy' : 'Terms of Service',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -24,6 +45,7 @@ class TermsScreen extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: isPrivacyPolicy ? _buildPrivacyPolicy(context) : _buildTerms(context),
       ),
+    ),
     );
   }
 

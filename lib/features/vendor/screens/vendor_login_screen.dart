@@ -106,16 +106,20 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Image.asset(
-                              'assets/icon/google_logo.png',
+                            Container(
                               width: 24,
                               height: 24,
-                              errorBuilder: (context, error, _) => const Text(
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Text(
                                 'G',
+                                textAlign: TextAlign.center,
                                 style: TextStyle(
                                   color: Color(0xFF4285F4),
-                                  fontSize: 20,
+                                  fontSize: 22,
                                   fontWeight: FontWeight.w700,
+                                  height: 1.1,
                                 ),
                               ),
                             ),
