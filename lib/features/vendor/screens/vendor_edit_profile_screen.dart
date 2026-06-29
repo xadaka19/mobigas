@@ -146,10 +146,11 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
         Navigator.pop(context, true); // return true to trigger reload
       }
     } catch (e) {
+      debugPrint('Profile update error: \$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Failed to update. Try again.'),
+            content: Text('Error: \$e'),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),

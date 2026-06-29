@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/widgets/location_picker_widget.dart';
 
 class VendorSetupScreen extends StatefulWidget {
   final Map<String, dynamic>? existingData;
@@ -32,9 +33,6 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late TextEditingController _paybillAccountController;
 
   // Step 2 - Location
-  late TextEditingController _areaController;
-  late TextEditingController _estateController;
-  late TextEditingController _countyController;
 
   // Step 3 - Gas products & prices
   // Refill prices
@@ -62,6 +60,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // Grill kit (6kg only: gas + cylinder + stove + grill)
   final TextEditingController _grillKitPriceController = TextEditingController();
   bool _grillKitAvailable = false;
+
+  // Step 2 - Location (Google Places)
+  String _selectedAddress = '';
+  double _selectedLat = 0.0;
+  double _selectedLng = 0.0;
   final List<String> _availableBrands = List<String>.from(KenyanGasBrands.all);
   final List<String> _selectedBrands = [];
   final TextEditingController _customBrandController = TextEditingController();
@@ -82,9 +85,6 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _paybillController = TextEditingController(text: d['paybillNumber'] ?? '');
     _paybillAccountController = TextEditingController(text: d['paybillAccount'] ?? '');
     _paymentMethod = d['paymentMethod'] ?? 'mpesa';
-    _areaController = TextEditingController(text: d['area'] ?? '');
-    _estateController = TextEditingController(text: d['estate'] ?? '');
-    _countyController = TextEditingController(text: d['county'] ?? '');
 
     // Load existing listings
     final listings = d['listings'] as List? ?? [];
@@ -113,9 +113,6 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _tillController.dispose();
     _paybillController.dispose();
     _paybillAccountController.dispose();
-    _areaController.dispose();
-    _estateController.dispose();
-    _countyController.dispose();
     for (final c in _priceControllers.values) { c.dispose(); }
     for (final c in _fullKitPriceControllers.values) { c.dispose(); }
     _grillKitPriceController.dispose();
@@ -140,10 +137,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return true;
   }
 
-  bool get _step1Valid =>
-      _areaController.text.trim().isNotEmpty &&
-      _estateController.text.trim().isNotEmpty &&
-      _countyController.text.trim().isNotEmpty;
+  bool get _step1Valid => _selectedAddress.isNotEmpty && _selectedLat != 0.0;
 
   bool get _step2Valid =>
       _selectedBrands.isNotEmpty &&
@@ -201,9 +195,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'tillNumber': _tillController.text.trim(),
         'paybillNumber': _paybillController.text.trim(),
         'paybillAccount': _paybillAccountController.text.trim(),
-        'area': _areaController.text.trim(),
-        'estate': _estateController.text.trim(),
-        'county': _countyController.text.trim(),
+        'address': _selectedAddress,
+        'latitude': _selectedLat,
+        'longitude': _selectedLng,
         'brands': _selectedBrands,
         'listings': listings,
         'isVerified': false,
@@ -393,40 +387,50 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // ── STEP 1: LOCATION ─────────────────────────────────────────────
   Widget _buildStep1() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _field('Estate / Street', _estateController,
-            Icons.location_on_outlined,
-            hint: 'e.g. Mirema Drive'),
-        const SizedBox(height: 16),
-        _field('Area / Suburb', _areaController,
-            Icons.location_city_outlined,
-            hint: 'e.g. Kasarani'),
-        const SizedBox(height: 16),
-        _field('County', _countyController,
-            Icons.map_outlined,
-            hint: 'e.g. Nairobi'),
+        Text('Business location',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 4),
+        Text('Search and select your exact business address',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.gray400, fontSize: 12)),
+        const SizedBox(height: 12),
+        LocationPickerWidget(
+          hint: 'e.g. Total Station, Mirema Drive, Nairobi...',
+          darkMode: true,
+          initialValue: _selectedAddress.isNotEmpty ? _selectedAddress : null,
+          onSelected: (address, lat, lng) {
+            setState(() {
+              _selectedAddress = address;
+              _selectedLat = lat;
+              _selectedLng = lng;
+            });
+          },
+        ),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppColors.white.withValues(alpha: 0.05),
+            color: AppColors.orange.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color: AppColors.white.withValues(alpha: 0.1)),
+            border: Border.all(color: AppColors.orange.withValues(alpha: 0.2)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.info_outline_rounded,
-                  color: AppColors.gray400, size: 18),
+              const Icon(Icons.location_on_rounded,
+                  color: AppColors.orange, size: 16),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Your location helps customers near you find your gas business.',
+                  'Your exact location is shared with customers for accurate delivery matching.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray400,
-                        height: 1.4,
-                      ),
+                        color: AppColors.orange, height: 1.4, fontSize: 11),
                 ),
               ),
             ],
@@ -436,7 +440,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     );
   }
 
-  // ── STEP 2: GAS PRODUCTS ─────────────────────────────────────────
+
   Widget _buildStep2() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

@@ -109,10 +109,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         Navigator.pop(context);
       }
     } catch (e) {
+      debugPrint('Profile update error: \$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Failed to update profile. Try again.'),
+            content: Text('Error: \$e'),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
