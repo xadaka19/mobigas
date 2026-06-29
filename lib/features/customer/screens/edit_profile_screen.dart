@@ -22,8 +22,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _nameController;
   late TextEditingController _phoneController;
   String _selectedAddress = '';
-  double _selectedLat = 0;
-  double _selectedLng = 0;
+  double _selectedLat = 0.0;
+  double _selectedLng = 0.0;
 
   @override
   void initState() {
@@ -60,6 +60,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _saveProfile() async {
     setState(() => _isSaving = true);
     final auth = context.read<AuthProvider>();
+    if (!mounted) return;
     final uid = auth.customer?.id;
     if (uid == null) return;
 
@@ -90,7 +91,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (selfieUrl != null) updates['selfieUrl'] = selfieUrl;
 
       await FirebaseService.users.doc(uid).update(updates);
-      await auth.refreshCustomer();
+      if (mounted) await auth.refreshCustomer();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,7 +106,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         Navigator.pop(context);
       }
     } catch (e) {
-      debugPrint('Profile update error: \$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
