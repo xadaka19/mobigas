@@ -116,10 +116,27 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       }
     }
 
-    // Load existing brands
+    // Load custom brands first so they appear in the list
+    final customBrands = d['customBrands'] as List? ?? [];
+    for (final b in customBrands) {
+      final brand = b as String;
+      if (!_availableBrands.contains(brand)) {
+        _availableBrands.add(brand);
+      }
+    }
+
+    // Load existing brands - including custom ones not in default list
     final brands = d['brands'] as List? ?? [];
     for (final b in brands) {
-      if (!_selectedBrands.contains(b)) _selectedBrands.add(b as String);
+      final brand = b as String;
+      // Add to available list if it's a custom brand
+      if (!_availableBrands.contains(brand)) {
+        _availableBrands.add(brand);
+      }
+      // Mark as selected
+      if (!_selectedBrands.contains(brand)) {
+        _selectedBrands.add(brand);
+      }
     }
   }
 
@@ -232,6 +249,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'latitude': _selectedLat,
         'longitude': _selectedLng,
         'brands': _selectedBrands,
+        'customBrands': _selectedBrands
+            .where((b) => !KenyanGasBrands.all.contains(b))
+            .toList(),
         'listings': listings,
         'isVerified': false,
         'isOnline': false,
@@ -542,21 +562,21 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               child: TextFormField(
                 controller: _customBrandController,
                 textCapitalization: TextCapitalization.words,
-                style: const TextStyle(color: AppColors.white),
+                style: const TextStyle(color: AppColors.navy, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Add other brand...',
-                  hintStyle: const TextStyle(color: AppColors.gray600),
+                  hintStyle: const TextStyle(color: AppColors.gray400),
                   prefixIcon: const Icon(Icons.add_rounded,
                       color: AppColors.gray400, size: 20),
+                  filled: true,
+                  fillColor: AppColors.white,
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                        color: AppColors.white.withValues(alpha: 0.2)),
+                    borderSide: const BorderSide(color: AppColors.gray200),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        const BorderSide(color: AppColors.orange),
+                    borderSide: const BorderSide(color: AppColors.orange),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 12),
