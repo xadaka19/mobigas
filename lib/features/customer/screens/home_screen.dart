@@ -22,6 +22,14 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Listen for active order status changes → auto-open tracking
+      context.read<OrderProvider>().addListener(() {
+        final order = context.read<OrderProvider>().activeOrder;
+        if (order?.status == OrderStatus.outForDelivery && mounted) {
+          context.go('/order-tracking');
+        }
+      });
+
       final auth = context.read<AuthProvider>();
       context.read<VendorProvider>().loadVendors(
             lat: auth.customer?.latitude,

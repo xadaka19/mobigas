@@ -194,6 +194,8 @@ class OrderModel {
   final String vendorPhone;
   final String customerName;
   final String customerArea;
+  final double customerLatitude;
+  final double customerLongitude;
   final GasListing listing;
   final double bankDisbursementAmount;
   final double originationFeeToMobigas;
@@ -213,6 +215,8 @@ class OrderModel {
     required this.vendorPhone,
     required this.customerName,
     required this.customerArea,
+    this.customerLatitude = 0.0,
+    this.customerLongitude = 0.0,
     required this.listing,
     required this.bankDisbursementAmount,
     required this.originationFeeToMobigas,

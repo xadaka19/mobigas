@@ -77,11 +77,15 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
 
         _updateMap();
 
-        // Update persistent notification
+        // Update persistent notification like Uber
         DeliveryNotificationService.showDeliveryProgress(
           vendorName: _order?.vendorName ?? '',
           gasSize: _order?.listing.size ?? '',
-          status: _statusLabel(),
+          status: _status == OrderStatus.outForDelivery
+              ? '🚴 Rider is on the way to you'
+              : _status == OrderStatus.accepted
+                  ? '✅ Order accepted — preparing your gas'
+                  : _statusLabel(),
         );
 
         // Navigate to confirmed screen when delivered

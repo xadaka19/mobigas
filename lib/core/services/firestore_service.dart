@@ -187,6 +187,8 @@ class FirestoreService {
       'vendorPhone': order.vendorPhone,
       'customerName': order.customerName,
       'customerArea': order.customerArea,
+      'customerLatitude': order.customerLatitude,
+      'customerLongitude': order.customerLongitude,
       'gasSize': order.listing.size,
       'gasKg': order.listing.kg,
       'gasPrice': order.listing.price,
@@ -266,6 +268,8 @@ class FirestoreService {
       vendorPhone: data['vendorPhone'] ?? '',
       customerName: data['customerName'] ?? '',
       customerArea: data['customerArea'] ?? '',
+      customerLatitude: (data['customerLatitude'] ?? 0.0).toDouble(),
+      customerLongitude: (data['customerLongitude'] ?? 0.0).toDouble(),
       listing: GasListing(
         size: data['gasSize'] ?? '',
         kg: data['gasKg'] ?? 0,

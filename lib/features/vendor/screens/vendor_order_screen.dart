@@ -25,6 +25,8 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   GoogleMapController? _mapController;
   double? _vendorLat;
   double? _vendorLng;
+  double? _customerLat;
+  double? _customerLng;
 
   @override
   void initState() {
@@ -40,6 +42,24 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           _vendorLat = pos.latitude;
           _vendorLng = pos.longitude;
         });
+      }
+    } catch (_) {}
+
+    // Load customer coordinates from Firestore
+    try {
+      final snap = await FirebaseService.orders
+          .where('orderId', isEqualTo: widget.order.orderId)
+          .get();
+      if (snap.docs.isNotEmpty) {
+        final data = snap.docs.first.data() as Map<String, dynamic>;
+        final cLat = (data['customerLatitude'] ?? 0.0).toDouble();
+        final cLng = (data['customerLongitude'] ?? 0.0).toDouble();
+        if (cLat != 0 && mounted) {
+          setState(() {
+            _customerLat = cLat;
+            _customerLng = cLng;
+          });
+        }
       }
     } catch (_) {}
   }
@@ -340,18 +360,62 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               child: GoogleMap(
                 initialCameraPosition: CameraPosition(
                   target: LatLng(_vendorLat!, _vendorLng!),
-                  zoom: 14,
+                  zoom: 13,
                 ),
-                onMapCreated: (c) => _mapController = c,
+                onMapCreated: (c) {
+                  _mapController = c;
+                  // Fit both markers if customer location available
+                  if (_customerLat != null) {
+                    Future.delayed(const Duration(milliseconds: 500), () {
+                      _mapController?.animateCamera(
+                        CameraUpdate.newLatLngBounds(
+                          LatLngBounds(
+                            southwest: LatLng(
+                              _vendorLat! < _customerLat! ? _vendorLat! : _customerLat!,
+                              _vendorLng! < _customerLng! ? _vendorLng! : _customerLng!,
+                            ),
+                            northeast: LatLng(
+                              _vendorLat! > _customerLat! ? _vendorLat! : _customerLat!,
+                              _vendorLng! > _customerLng! ? _vendorLng! : _customerLng!,
+                            ),
+                          ),
+                          80,
+                        ),
+                      );
+                    });
+                  }
+                },
                 markers: {
                   Marker(
                     markerId: const MarkerId('vendor'),
                     position: LatLng(_vendorLat!, _vendorLng!),
                     icon: BitmapDescriptor.defaultMarkerWithHue(
                         BitmapDescriptor.hueOrange),
-                    infoWindow: const InfoWindow(title: 'Your location'),
+                    infoWindow: const InfoWindow(title: 'You'),
                   ),
+                  if (_customerLat != null)
+                    Marker(
+                      markerId: const MarkerId('customer'),
+                      position: LatLng(_customerLat!, _customerLng!),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                          BitmapDescriptor.hueBlue),
+                      infoWindow: InfoWindow(
+                          title: widget.order.customerName,
+                          snippet: widget.order.customerArea),
+                    ),
                 },
+                polylines: _customerLat != null ? {
+                  Polyline(
+                    polylineId: const PolylineId('route'),
+                    points: [
+                      LatLng(_vendorLat!, _vendorLng!),
+                      LatLng(_customerLat!, _customerLng!),
+                    ],
+                    color: AppColors.orange,
+                    width: 4,
+                    patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+                  ),
+                } : {},
                 myLocationEnabled: true,
                 zoomControlsEnabled: false,
                 mapToolbarEnabled: false,

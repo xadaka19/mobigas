@@ -37,6 +37,8 @@ class OrderProvider extends ChangeNotifier {
         vendorPhone: vendor.phone,
         customerName: customer.name,
         customerArea: '${customer.estate}, ${customer.area}',
+        customerLatitude: customer.latitude,
+        customerLongitude: customer.longitude,
         listing: listing,
         bankDisbursementAmount: listing.price,
         originationFeeToMobigas:
