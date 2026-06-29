@@ -1,7 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
@@ -21,6 +24,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   // Business type
   String _businessType = 'sole'; // sole, registered, petrol_station
+  File? _certificateFile;
+  bool _isUploadingCert = false; // ignore: prefer_final_fields
 
   // Step 1 - Business
   late TextEditingController _businessNameController;
@@ -151,6 +156,19 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     setState(() => _isSaving = true);
 
     try {
+      // Upload certificate if selected
+      String? certificateUrl;
+      if (_certificateFile != null) {
+        setState(() => _isUploadingCert = true);
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('business_certificates')
+            .child(_vendorId);
+        await ref.putFile(_certificateFile!);
+        certificateUrl = await ref.getDownloadURL();
+        setState(() => _isUploadingCert = false);
+      }
+
       final listings = <Map<String, dynamic>>[];
       // Refills
       for (final e in _priceControllers.entries) {
@@ -209,6 +227,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'totalReviews': 0,
         'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty ? _deliveryTimeController.text.trim() : '20–40 min',
         'updatedAt': FieldValue.serverTimestamp(),
+        'certificateUrl': certificateUrl,
         'createdAt': widget.existingData == null
             ? FieldValue.serverTimestamp()
             : widget.existingData!['createdAt'],
@@ -381,6 +400,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               ? TextInputType.number
               : TextInputType.text,
         ),
+        const SizedBox(height: 16),
+        _buildCertificateUpload(),
         const SizedBox(height: 16),
         _buildPaymentMethodSelector(),
         const SizedBox(height: 16),
@@ -891,6 +912,123 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _pickCertificate() async {
+    final picker = ImagePicker();
+    final file = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 90,
+    );
+    if (file != null) {
+      setState(() => _certificateFile = File(file.path));
+    }
+  }
+
+  Widget _buildCertificateUpload() {
+    final hasCert = _certificateFile != null ||
+        (widget.existingData?['certificateUrl'] != null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Business certificate / ID document',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 4),
+        Text(
+          _businessType == 'sole'
+              ? 'Upload a photo of your National ID (front)'
+              : 'Upload your Certificate of Incorporation or Business Registration',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: AppColors.gray400, fontSize: 11),
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _pickCertificate,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: hasCert
+                  ? AppColors.success.withValues(alpha: 0.1)
+                  : AppColors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: hasCert
+                    ? AppColors.success.withValues(alpha: 0.4)
+                    : AppColors.white.withValues(alpha: 0.2),
+                width: hasCert ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  hasCert
+                      ? Icons.check_circle_rounded
+                      : Icons.upload_file_rounded,
+                  color: hasCert ? AppColors.success : AppColors.gray400,
+                  size: 28,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hasCert
+                            ? _certificateFile != null
+                                ? 'Document selected ✓'
+                                : 'Document already uploaded ✓'
+                            : 'Tap to upload document',
+                        style: TextStyle(
+                          color: hasCert
+                              ? AppColors.success
+                              : AppColors.gray400,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      Text(
+                        hasCert
+                            ? 'Tap to change'
+                            : 'JPG, PNG accepted · Used for verification only',
+                        style: TextStyle(
+                            color: AppColors.gray600, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_isUploadingCert)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.orange),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (_certificateFile != null) ...[
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              _certificateFile!,
+              height: 120,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ],
+      ],
     );
   }
 

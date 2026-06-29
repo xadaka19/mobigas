@@ -1124,18 +1124,25 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 6),
                   decoration: BoxDecoration(
-                    color:
-                        AppColors.success.withValues(alpha: 0.2),
+                    color: (_vendorData?['isVerified'] == true
+                            ? AppColors.success
+                            : AppColors.warning)
+                        .withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text('Verified vendor ✓',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                            color: AppColors.success,
-                            fontWeight: FontWeight.w600,
-                          )),
+                  child: Text(
+                    _vendorData?['isVerified'] == true
+                        ? 'Verified vendor ✓'
+                        : 'Pending verification ⏳',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(
+                          color: _vendorData?['isVerified'] == true
+                              ? AppColors.success
+                              : AppColors.warning,
+                          fontWeight: FontWeight.w600,
+                        )),
                 ),
               ],
             ),
