@@ -176,9 +176,9 @@ class _StockLoanScreenState extends State<StockLoanScreen> {
   Widget _buildStatusView() {
     final status = _existingStatus ?? StockLoanStatus.pending;
     final isPending = status == StockLoanStatus.pending;
-    final isApproved = status == StockLoanStatus.approved ||
+    final isApproved = status == StockLoanStatus.bankApproved ||
         status == StockLoanStatus.disbursed;
-    final isRejected = status == StockLoanStatus.rejected;
+    final isRejected = status == StockLoanStatus.bankRejected;
 
     return Column(
       children: [
@@ -225,7 +225,7 @@ class _StockLoanScreenState extends State<StockLoanScreen> {
         const SizedBox(height: 12),
         Text(
           _submitted || isPending
-              ? 'Our team and partner bank will review your application within 24-48 hours. You will be notified via push notification.'
+              ? 'Your application is being sent to our partner bank for instant review. The bank will assess your delivery track record and notify you within minutes.'
               : isApproved
                   ? 'Your loan has been approved. Funds will be disbursed to your M-Pesa shortly.'
                   : 'Unfortunately your application was not approved at this time. You can reapply after 30 days.',
@@ -564,13 +564,13 @@ class _StockLoanScreenState extends State<StockLoanScreen> {
       child: Column(
         children: [
           _infoRow(Icons.account_balance_outlined,
-              'Financed by our partner bank — not MobiGas'),
+              'MobiGas shares your delivery data with partner bank — bank makes all credit decisions'),
           _infoRow(Icons.payments_outlined,
               'Repay from your delivery earnings over 30-90 days'),
           _infoRow(Icons.percent_rounded,
               'Competitive interest rate from partner bank'),
           _infoRow(Icons.shield_outlined,
-              'Zero capital risk — MobiGas is just the connector'),
+              'MobiGas never lends money — we only connect you to the bank'),
         ],
       ),
     );

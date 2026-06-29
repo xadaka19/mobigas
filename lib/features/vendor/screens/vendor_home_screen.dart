@@ -303,7 +303,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Our team will verify your business within 24 hours.',
+                          'MobiGas is reviewing your details before activating your account.',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall

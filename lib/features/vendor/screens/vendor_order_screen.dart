@@ -650,7 +650,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                           fontSize: 24,
                         ),
                   ),
-                  Text('Being sent by ${widget.order.partnerBankName}',
+                  Text('Instantly sent to your M-Pesa by ${widget.order.partnerBankName}',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall

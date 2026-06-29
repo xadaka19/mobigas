@@ -262,7 +262,15 @@ class PartnerBank {
 }
 
 // ── STOCK BOOST LOAN ──────────────────────────────────────────────────────
-enum StockLoanStatus { pending, approved, disbursed, repaying, repaid, rejected }
+enum StockLoanStatus {
+  pending,          // Vendor submitted application
+  submittedToBank,  // MobiGas sent to bank API
+  bankApproved,     // Bank approved loan amount
+  bankRejected,     // Bank rejected
+  disbursed,        // Bank sent funds to vendor M-Pesa
+  repaying,         // Vendor repaying
+  repaid,           // Fully repaid
+}
 
 class StockLoanApplication {
   final String id;

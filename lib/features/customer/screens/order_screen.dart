@@ -322,7 +322,7 @@ class _OrderScreenState extends State<OrderScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Available credit',
+                Text('Your gas credit limit',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.gray400,
                         )),

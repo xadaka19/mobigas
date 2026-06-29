@@ -509,7 +509,7 @@ class _CreditApplicationScreenState extends State<CreditApplicationScreen> {
                 color: AppColors.success, size: 56),
           ),
           const SizedBox(height: 32),
-          Text('Application submitted!',
+          Text('Checking your credit...',
               style: Theme.of(context).textTheme.displayMedium?.copyWith(
                     color: AppColors.navy,
                     fontSize: 26,
@@ -517,7 +517,7 @@ class _CreditApplicationScreenState extends State<CreditApplicationScreen> {
               textAlign: TextAlign.center),
           const SizedBox(height: 12),
           Text(
-            'Our partner bank is reviewing your application. You will receive a notification once approved — usually within minutes.',
+            'Our partner bank is reviewing your application. You will receive a notification once approved — usually in seconds.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: AppColors.gray600,

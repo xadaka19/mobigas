@@ -335,7 +335,7 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Pay anytime via M-Pesa before due date.',
+                        'Pay anytime via M-Pesa within 30 days. No early payment penalty.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context)
                             .textTheme
