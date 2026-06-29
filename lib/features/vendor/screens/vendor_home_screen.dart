@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -39,8 +40,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       final doc = await FirebaseService.vendors.doc(_vendorId).get();
       if (!mounted) return;
       if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        debugPrint('isVerified from Firestore: ${data['isVerified']}');
         setState(() {
-          _vendorData = doc.data() as Map<String, dynamic>;
+          _vendorData = data;
           _isOnline = _vendorData?['isOnline'] ?? false;
           _isLoadingVendor = false;
         });
