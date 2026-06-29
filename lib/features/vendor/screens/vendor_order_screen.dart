@@ -6,6 +6,7 @@ import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/services/api_service.dart';
 
 class VendorOrderScreen extends StatefulWidget {
   final OrderModel order;
@@ -128,6 +129,8 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         'updatedAt': FieldValue.serverTimestamp(),
       });
       LocationService.stopTracking();
+      // Notify backend — triggers bank payment to vendor
+      ApiService.notifyOrderDelivered(widget.order.orderId);
       setState(() {
         _step = _Step.confirmed;
         _isLoading = false;
