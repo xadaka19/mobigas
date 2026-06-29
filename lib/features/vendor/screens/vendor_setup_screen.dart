@@ -97,10 +97,22 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     final listings = d['listings'] as List? ?? [];
     for (final l in listings) {
       final size = l['size'] as String?;
-      if (size != null && _priceControllers.containsKey(size)) {
-        _priceControllers[size]!.text =
-            (l['price'] ?? '').toString();
-        _sizeAvailable[size] = l['available'] ?? true;
+      final productType = l['productType'] as String? ?? 'refill';
+      final price = (l['price'] ?? 0).toString();
+      final available = l['available'] as bool? ?? false;
+
+      if (size == null) continue;
+
+      if (productType == 'refill' && _priceControllers.containsKey(size)) {
+        _priceControllers[size]!.text = price;
+        _sizeAvailable[size] = available;
+      } else if (productType == 'fullKit' &&
+          _fullKitPriceControllers.containsKey(size)) {
+        _fullKitPriceControllers[size]!.text = price;
+        _fullKitAvailable[size] = available;
+      } else if (productType == 'grillKit') {
+        _grillKitPriceController.text = price;
+        _grillKitAvailable = available;
       }
     }
 
