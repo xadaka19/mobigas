@@ -27,6 +27,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late TextEditingController _ownerNameController;
   late TextEditingController _idOrBrnController; // National ID or BRN
   late TextEditingController _phoneController;
+  late TextEditingController _deliveryTimeController;
   String _paymentMethod = 'mpesa'; // mpesa, till, paybill
   late TextEditingController _tillController;
   late TextEditingController _paybillController;
@@ -81,6 +82,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _idOrBrnController = TextEditingController(
         text: d['nationalId'] ?? d['businessRegNumber'] ?? '');
     _phoneController = TextEditingController(text: d['phone'] ?? '');
+    _deliveryTimeController = TextEditingController(text: d['deliveryTime'] ?? '20–40 min');
     _tillController = TextEditingController(text: d['tillNumber'] ?? '');
     _paybillController = TextEditingController(text: d['paybillNumber'] ?? '');
     _paybillAccountController = TextEditingController(text: d['paybillAccount'] ?? '');
@@ -110,6 +112,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _ownerNameController.dispose();
     _idOrBrnController.dispose();
     _phoneController.dispose();
+    _deliveryTimeController.dispose();
     _tillController.dispose();
     _paybillController.dispose();
     _paybillAccountController.dispose();
@@ -204,7 +207,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'isOnline': false,
         'rating': 0.0,
         'totalReviews': 0,
-        'deliveryTime': '20–40 min',
+        'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty ? _deliveryTimeController.text.trim() : '20–40 min',
         'updatedAt': FieldValue.serverTimestamp(),
         'createdAt': widget.existingData == null
             ? FieldValue.serverTimestamp()
@@ -380,6 +383,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ),
         const SizedBox(height: 16),
         _buildPaymentMethodSelector(),
+        const SizedBox(height: 16),
+        _field('Delivery time', _deliveryTimeController,
+            Icons.access_time_rounded,
+            hint: 'e.g. 20–40 min'),
       ],
     );
   }

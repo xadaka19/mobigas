@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -40,10 +39,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       final doc = await FirebaseService.vendors.doc(_vendorId).get();
       if (!mounted) return;
       if (doc.exists) {
-        final data = doc.data() as Map<String, dynamic>;
-        debugPrint('isVerified from Firestore: ${data['isVerified']}');
         setState(() {
-          _vendorData = data;
+          _vendorData = doc.data() as Map<String, dynamic>;
           _isOnline = _vendorData?['isOnline'] ?? false;
           _isLoadingVendor = false;
         });
@@ -443,7 +440,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            '${_vendorData?['estate'] ?? ''}, ${_vendorData?['area'] ?? ''}',
+            '${_vendorData?['address'] ?? _vendorData?['estate'] ?? ''}, ${_vendorData?['county'] ?? ''}',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppColors.gray400,
                 ),
@@ -1150,7 +1147,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 _profileTile(Icons.phone_outlined, 'M-Pesa number',
                     _vendorData?['phone'] ?? ''),
                 _profileTile(Icons.location_on_outlined, 'Location',
-                    '${_vendorData?['estate'] ?? ''}, ${_vendorData?['county'] ?? ''}'),
+                    '${_vendorData?['address'] ?? _vendorData?['estate'] ?? ''}'),
                 _profileTile(Icons.local_gas_station_outlined,
                     'Brands',
                     (_vendorData?['brands'] as List?)?.join(', ') ?? ''),
