@@ -466,7 +466,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Front camera · Make sure your face is clearly visible',
+                        'Front camera only · Used for identity verification',
                         textAlign: TextAlign.center,
                         style: Theme.of(context)
                             .textTheme

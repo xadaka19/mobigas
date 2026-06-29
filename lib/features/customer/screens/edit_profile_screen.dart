@@ -52,17 +52,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
-  Future<void> _pickFromGallery() async {
-    final picker = ImagePicker();
-    final photo = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-      maxWidth: 800,
-    );
-    if (photo != null) {
-      setState(() => _newSelfie = File(photo.path));
-    }
-  }
 
   Future<void> _saveProfile() async {
     setState(() => _isSaving = true);
@@ -296,46 +285,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   void _showPhotoOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Update photo',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.navy,
-                    )),
-            const SizedBox(height: 20),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined,
-                  color: AppColors.orange),
-              title: const Text('Take selfie'),
-              onTap: () {
-                Navigator.pop(context);
-                _takeSelfie();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined,
-                  color: AppColors.orange),
-              title: const Text('Choose from gallery'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickFromGallery();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+    // Customer selfie only — no gallery for security
+    _takeSelfie();
   }
 
   Widget _buildField(
