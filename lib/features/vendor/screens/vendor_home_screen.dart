@@ -1038,19 +1038,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isEligible
-              ? [AppColors.orange, AppColors.orangeDeep]
-              : [AppColors.white.withValues(alpha: 0.05),
-                 AppColors.white.withValues(alpha: 0.08)],
+        color: isEligible ? null : AppColors.navy,
+        gradient: isEligible ? LinearGradient(
+          colors: [AppColors.orange, AppColors.orangeDeep],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-        ),
+        ) : null,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isEligible
-              ? AppColors.orange
-              : AppColors.gray200,
+          color: isEligible ? AppColors.orange : AppColors.orange.withValues(alpha: 0.4),
+          width: 1.5,
         ),
       ),
       child: Column(
@@ -1063,7 +1060,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             Text('Stock Boost Loan',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: AppColors.white,
-                      fontWeight: FontWeight.w700)),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16)),
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1085,8 +1083,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 : 'Deliver consistently for 3 months to unlock a stock loan. '
                   'Use the app actively — every delivery brings you closer!',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.white.withValues(alpha: 0.85),
-                  height: 1.4, fontSize: 12)),
+                  color: AppColors.white,
+                  height: 1.5,
+                  fontSize: 13)),
           if (!isEligible) ...[
             const SizedBox(height: 12),
             if (monthsOnPlatform < 3)
