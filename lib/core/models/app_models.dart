@@ -148,6 +148,7 @@ class CustomerModel {
   final String partnerBankName;
   final List<GuarantorModel> guarantors;
   final String? selfieUrl;
+  final String? fcmToken;
 
   const CustomerModel({
     required this.id,
@@ -165,6 +166,7 @@ class CustomerModel {
     required this.partnerBankName,
     required this.guarantors,
     this.selfieUrl,
+    this.fcmToken,
   });
 
   double get bankCreditAvailable =>

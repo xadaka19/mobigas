@@ -114,6 +114,7 @@ class FirestoreService {
               ))
           .toList(),
       selfieUrl: data['selfieUrl'],
+      fcmToken: data['fcmToken'],
     );
   }
 

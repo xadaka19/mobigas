@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
+import 'package:mobigas/core/services/firebase_service.dart';
 
 class OrderProvider extends ChangeNotifier {
   final List<OrderModel> _orders = [];
@@ -46,8 +47,36 @@ class OrderProvider extends ChangeNotifier {
         partnerBankName: customer.partnerBankName,
       );
 
+      // Get vendor FCM token for backend to send push notification
+      String? vendorFcmToken;
+      try {
+        final vendorDoc = await FirebaseService.vendors.doc(vendor.id).get();
+        if (vendorDoc.exists) {
+          final vData = vendorDoc.data() as Map<String, dynamic>;
+          vendorFcmToken = vData['fcmToken'] as String?;
+        }
+      } catch (_) {}
+
       // Save to Firestore
       await FirestoreService.createOrder(order);
+
+      // Write vendorFcmToken to order so backend can trigger FCM
+      if (vendorFcmToken != null) {
+        await FirebaseService.orders
+            .where('orderId', isEqualTo: order.orderId)
+            .get()
+            .then((snap) {
+          if (snap.docs.isNotEmpty) {
+            snap.docs.first.reference.update({
+              'vendorFcmToken': vendorFcmToken,
+              'customerFcmToken': customer.fcmToken ?? '',
+              'notificationTitle': 'New order received!',
+              'notificationBody':
+                  '${customer.name} ordered ${listing.size} gas · KES ${listing.price.toStringAsFixed(0)}',
+            });
+          }
+        });
+      }
 
       // Update customer credit used
       await FirestoreService.updateCreditUsed(
