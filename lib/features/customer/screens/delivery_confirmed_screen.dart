@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/providers/order_provider.dart';
+import 'package:mobigas/core/services/firebase_service.dart';
 
 class DeliveryConfirmedScreen extends StatefulWidget {
   const DeliveryConfirmedScreen({super.key});
@@ -15,6 +19,10 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
   late AnimationController _controller;
   late Animation<double> _scaleAnim;
   late Animation<double> _fadeAnim;
+
+  int _selectedRating = 0;
+  bool _ratingSubmitted = false;
+  bool _isSubmittingRating = false;
 
   @override
   void initState() {
@@ -38,18 +46,78 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
     super.dispose();
   }
 
+  Future<void> _submitRating() async {
+    if (_selectedRating == 0) return;
+    setState(() => _isSubmittingRating = true);
+
+    final order = context.read<OrderProvider>().activeOrder;
+    if (order == null) {
+      setState(() {
+        _ratingSubmitted = true;
+        _isSubmittingRating = false;
+      });
+      return;
+    }
+
+    try {
+      // Save rating to order
+      final orderSnap = await FirebaseService.orders
+          .where('orderId', isEqualTo: order.orderId)
+          .get();
+
+      if (orderSnap.docs.isNotEmpty) {
+        await orderSnap.docs.first.reference.update({
+          'customerRating': _selectedRating,
+          'ratedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // Update vendor's average rating
+      final vendorDoc = await FirebaseService.vendors
+          .doc(order.vendorId)
+          .get();
+
+      if (vendorDoc.exists) {
+        final data = vendorDoc.data() as Map<String, dynamic>;
+        final currentRating = (data['rating'] ?? 0.0).toDouble();
+        final totalReviews = (data['totalReviews'] ?? 0) as int;
+        final newTotal = totalReviews + 1;
+        final newRating =
+            ((currentRating * totalReviews) + _selectedRating) / newTotal;
+
+        await FirebaseService.vendors.doc(order.vendorId).update({
+          'rating': double.parse(newRating.toStringAsFixed(1)),
+          'totalReviews': newTotal,
+        });
+      }
+
+      setState(() => _ratingSubmitted = true);
+    } catch (e) {
+      setState(() => _ratingSubmitted = true);
+    }
+
+    setState(() => _isSubmittingRating = false);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final order = context.read<OrderProvider>().activeOrder;
+    final dueDate = DateTime.now().add(const Duration(days: 30));
+    final dueDateStr =
+        '${dueDate.day}/${dueDate.month}/${dueDate.year}';
+    final totalRepayment = order?.listing.customerRepayment ?? 0;
+
     return Scaffold(
       backgroundColor: AppColors.navy,
       body: SafeArea(
         child: FadeTransition(
           opacity: _fadeAnim,
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(32),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                const SizedBox(height: 20),
                 ScaleTransition(
                   scale: _scaleAnim,
                   child: Container(
@@ -66,7 +134,7 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
                 Text(
                   'Delivery confirmed!',
                   style: Theme.of(context)
@@ -78,16 +146,154 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                       ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Text(
-                  'Your vendor has been paid. Enjoy your gas!',
+                  'Your gas has been delivered. Enjoy!',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: AppColors.gray400,
-                        height: 1.6,
+                        height: 1.5,
                       ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
+
+                // ── RATING SECTION ────────────────────────────────
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppColors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: AppColors.white.withValues(alpha: 0.1)),
+                  ),
+                  child: _ratingSubmitted
+                      ? Column(
+                          children: [
+                            const Icon(Icons.favorite_rounded,
+                                color: AppColors.orange, size: 32),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Thanks for your rating!',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(color: AppColors.white),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Your feedback helps other customers',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: AppColors.gray400),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            Text(
+                              'Rate your delivery',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    color: AppColors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                            if (order != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                order.vendorName,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: AppColors.gray400),
+                              ),
+                            ],
+                            const SizedBox(height: 16),
+                            // Stars
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: List.generate(5, (i) {
+                                final star = i + 1;
+                                return GestureDetector(
+                                  onTap: () => setState(
+                                      () => _selectedRating = star),
+                                  child: AnimatedContainer(
+                                    duration:
+                                        const Duration(milliseconds: 150),
+                                    padding: const EdgeInsets.all(6),
+                                    child: Icon(
+                                      star <= _selectedRating
+                                          ? Icons.star_rounded
+                                          : Icons.star_outline_rounded,
+                                      color: star <= _selectedRating
+                                          ? AppColors.warning
+                                          : AppColors.gray600,
+                                      size: 40,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _selectedRating == 0
+                                  ? 'Tap to rate'
+                                  : _selectedRating == 1
+                                      ? 'Poor'
+                                      : _selectedRating == 2
+                                          ? 'Fair'
+                                          : _selectedRating == 3
+                                              ? 'Good'
+                                              : _selectedRating == 4
+                                                  ? 'Great'
+                                                  : 'Excellent!',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: _selectedRating == 0
+                                        ? AppColors.gray600
+                                        : AppColors.warning,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: _selectedRating == 0 ||
+                                      _isSubmittingRating
+                                  ? null
+                                  : _submitRating,
+                              style: ElevatedButton.styleFrom(
+                                minimumSize:
+                                    const Size(double.infinity, 48),
+                              ),
+                              child: _isSubmittingRating
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppColors.white),
+                                    )
+                                  : const Text('Submit rating'),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  setState(() => _ratingSubmitted = true),
+                              child: Text('Skip',
+                                  style: TextStyle(
+                                      color: AppColors.gray600)),
+                            ),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 20),
+
+                // ── REPAYMENT REMINDER ────────────────────────────
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -99,8 +305,10 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                   ),
                   child: Column(
                     children: [
-                      const Icon(Icons.account_balance_wallet_outlined,
-                          color: AppColors.orange, size: 28),
+                      const Icon(
+                          Icons.account_balance_wallet_outlined,
+                          color: AppColors.orange,
+                          size: 28),
                       const SizedBox(height: 10),
                       Text(
                         'Repayment reminder',
@@ -114,7 +322,9 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'KES 1,620 due by 27/07/2026',
+                        totalRepayment > 0
+                            ? 'KES ${totalRepayment.toStringAsFixed(0)} due by $dueDateStr'
+                            : 'Check repayments tab for due date',
                         style: Theme.of(context)
                             .textTheme
                             .bodyLarge
@@ -125,18 +335,20 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Pay anytime via M-Pesa. We will remind you before the due date.',
+                        'Pay anytime via M-Pesa before due date.',
                         textAlign: TextAlign.center,
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppColors.gray400,
-                                  height: 1.4,
-                                ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              color: AppColors.gray400,
+                              height: 1.4,
+                            ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 32),
                 ElevatedButton(
                   onPressed: () => context.go('/home'),
                   child: const Text('Back to home'),
@@ -145,10 +357,11 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                 TextButton(
                   onPressed: () => context.go('/home'),
                   child: Text(
-                    'View repayment schedule',
+                    'View repayments',
                     style: TextStyle(color: AppColors.gray400),
                   ),
                 ),
+                const SizedBox(height: 20),
               ],
             ),
           ),
