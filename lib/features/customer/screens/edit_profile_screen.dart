@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/widgets/location_picker_widget.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -20,7 +21,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool _isSaving = false;
   late TextEditingController _nameController;
   late TextEditingController _phoneController;
-  late TextEditingController _estateController;
+  String _selectedAddress = '';
+  double _selectedLat = 0;
+  double _selectedLng = 0;
 
   @override
   void initState() {
@@ -28,14 +31,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final customer = context.read<AuthProvider>().customer;
     _nameController = TextEditingController(text: customer?.name ?? '');
     _phoneController = TextEditingController(text: customer?.phone ?? '');
-    _estateController = TextEditingController(text: customer?.estate ?? '');
+    _selectedAddress = customer?.estate ?? '';
+    _selectedLat = customer?.latitude ?? 0;
+    _selectedLng = customer?.longitude ?? 0;
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
-    _estateController.dispose();
     super.dispose();
   }
 
@@ -78,7 +82,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final updates = <String, dynamic>{
         'name': _nameController.text.trim(),
         'phone': _phoneController.text.trim(),
-        'estate': _estateController.text.trim(),
+        'estate': _selectedAddress,
+        'area': _selectedAddress,
+        'latitude': _selectedLat,
+        'longitude': _selectedLng,
       };
       if (selfieUrl != null) updates['selfieUrl'] = selfieUrl;
 
@@ -252,8 +259,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         Icons.phone_outlined,
                         keyboardType: TextInputType.phone),
                     const SizedBox(height: 16),
-                    _buildField('Estate / Area', _estateController,
-                        Icons.location_on_outlined),
+                    Text('Location',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontSize: 13,
+                              color: AppColors.navy,
+                              fontWeight: FontWeight.w600,
+                            )),
+                    const SizedBox(height: 6),
+                    LocationPickerWidget(
+                      hint: 'Search your home address...',
+                      darkMode: false,
+                      initialValue: _selectedAddress.isNotEmpty
+                          ? _selectedAddress
+                          : null,
+                      onSelected: (address, lat, lng) {
+                        setState(() {
+                          _selectedAddress = address;
+                          _selectedLat = lat;
+                          _selectedLng = lng;
+                        });
+                      },
+                    ),
                     const SizedBox(height: 8),
                     // Read-only fields
                     _readOnlyField('National ID',
