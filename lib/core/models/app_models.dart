@@ -256,3 +256,44 @@ class PartnerBank {
     required this.maxLoanAmount,
   });
 }
+
+// ── STOCK BOOST LOAN ──────────────────────────────────────────────────────
+enum StockLoanStatus { pending, approved, disbursed, repaying, repaid, rejected }
+
+class StockLoanApplication {
+  final String id;
+  final String vendorId;
+  final String vendorName;
+  final double requestedAmount;
+  final double approvedAmount;
+  final StockLoanStatus status;
+  final DateTime appliedAt;
+  final String partnerBankName;
+  final int monthsOnPlatform;
+  final int totalDeliveries;
+  final double averageMonthlyRevenue;
+
+  const StockLoanApplication({
+    required this.id,
+    required this.vendorId,
+    required this.vendorName,
+    required this.requestedAmount,
+    required this.approvedAmount,
+    required this.status,
+    required this.appliedAt,
+    required this.partnerBankName,
+    required this.monthsOnPlatform,
+    required this.totalDeliveries,
+    required this.averageMonthlyRevenue,
+  });
+}
+
+// ── FEATURE FLAGS ─────────────────────────────────────────────────────────
+// Flip to true to activate features
+class FeatureFlags {
+  static const bool stockBoostLoan = true;      // Vendor stock loans
+  static const bool mpesaStkPush = false;         // In-app M-Pesa repayment
+  static const bool vehicleLeasing = false;       // Vehicle leasing marketplace
+  static const bool cargoInsurance = false;       // Cargo insurance
+  static const bool embeddedFinance = false;      // Full embedded finance suite
+}

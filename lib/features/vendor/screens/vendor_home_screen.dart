@@ -7,6 +7,7 @@ import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
+import 'package:mobigas/features/vendor/screens/stock_loan_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
 
 class VendorHomeScreen extends StatefulWidget {
@@ -979,7 +980,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${orders.length} deliveries completed',
+                    // Stock Boost Loan
+                    if (FeatureFlags.stockBoostLoan)
+                      _buildStockBoostCard(orders.length, orders),
+                    if (FeatureFlags.stockBoostLoan)
+                      const SizedBox(height: 20),
+                    Text('\${orders.length} deliveries completed',
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -1010,6 +1016,149 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildStockBoostCard(int totalDeliveries, List<OrderModel> orders) {
+    final createdAt = _vendorData?['createdAt'];
+    int monthsOnPlatform = 0;
+    if (createdAt != null) {
+      try {
+        final joined = (createdAt as dynamic).toDate() as DateTime;
+        monthsOnPlatform = DateTime.now().difference(joined).inDays ~/ 30;
+      } catch (_) {}
+    }
+    final isEligible = monthsOnPlatform >= 3 && totalDeliveries >= 30;
+    final monthlyRevenue = orders.isEmpty || monthsOnPlatform == 0
+        ? 0.0
+        : orders.fold(0.0, (acc, o) => acc + o.bankDisbursementAmount) /
+            monthsOnPlatform;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isEligible
+              ? [AppColors.orange, AppColors.orangeDeep]
+              : [AppColors.white.withValues(alpha: 0.05),
+                 AppColors.white.withValues(alpha: 0.08)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isEligible
+              ? AppColors.orange
+              : AppColors.gray200,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.rocket_launch_rounded,
+                color: AppColors.white, size: 22),
+            const SizedBox(width: 10),
+            Text('Stock Boost Loan',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppColors.white,
+                      fontWeight: FontWeight.w700)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(isEligible ? 'Eligible!' : 'Not yet eligible',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            isEligible
+                ? 'You qualify! Get funding to buy more gas stock and grow your business.'
+                : 'Get a loan to buy bulk gas stock. Repay from delivery earnings.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.white.withValues(alpha: 0.85),
+                  height: 1.4, fontSize: 12)),
+          if (!isEligible) ...[
+            const SizedBox(height: 12),
+            if (monthsOnPlatform < 3)
+              _eligibilityBar('Months on platform',
+                  monthsOnPlatform, 3, '\$monthsOnPlatform/3 months'),
+            const SizedBox(height: 6),
+            if (totalDeliveries < 30)
+              _eligibilityBar('Total deliveries',
+                  totalDeliveries, 30, '\$totalDeliveries/30 deliveries'),
+          ],
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: isEligible
+                ? () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => StockLoanScreen(
+                          monthsOnPlatform: monthsOnPlatform,
+                          totalDeliveries: totalDeliveries,
+                          averageMonthlyRevenue: monthlyRevenue,
+                          vendorData: _vendorData ?? {},
+                        ),
+                      ),
+                    )
+                : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isEligible
+                  ? AppColors.white
+                  : AppColors.white.withValues(alpha: 0.15),
+              foregroundColor:
+                  isEligible ? AppColors.orange : AppColors.gray400,
+              minimumSize: const Size(double.infinity, 44),
+              elevation: 0,
+            ),
+            child: Text(
+              isEligible ? 'Apply for stock loan' : 'Not yet eligible',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _eligibilityBar(String label, int current, int max, String text) {
+    final progress = (current / max).clamp(0.0, 1.0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Text(label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.white.withValues(alpha: 0.7),
+                    fontSize: 11)),
+          const Spacer(),
+          Text(text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600)),
+        ]),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: progress,
+            backgroundColor: AppColors.white.withValues(alpha: 0.15),
+            valueColor:
+                const AlwaysStoppedAnimation<Color>(AppColors.orange),
+            minHeight: 6,
+          ),
+        ),
+      ],
     );
   }
 
