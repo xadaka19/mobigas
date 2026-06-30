@@ -9,6 +9,7 @@ import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/delivery_notification_service.dart';
+import 'package:mobigas/core/services/screen_security_service.dart';
 
 class OrderTrackingScreen extends StatefulWidget {
   const OrderTrackingScreen({super.key});
@@ -32,6 +33,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   @override
   void initState() {
     super.initState();
+    ScreenSecurityService.enableSecureMode();
     _initTracking();
   }
 
@@ -186,6 +188,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
 
   @override
   void dispose() {
+    ScreenSecurityService.disableSecureMode();
     _orderSubscription?.cancel();
     _mapController?.dispose();
     super.dispose();

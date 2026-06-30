@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/services/security_service.dart';
 
 class VendorSplashScreen extends StatefulWidget {
   const VendorSplashScreen({super.key});
@@ -34,7 +36,33 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     _navigate();
   }
 
+  void _showSecurityWarning() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Security Warning'),
+        content: const Text(
+          'MobiGas cannot run on rooted or jailbroken devices for your security. '
+          'Please use a standard device to access the app.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => SystemNavigator.pop(),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _navigate() async {
+    final isCompromised = await SecurityService.isDeviceCompromised();
+    if (isCompromised && mounted) {
+      _showSecurityWarning();
+      return;
+    }
+
     await Future.delayed(const Duration(milliseconds: 1800));
     if (!mounted) return;
 

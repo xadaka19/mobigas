@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
+import 'package:mobigas/core/services/screen_security_service.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
@@ -33,6 +34,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   void initState() {
     super.initState();
     _initLocation();
+    ScreenSecurityService.enableSecureMode();
   }
 
   Future<void> _initLocation() async {
@@ -145,6 +147,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
 
   @override
   void dispose() {
+    ScreenSecurityService.disableSecureMode();
     _riderNameController.dispose();
     _riderPhoneController.dispose();
     _mapController?.dispose();
