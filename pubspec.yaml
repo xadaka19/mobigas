@@ -61,6 +61,9 @@ dependencies:
   flutter_jailbreak_detection: ^1.10.0
   crypto: ^3.0.7
   flutter_windowmanager: ^0.2.0
+  flutter_secure_storage: ^10.3.1
+  firebase_app_check: ^0.4.5
+  device_info_plus: ^13.2.0
 
 dev_dependencies:
   flutter_test:

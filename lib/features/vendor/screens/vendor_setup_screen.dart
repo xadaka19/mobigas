@@ -235,6 +235,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       await FirebaseService.vendors.doc(_vendorId).set({
         'businessName': _businessNameController.text.trim(),
         'ownerName': _ownerNameController.text.trim(),
+        'email': FirebaseAuth.instance.currentUser?.email,
         'businessType': _businessType,
         if (_businessType == 'sole')
           'nationalId': _idOrBrnController.text.trim()

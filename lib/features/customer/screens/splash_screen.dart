@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/security_service.dart';
+import 'package:mobigas/core/services/screen_security_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -63,6 +65,15 @@ class _SplashScreenState extends State<SplashScreen>
     if (isCompromised && mounted) {
       _showSecurityWarning();
       return;
+    }
+
+    // Verify app hasn't been repackaged/re-signed by a third party
+    if (!kDebugMode) {
+      final isAuthentic = await ScreenSecurityService.verifyAppSignature();
+      if (!isAuthentic && mounted) {
+        _showSecurityWarning();
+        return;
+      }
     }
 
     await Future.delayed(const Duration(milliseconds: 1800));

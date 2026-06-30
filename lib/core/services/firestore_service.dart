@@ -8,6 +8,7 @@ class FirestoreService {
   static Future<Map<String, bool>> checkDuplicates({
     required String phone,
     required String nationalId,
+    String? deviceFingerprint,
   }) async {
     final phoneSnap = await FirebaseService.users
         .where('phone', isEqualTo: phone)
@@ -19,9 +20,18 @@ class FirestoreService {
         .limit(1)
         .get();
 
+
+    bool deviceFlagged = false;
+    if (deviceFingerprint != null) {
+      final deviceSnap = await FirebaseService.users
+          .where("deviceFingerprint", isEqualTo: deviceFingerprint)
+          .get();
+      deviceFlagged = deviceSnap.docs.isNotEmpty;
+    }
     return {
       'phoneTaken': phoneSnap.docs.isNotEmpty,
       'idTaken': idSnap.docs.isNotEmpty,
+      'deviceFlagged': deviceFlagged,
     };
   }
 
@@ -40,6 +50,9 @@ class FirestoreService {
     await FirebaseService.users.doc(customer.id).set({
       'id': customer.id,
       'name': customer.name,
+      'email': customer.email,
+      'deviceFingerprint': customer.deviceFingerprint,
+      'deviceFlagged': customer.deviceFlagged,
       'phone': customer.phone,
       'nationalId': customer.nationalId,
       'county': customer.county,
@@ -93,6 +106,9 @@ class FirestoreService {
     return CustomerModel(
       id: uid,
       name: data['name'] ?? '',
+      email: data['email'],
+      deviceFingerprint: data['deviceFingerprint'],
+      deviceFlagged: data['deviceFlagged'] ?? false,
       phone: data['phone'] ?? '',
       nationalId: data['nationalId'] ?? '',
       county: data['county'] ?? '',

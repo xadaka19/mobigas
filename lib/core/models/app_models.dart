@@ -94,6 +94,7 @@ class VendorModel {
   final String id;
   final String businessName;
   final String ownerName;
+  final String? email;
   final String phone;
   final String area;
   final String estate;
@@ -113,6 +114,7 @@ class VendorModel {
     required this.id,
     required this.businessName,
     required this.ownerName,
+    this.email,
     required this.phone,
     required this.area,
     required this.estate,
@@ -135,7 +137,10 @@ enum BankApprovalStatus { pending, approved, rejected }
 class CustomerModel {
   final String id;
   final String name;
+  final String? email;
   final String phone;
+  final String? deviceFingerprint;
+  final bool deviceFlagged;
   final String nationalId;
   final String county;
   final String area;
@@ -153,7 +158,10 @@ class CustomerModel {
   const CustomerModel({
     required this.id,
     required this.name,
+    this.email,
     required this.phone,
+    this.deviceFingerprint,
+    this.deviceFlagged = false,
     required this.nationalId,
     required this.county,
     required this.area,

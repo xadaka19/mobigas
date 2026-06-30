@@ -8,11 +8,13 @@ import 'package:mobigas/core/services/delivery_notification_service.dart';
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Show local notification when app is in background/terminated
+  // Messages are data-only — title/body come from message.data, not
+  // message.notification, to avoid Android auto-displaying a duplicate.
   await DeliveryNotificationService.initialize();
-  
-  final title = message.notification?.title ?? 'MobiGas';
-  final body = message.notification?.body ?? '';
+
   final data = message.data;
+  final title = data['title'] ?? 'MobiGas';
+  final body = data['body'] ?? '';
   final type = data['type'] ?? '';
 
   if (type == 'order_update' || type == 'delivery') {
@@ -120,8 +122,8 @@ class NotificationService {
   static Future<void> _showForegroundNotification(
       RemoteMessage message) async {
     await DeliveryNotificationService.initialize();
-    final title = message.notification?.title ?? 'MobiGas';
-    final body = message.notification?.body ?? '';
+    final title = message.data['title'] ?? 'MobiGas';
+    final body = message.data['body'] ?? '';
     await DeliveryNotificationService.showDeliveryProgress(
       vendorName: '',
       gasSize: title,

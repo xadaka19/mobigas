@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:io';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 
@@ -86,10 +87,14 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Check for duplicate phone or national ID
+      // Capture device fingerprint for fraud prevention
+      final deviceFingerprint = await DeviceFingerprintService.getFingerprint();
+
+      // Check for duplicate phone or national ID, and flag shared-device usage
       final duplicates = await FirestoreService.checkDuplicates(
         phone: phone.trim(),
         nationalId: nationalId.trim(),
+        deviceFingerprint: deviceFingerprint,
       );
 
       if (duplicates['phoneTaken'] == true) {
@@ -119,7 +124,10 @@ class AuthProvider extends ChangeNotifier {
       final customer = CustomerModel(
         id: uid,
         name: name,
+        email: email.trim().toLowerCase(),
         phone: phone,
+        deviceFingerprint: deviceFingerprint,
+        deviceFlagged: duplicates['deviceFlagged'] ?? false,
         nationalId: nationalId,
         county: county,
         area: area,
