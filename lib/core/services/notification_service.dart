@@ -7,11 +7,13 @@ import 'package:mobigas/core/services/delivery_notification_service.dart';
 // MUST be top-level function for background messages
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Show local notification when app is in background/terminated
-  // Messages are data-only — title/body come from message.data, not
-  // message.notification, to avoid Android auto-displaying a duplicate.
   await DeliveryNotificationService.initialize();
 
+  // If message has a notification block (credit/loan decisions),
+  // Android auto-displays it — don't show a duplicate local notification.
+  if (message.notification != null) return;
+
+  // Data-only messages (delivery tracking) — show custom local notification
   final data = message.data;
   final title = data['title'] ?? 'MobiGas';
   final body = data['body'] ?? '';
