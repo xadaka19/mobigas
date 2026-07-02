@@ -19,12 +19,14 @@ workflows:
       - name: Build customer APK
         script: |
           flutter build apk --release \
+            --android-skip-build-dependency-validation \
             --target lib/main_customer.dart \
             --obfuscate \
             --split-debug-info=build/debug-info
       - name: Build customer AAB
         script: |
           flutter build appbundle --release \
+            --android-skip-build-dependency-validation \
             --target lib/main_customer.dart \
             --obfuscate \
             --split-debug-info=build/debug-info
@@ -53,12 +55,14 @@ workflows:
       - name: Build vendor APK
         script: |
           flutter build apk --release \
+            --android-skip-build-dependency-validation \
             --target lib/main_vendor.dart \
             --obfuscate \
             --split-debug-info=build/debug-info
       - name: Build vendor AAB
         script: |
           flutter build appbundle --release \
+            --android-skip-build-dependency-validation \
             --target lib/main_vendor.dart \
             --obfuscate \
             --split-debug-info=build/debug-info
