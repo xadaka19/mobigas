@@ -26,3 +26,9 @@
     public static *** v(...);
     public static *** i(...);
 }
+
+# Flutter Play Store Split Application
+-keep class com.google.android.play.core.** { *; }
+-dontwarn com.google.android.play.core.**
+-dontwarn io.flutter.embedding.android.FlutterPlayStoreSplitApplication
+-dontwarn io.flutter.embedding.engine.deferredcomponents.**
