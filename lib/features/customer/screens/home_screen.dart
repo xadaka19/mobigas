@@ -986,7 +986,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _profileAction(Icons.people_outline_rounded, 'My guarantors',
                     onTap: () => _showGuarantors(context, customer)),
                 _profileAction(Icons.help_outline_rounded, 'Help & support',
-                    onTap: () => _showHelp(context)),
+                    onTap: () => context.go('/support')),
                 _profileAction(Icons.info_outline_rounded, 'About MobiGas',
                     onTap: () => _showAbout(context)),
                 const SizedBox(height: 16),
@@ -1460,50 +1460,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  void _showHelp(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Help & support',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(color: AppColors.navy)),
-            const SizedBox(height: 16),
-            ListTile(
-              leading:
-                  const Icon(Icons.phone_outlined, color: AppColors.orange),
-              title: const Text('Call us'),
-              subtitle: const Text('0800 000 000'),
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.email_outlined, color: AppColors.orange),
-              title: const Text('Email us'),
-              subtitle: const Text('support@mobigas.co.ke'),
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.chat_outlined, color: AppColors.orange),
-              title: const Text('WhatsApp'),
-              subtitle: const Text('+254 700 000 000'),
-            ),
-            const SizedBox(height: 8),
-          ],
         ),
       ),
     );

@@ -1336,6 +1336,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
+                  onPressed: () => context.go('/vendor-support'),
+                  icon: const Icon(Icons.support_agent_rounded, size: 18),
+                  label: const Text('Help & Support'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.orange,
+                    side: const BorderSide(color: AppColors.orange),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
                   onPressed: () async {
                     await FirebaseAuth.instance.signOut();
                     if (mounted) context.go('/');
