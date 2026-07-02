@@ -4,15 +4,18 @@ import 'package:safe_device/safe_device.dart';
 class SecurityService {
   /// Returns true if device is rooted/jailbroken
   static Future<bool> isDeviceCompromised() async {
-    // Skip check in debug mode for development
+    // Always allow in debug mode for development
     if (kDebugMode) return false;
 
     try {
       final isJailBroken = await SafeDevice.isJailBroken;
-      final isDeveloperMode = await SafeDevice.isDevelopmentModeEnable;
-      final isRealDevice = await SafeDevice.isRealDevice;
-      return isJailBroken || isDeveloperMode || !isRealDevice;
+
+      // Only block on confirmed jailbreak/root
+      // Avoid blocking on developer mode alone (too many false positives)
+      // isRealDevice can return false on some legitimate devices
+      return isJailBroken;
     } catch (_) {
+      // If detection fails, allow app to continue
       return false;
     }
   }
