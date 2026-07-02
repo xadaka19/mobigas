@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_jailbreak_detection/flutter_jailbreak_detection.dart';
+import 'package:safe_device/safe_device.dart';
 
 class SecurityService {
   /// Returns true if device is rooted/jailbroken
@@ -8,11 +8,11 @@ class SecurityService {
     if (kDebugMode) return false;
 
     try {
-      final isJailbroken = await FlutterJailbreakDetection.jailbroken;
-      final isDeveloperMode = await FlutterJailbreakDetection.developerMode;
-      return isJailbroken || isDeveloperMode;
+      final isJailBroken = await SafeDevice.isJailBroken;
+      final isDeveloperMode = await SafeDevice.isDevelopmentModeEnable;
+      final isRealDevice = await SafeDevice.isRealDevice;
+      return isJailBroken || isDeveloperMode || !isRealDevice;
     } catch (_) {
-      // If detection fails, allow app to continue (fail open for UX)
       return false;
     }
   }
