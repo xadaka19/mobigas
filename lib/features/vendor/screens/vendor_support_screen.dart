@@ -30,21 +30,16 @@ class _VendorSupportScreenState extends State<VendorSupportScreen> {
   Future<void> _ensureChatDocument() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    final chatRef = FirebaseFirestore.instance
-        .collection('support_chats')
-        .doc(_uid);
-    final doc = await chatRef.get();
-    if (!doc.exists) {
+    try {
+      final chatRef =
+          FirebaseFirestore.instance.collection('support_chats').doc(_uid);
       await chatRef.set({
         'userId': _uid,
         'userEmail': user.email ?? '',
         'userType': 'vendor',
-        'status': 'open',
-        'createdAt': FieldValue.serverTimestamp(),
-        'lastMessage': '',
-        'lastMessageAt': FieldValue.serverTimestamp(),
-        'unreadByAdmin': 0,
-      });
+      }, SetOptions(merge: true));
+    } catch (_) {
+      // Non-fatal: _sendMessage will create/merge the doc anyway.
     }
   }
 
@@ -54,25 +49,35 @@ class _VendorSupportScreenState extends State<VendorSupportScreen> {
     setState(() => _sending = true);
     _controller.clear();
 
-    final chatRef = FirebaseFirestore.instance
-        .collection('support_chats')
-        .doc(_uid);
+    final chatRef =
+        FirebaseFirestore.instance.collection('support_chats').doc(_uid);
 
-    await _messages.add({
-      'text': text,
-      'sender': 'user',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await _messages.add({
+        'text': text,
+        'sender': 'user',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
-    await chatRef.update({
-      'lastMessage': text,
-      'lastMessageAt': FieldValue.serverTimestamp(),
-      'status': 'open',
-      'unreadByAdmin': FieldValue.increment(1),
-    });
-
-    setState(() => _sending = false);
-    _scrollToBottom();
+      await chatRef.set({
+        'userId': _uid,
+        'userEmail': FirebaseAuth.instance.currentUser?.email ?? '',
+        'userType': 'vendor',
+        'lastMessage': text,
+        'lastMessageAt': FieldValue.serverTimestamp(),
+        'status': 'open',
+        'unreadByAdmin': FieldValue.increment(1),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Message failed to send: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+      _scrollToBottom();
+    }
   }
 
   void _scrollToBottom() {
@@ -119,10 +124,35 @@ class _VendorSupportScreenState extends State<VendorSupportScreen> {
                   .orderBy('createdAt', descending: false)
                   .snapshots(),
               builder: (context, snap) {
-                if (!snap.hasData) {
+                if (snap.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.error_outline,
+                              size: 48, color: Colors.red.shade300),
+                          const SizedBox(height: 12),
+                          const Text('Could not load support chat.',
+                              style:
+                                  TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${snap.error}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+                if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final docs = snap.data!.docs;
+                final docs = snap.data?.docs ?? [];
                 if (docs.isEmpty) {
                   return Center(
                     child: Padding(

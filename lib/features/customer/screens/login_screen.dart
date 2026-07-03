@@ -214,7 +214,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         GestureDetector(
-                          onTap: () => context.go('/terms'),
+                          onTap: () => context.push('/terms'),
                           child: Text('Terms of Service',
                               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: AppColors.orange,
@@ -226,7 +226,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   color: AppColors.gray400,
                                 )),
                         GestureDetector(
-                          onTap: () => context.go('/privacy'),
+                          onTap: () => context.push('/privacy'),
                           child: Text('Privacy Policy',
                               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: AppColors.orange,

@@ -182,6 +182,10 @@ class FirestoreService {
                 kg: l['kg'] ?? 0,
                 price: (l['price'] ?? 0).toDouble(),
                 available: l['available'] ?? false,
+                productType: GasProductType.values.firstWhere(
+                  (t) => t.name == (l['productType'] ?? 'refill'),
+                  orElse: () => GasProductType.refill,
+                ),
               ))
           .toList(),
       rating: (data['rating'] ?? 0.0).toDouble(),
@@ -208,6 +212,7 @@ class FirestoreService {
       'gasSize': order.listing.size,
       'gasKg': order.listing.kg,
       'gasPrice': order.listing.price,
+      'gasProductType': order.listing.productType.name,
       'bankDisbursementAmount': order.bankDisbursementAmount,
       'originationFeeToMobigas': order.originationFeeToMobigas,
       'pin': order.pin,
@@ -291,6 +296,10 @@ class FirestoreService {
         kg: data['gasKg'] ?? 0,
         price: (data['gasPrice'] ?? 0).toDouble(),
         available: true,
+        productType: GasProductType.values.firstWhere(
+          (t) => t.name == (data['gasProductType'] ?? 'refill'),
+          orElse: () => GasProductType.refill,
+        ),
       ),
       bankDisbursementAmount:
           (data['bankDisbursementAmount'] ?? 0).toDouble(),

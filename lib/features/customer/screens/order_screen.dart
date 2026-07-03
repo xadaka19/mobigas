@@ -15,11 +15,12 @@ class OrderScreen extends StatefulWidget {
 }
 
 class _OrderScreenState extends State<OrderScreen> {
-  int _currentStep = 0; // 0=select vendor+size, 1=repayment info, 2=summary
+  int _currentStep = 0; // 0=product+size+vendor, 1=repayment info, 2=summary
 
+  GasProductType? _selectedType;
+  String? _selectedSize;
   VendorModel? _selectedVendor;
   GasListing? _selectedListing;
-  String? _creditError;
 
   @override
   void initState() {
@@ -33,33 +34,42 @@ class _OrderScreenState extends State<OrderScreen> {
     });
   }
 
-  void _selectListing(VendorModel vendor, GasListing listing) {
-    final customer = context.read<AuthProvider>().customer;
-    if (customer == null) return;
+  void _selectType(GasProductType type) {
+    setState(() {
+      _selectedType = type;
+      _selectedSize = null;
+      _selectedVendor = null;
+      _selectedListing = null;
+    });
+  }
 
-    if (!customer.canAfford(listing)) {
-      setState(() {
-        _creditError =
-            'Your available credit is KES ${customer.bankCreditAvailable.toStringAsFixed(0)}. '
-            'This order requires KES ${listing.price.toStringAsFixed(0)}. '
-            'Please select a smaller size or repay existing balance.';
-        _selectedListing = null;
-        _selectedVendor = null;
-      });
-      return;
-    }
+  void _selectSize(String size) {
+    setState(() {
+      _selectedSize = size;
+      _selectedVendor = null;
+      _selectedListing = null;
+    });
+  }
 
+  void _selectOffer(VendorModel vendor, GasListing listing) {
     setState(() {
       _selectedVendor = vendor;
       _selectedListing = listing;
-      _creditError = null;
     });
   }
 
   void _nextStep() {
     if (_currentStep == 0) {
+      if (_selectedType == null) {
+        _showError('Please choose what you want to order');
+        return;
+      }
+      if (_selectedSize == null) {
+        _showError('Please choose a gas size');
+        return;
+      }
       if (_selectedVendor == null || _selectedListing == null) {
-        _showError('Please select a vendor and gas size');
+        _showError('Please choose a vendor');
         return;
       }
     }
@@ -84,7 +94,11 @@ class _OrderScreenState extends State<OrderScreen> {
     final orders = context.read<OrderProvider>();
     final customer = auth.customer;
 
-    if (customer == null || _selectedVendor == null || _selectedListing == null) return;
+    if (customer == null ||
+        _selectedVendor == null ||
+        _selectedListing == null) {
+      return;
+    }
 
     Navigator.pop(context); // close sheet
 
@@ -94,7 +108,7 @@ class _OrderScreenState extends State<OrderScreen> {
       listing: _selectedListing!,
     );
 
-    if (mounted) context.go('/order-tracking');
+    if (mounted) context.pushReplacement('/order-tracking');
   }
 
   void _showConfirmSheet() {
@@ -110,6 +124,41 @@ class _OrderScreenState extends State<OrderScreen> {
   double get _bankInterest => _gasPrice * MobiGasFees.bankInterestRate;
   double get _totalRepayment => _gasPrice + _bankInterest;
 
+  bool get _isRefill => _selectedType == GasProductType.refill;
+
+  String _typeDescription(GasProductType t) {
+    switch (t) {
+      case GasProductType.refill:
+        return 'Gas only — the vendor collects your empty cylinder when they deliver';
+      case GasProductType.fullKit:
+        return 'New cylinder + gas — no empty cylinder needed';
+      case GasProductType.grillKit:
+        return '6kg gas + cylinder + stove + grill — complete starter package';
+    }
+  }
+
+  IconData _typeIcon(GasProductType t) {
+    switch (t) {
+      case GasProductType.refill:
+        return Icons.autorenew_rounded;
+      case GasProductType.fullKit:
+        return Icons.propane_tank_outlined;
+      case GasProductType.grillKit:
+        return Icons.outdoor_grill_rounded;
+    }
+  }
+
+  String _shortTypeLabel(GasProductType t) {
+    switch (t) {
+      case GasProductType.refill:
+        return 'Refill';
+      case GasProductType.fullKit:
+        return 'Gas + cylinder';
+      case GasProductType.grillKit:
+        return 'Gas + cylinder + grill';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -124,7 +173,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    if (_currentStep == 0) _buildVendorSizeStep(),
+                    if (_currentStep == 0) _buildProductStep(),
                     if (_currentStep == 1) _buildRepaymentStep(),
                     if (_currentStep == 2) _buildSummaryStep(),
                     const SizedBox(height: 24),
@@ -140,9 +189,9 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _buildHeader() {
-    final titles = ['Select gas & vendor', 'Repayment info', 'Order summary'];
+    final titles = ['Order gas', 'Repayment info', 'Order summary'];
     final subtitles = [
-      'Prices set by each vendor',
+      'Pick product, size, then vendor',
       'Pay within 30 days via M-Pesa',
       'Review before confirming',
     ];
@@ -160,7 +209,7 @@ class _OrderScreenState extends State<OrderScreen> {
               if (_currentStep > 0) {
                 setState(() => _currentStep--);
               } else {
-                context.go('/home');
+                context.pop();
               }
             },
             child: const Icon(Icons.arrow_back_ios_rounded,
@@ -231,52 +280,60 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
-  // ── STEP 1: VENDOR + SIZE ─────────────────────────────────────────
-  Widget _buildVendorSizeStep() {
+  // ── STEP 1: PRODUCT → SIZE → VENDOR ──────────────────────────────
+  Widget _buildProductStep() {
     final customer = context.watch<AuthProvider>().customer;
     final vendorProvider = context.watch<VendorProvider>();
-    final vendors = vendorProvider.vendors;
+    final vendors = vendorProvider.vendors
+        .where((v) => v.isOnline && v.isVerified)
+        .toList();
+
+    // Product types actually offered by online vendors
+    final offeredTypes = <GasProductType>{
+      for (final v in vendors)
+        for (final l in v.listings)
+          if (l.available) l.productType,
+    };
+
+    // Sizes available for the selected type (sorted by kg)
+    final sizeKg = <String, int>{};
+    if (_selectedType != null) {
+      for (final v in vendors) {
+        for (final l in v.listings) {
+          if (l.available && l.productType == _selectedType) {
+            sizeKg[l.size] = l.kg;
+          }
+        }
+      }
+    }
+    final sizes = sizeKg.keys.toList()
+      ..sort((a, b) => sizeKg[a]!.compareTo(sizeKg[b]!));
+
+    // Vendor offers for type + size, cheapest first
+    final offers = <(VendorModel, GasListing)>[];
+    if (_selectedType != null && _selectedSize != null) {
+      for (final v in vendors) {
+        for (final l in v.listings) {
+          if (l.available &&
+              l.productType == _selectedType &&
+              l.size == _selectedSize) {
+            offers.add((v, l));
+          }
+        }
+      }
+      offers.sort((a, b) => a.$2.price.compareTo(b.$2.price));
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Credit card
         if (customer != null) _buildCreditCard(customer),
         const SizedBox(height: 16),
-        _infoCard(icon: Icons.swap_horiz_rounded, text: 'Have your empty cylinder ready for exchange on delivery.'),
-        const SizedBox(height: 16),
-        // Credit error
-        if (_creditError != null) ...[
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.errorLight,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.warning_rounded,
-                    color: AppColors.error, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(_creditError!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.error,
-                            height: 1.5,
-                          )),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
-        // Loading
+
+        // Loading / empty
         if (vendorProvider.isLoading)
           const Center(
               child: CircularProgressIndicator(color: AppColors.orange)),
-        // Vendors list
         if (!vendorProvider.isLoading && vendors.isEmpty)
           Container(
             width: double.infinity,
@@ -304,8 +361,309 @@ class _OrderScreenState extends State<OrderScreen> {
               ],
             ),
           ),
-        ...vendors.map((v) => _vendorCard(v, customer)),
+
+        if (vendors.isNotEmpty) ...[
+          // 1) PRODUCT TYPE
+          _sectionTitle('1. What do you need?'),
+          const SizedBox(height: 10),
+          ...GasProductType.values
+              .where((t) => offeredTypes.contains(t))
+              .map((t) => _typeCard(t)),
+
+          // 2) SIZE
+          if (_selectedType != null) ...[
+            const SizedBox(height: 20),
+            _sectionTitle('2. Choose size'),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: sizes.map((s) => _sizeChip(s)).toList(),
+            ),
+            if (_isRefill) ...[
+              const SizedBox(height: 12),
+              _infoCard(
+                icon: Icons.swap_horiz_rounded,
+                text:
+                    'Have your empty cylinder ready — the vendor collects it when they deliver.',
+              ),
+            ],
+          ],
+
+          // 3) VENDOR
+          if (_selectedType != null && _selectedSize != null) ...[
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                _sectionTitle('3. Choose vendor'),
+                const Spacer(),
+                Text('Cheapest first',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.gray400,
+                          fontSize: 11,
+                        )),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (offers.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.gray200),
+                ),
+                child: Text(
+                  'No vendor currently offers this option. Try another size or product.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.gray400),
+                ),
+              ),
+            ...offers.asMap().entries.map((e) => _offerRow(
+                  e.value.$1,
+                  e.value.$2,
+                  customer,
+                  isCheapest: e.key == 0 && offers.length > 1,
+                )),
+          ],
+        ],
       ],
+    );
+  }
+
+  Widget _sectionTitle(String text) {
+    return Text(text,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: AppColors.navy,
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+            ));
+  }
+
+  Widget _typeCard(GasProductType type) {
+    final isSelected = _selectedType == type;
+    return GestureDetector(
+      onTap: () => _selectType(type),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? AppColors.orange : AppColors.gray200,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppColors.orange
+                    : AppColors.orange.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(_typeIcon(type),
+                  color: isSelected ? AppColors.white : AppColors.orange,
+                  size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_shortTypeLabel(type),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: AppColors.navy,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          )),
+                  const SizedBox(height: 2),
+                  Text(_typeDescription(type),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.gray400,
+                            fontSize: 11,
+                            height: 1.4,
+                          )),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              isSelected
+                  ? Icons.check_circle_rounded
+                  : Icons.circle_outlined,
+              color: isSelected ? AppColors.orange : AppColors.gray200,
+              size: 22,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sizeChip(String size) {
+    final isSelected = _selectedSize == size;
+    return GestureDetector(
+      onTap: () => _selectSize(size),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.orange : AppColors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? AppColors.orange : AppColors.gray200,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          size,
+          style: TextStyle(
+            color: isSelected ? AppColors.white : AppColors.navy,
+            fontWeight: FontWeight.w700,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _offerRow(VendorModel vendor, GasListing listing,
+      CustomerModel? customer,
+      {bool isCheapest = false}) {
+    final isSelected = _selectedVendor?.id == vendor.id &&
+        _selectedListing?.size == listing.size &&
+        _selectedListing?.productType == listing.productType;
+    final canAfford = customer?.canAfford(listing) ?? false;
+
+    return GestureDetector(
+      onTap: canAfford ? () => _selectOffer(vendor, listing) : null,
+      child: Opacity(
+        opacity: canAfford ? 1.0 : 0.55,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected ? AppColors.orange : AppColors.gray200,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: AppColors.orange,
+                child: Text(vendor.businessName[0].toUpperCase(),
+                    style: const TextStyle(
+                      color: AppColors.white,
+                      fontWeight: FontWeight.w700,
+                    )),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(vendor.businessName,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    fontSize: 14,
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        if (isCheapest && canAfford) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.successLight,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text('Best price',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: AppColors.success,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    )),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${vendor.estate} · ${vendor.distance} · ★ ${vendor.rating.toStringAsFixed(1)} · ${vendor.deliveryTime}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.gray400,
+                            fontSize: 11,
+                          ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (!canAfford) ...[
+                      const SizedBox(height: 4),
+                      Text('Above your available credit',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: AppColors.error,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              )),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('KES ${listing.price.toStringAsFixed(0)}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: canAfford
+                                ? AppColors.orange
+                                : AppColors.gray400,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          )),
+                  const SizedBox(height: 4),
+                  Icon(
+                    isSelected
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    color:
+                        isSelected ? AppColors.orange : AppColors.gray200,
+                    size: 20,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -340,7 +698,8 @@ class _OrderScreenState extends State<OrderScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('Limit: KES ${customer.bankApprovedLimit?.toStringAsFixed(0) ?? "0"}',
+              Text(
+                  'Limit: KES ${customer.bankApprovedLimit?.toStringAsFixed(0) ?? "0"}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                         fontSize: 11,
@@ -362,265 +721,6 @@ class _OrderScreenState extends State<OrderScreen> {
               ],
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _vendorCard(VendorModel vendor, CustomerModel? customer) {
-    final isSelected = _selectedVendor?.id == vendor.id;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isSelected ? AppColors.orange : AppColors.gray200,
-          width: isSelected ? 2 : 1,
-        ),
-      ),
-      child: Column(
-        children: [
-          // Vendor header
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor:
-                      vendor.isOnline ? AppColors.orange : AppColors.gray200,
-                  child: Text(vendor.businessName[0],
-                      style: TextStyle(
-                        color: vendor.isOnline
-                            ? AppColors.white
-                            : AppColors.gray400,
-                        fontWeight: FontWeight.w700,
-                      )),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(vendor.businessName,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                fontSize: 14,
-                                color: vendor.isOnline
-                                    ? AppColors.navy
-                                    : AppColors.gray400,
-                              )),
-                      Text('${vendor.estate} · ${vendor.distance}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: AppColors.gray400)),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: vendor.isOnline
-                            ? AppColors.successLight
-                            : AppColors.gray200,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        vendor.isOnline ? 'Online' : 'Offline',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: vendor.isOnline
-                                  ? AppColors.success
-                                  : AppColors.gray400,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(Icons.star_rounded,
-                            color: AppColors.warning, size: 12),
-                        const SizedBox(width: 2),
-                        Text('${vendor.rating}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: AppColors.navy,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                )),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          // Gas sizes
-          if (vendor.isOnline && vendor.isVerified) ...[
-            const Divider(height: 1, color: AppColors.gray200),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Select size',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.gray600,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 11,
-                          )),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: vendor.listings.map((listing) {
-                      final isListingSelected =
-                          _selectedListing?.size == listing.size &&
-                              _selectedVendor?.id == vendor.id;
-                      final canAfford =
-                          customer?.canAfford(listing) ?? false;
-
-                      return Expanded(
-                        child: GestureDetector(
-                          onTap: (!listing.available || !canAfford)
-                              ? null
-                              : () => _selectListing(vendor, listing),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 10, horizontal: 6),
-                            decoration: BoxDecoration(
-                              color: !listing.available
-                                  ? AppColors.gray100
-                                  : isListingSelected
-                                      ? AppColors.orange
-                                      : !canAfford
-                                          ? AppColors.errorLight
-                                          : AppColors.orangeLight,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isListingSelected
-                                    ? AppColors.orange
-                                    : !listing.available
-                                        ? AppColors.gray200
-                                        : !canAfford
-                                            ? AppColors.error
-                                                .withValues(alpha: 0.3)
-                                            : AppColors.orange
-                                                .withValues(alpha: 0.3),
-                              ),
-                            ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  listing.size,
-                                  style: TextStyle(
-                                    color: !listing.available
-                                        ? AppColors.gray400
-                                        : isListingSelected
-                                            ? AppColors.white
-                                            : AppColors.navy,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  !listing.available
-                                      ? 'N/A'
-                                      : 'KES ${listing.price.toStringAsFixed(0)}',
-                                  style: TextStyle(
-                                    color: !listing.available
-                                        ? AppColors.gray400
-                                        : isListingSelected
-                                            ? AppColors.white
-                                                .withValues(alpha: 0.9)
-                                            : AppColors.orange,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                if (!listing.available)
-                                  Text('Out of stock',
-                                      style: TextStyle(
-                                          color: AppColors.gray400,
-                                          fontSize: 9),
-                                      textAlign: TextAlign.center),
-                                if (listing.available && !canAfford)
-                                  Text('Low credit',
-                                      style: TextStyle(
-                                          color: AppColors.error, fontSize: 9),
-                                      textAlign: TextAlign.center),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 8),
-                  // Brands
-                  Wrap(
-                    spacing: 4,
-                    children: vendor.brands
-                        .map((b) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppColors.gray100,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(b,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(
-                                          color: AppColors.gray600,
-                                          fontSize: 10)),
-                            ))
-                        .toList(),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(Icons.access_time_rounded,
-                          color: AppColors.gray400, size: 12),
-                      const SizedBox(width: 4),
-                      Text(vendor.deliveryTime,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                  color: AppColors.gray400, fontSize: 11)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ] else ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              child: Text('This vendor is currently offline',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: AppColors.gray400),
-                  textAlign: TextAlign.center),
-            ),
-          ],
         ],
       ),
     );
@@ -652,7 +752,8 @@ class _OrderScreenState extends State<OrderScreen> {
                         fontWeight: FontWeight.w700,
                       )),
               const SizedBox(height: 16),
-              _feeRow('Gas price (${_selectedListing?.size})',
+              _feeRow(
+                  '${_shortTypeLabel(_selectedListing?.productType ?? GasProductType.refill)} (${_selectedListing?.size})',
                   'KES ${_gasPrice.toStringAsFixed(0)}'),
               _feeRow('Bank interest (8%)',
                   'KES ${_bankInterest.toStringAsFixed(0)}'),
@@ -761,13 +862,15 @@ class _OrderScreenState extends State<OrderScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
-          Text(label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.gray400,
-                    fontWeight:
-                        isBold ? FontWeight.w600 : FontWeight.w400,
-                  )),
-          const Spacer(),
+          Expanded(
+            child: Text(label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.gray400,
+                      fontWeight:
+                          isBold ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                overflow: TextOverflow.ellipsis),
+          ),
           Text(value,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: valueColor ?? AppColors.white,
@@ -843,9 +946,13 @@ class _OrderScreenState extends State<OrderScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    _summaryRow('Vendor', _selectedVendor?.businessName ?? ''),
+                    _summaryRow(
+                        'Product',
+                        _shortTypeLabel(_selectedListing?.productType ??
+                            GasProductType.refill)),
                     _summaryRow('Gas size', _selectedListing?.size ?? ''),
-                    _summaryRow('Gas price',
+                    _summaryRow('Vendor', _selectedVendor?.businessName ?? ''),
+                    _summaryRow('Price',
                         'KES ${_gasPrice.toStringAsFixed(0)}'),
                     _summaryRow('Bank interest (8%)',
                         'KES ${_bankInterest.toStringAsFixed(0)}'),
@@ -867,50 +974,52 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.warningLight,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-                color: AppColors.warning.withValues(alpha: 0.4)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.warning_amber_rounded,
-                  color: AppColors.warning, size: 22),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Have your empty cylinder ready',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              fontSize: 14,
-                              color: Color(0xFF92400E),
-                              fontWeight: FontWeight.w600,
-                            )),
-                    const SizedBox(height: 4),
-                    Text(
-                        'The vendor collects your empty cylinder on delivery.',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color: Color(0xFF92400E),
-                              height: 1.5,
-                            )),
-                  ],
+        if (_isRefill) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.warningLight,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: AppColors.warning.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    color: AppColors.warning, size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Have your empty cylinder ready',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                fontSize: 14,
+                                color: Color(0xFF92400E),
+                                fontWeight: FontWeight.w600,
+                              )),
+                      const SizedBox(height: 4),
+                      Text(
+                          'The vendor collects your empty cylinder when they deliver.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: Color(0xFF92400E),
+                                height: 1.5,
+                              )),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -926,13 +1035,17 @@ class _OrderScreenState extends State<OrderScreen> {
                     color: AppColors.gray600,
                   )),
           const Spacer(),
-          Text(value,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: valueColor ?? AppColors.navy,
-                    fontWeight:
-                        isBold ? FontWeight.w700 : FontWeight.w500,
-                    fontSize: isBold ? 16 : 14,
-                  )),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.end,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: valueColor ?? AppColors.navy,
+                      fontWeight:
+                          isBold ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: isBold ? 16 : 14,
+                    ),
+                overflow: TextOverflow.ellipsis),
+          ),
         ],
       ),
     );
@@ -941,6 +1054,8 @@ class _OrderScreenState extends State<OrderScreen> {
   // ── CONFIRM SHEET ─────────────────────────────────────────────────
   Widget _buildConfirmSheet() {
     final isLoading = context.watch<OrderProvider>().isLoading;
+    final typeLabel = _shortTypeLabel(
+        _selectedListing?.productType ?? GasProductType.refill);
 
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -971,7 +1086,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   ?.copyWith(color: AppColors.navy)),
           const SizedBox(height: 8),
           Text(
-              '${_selectedListing?.size} gas · KES ${_totalRepayment.toStringAsFixed(0)} total',
+              '${_selectedListing?.size} $typeLabel · KES ${_totalRepayment.toStringAsFixed(0)} total',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme

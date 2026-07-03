@@ -15,7 +15,7 @@ class TermsScreen extends StatelessWidget {
         if (Navigator.canPop(context)) {
           Navigator.pop(context);
         } else {
-          context.go('/login');
+          context.pop();
         }
       },
       child: Scaffold(
@@ -29,7 +29,7 @@ class TermsScreen extends StatelessWidget {
             if (Navigator.canPop(context)) {
               Navigator.pop(context);
             } else {
-              context.go('/login');
+              context.pop();
             }
           },
         ),

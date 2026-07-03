@@ -137,7 +137,7 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
                             fontSize: 11,
                           )),
                   GestureDetector(
-                    onTap: () => context.go('/terms'),
+                    onTap: () => context.push('/terms'),
                     child: Text('Terms',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.orange,
@@ -151,7 +151,7 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
                             fontSize: 11,
                           )),
                   GestureDetector(
-                    onTap: () => context.go('/privacy'),
+                    onTap: () => context.push('/privacy'),
                     child: Text('Privacy Policy',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.orange,

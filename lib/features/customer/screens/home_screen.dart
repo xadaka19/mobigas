@@ -7,6 +7,7 @@ import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/customer/screens/repayments_screen.dart';
+import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -26,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context.read<OrderProvider>().addListener(() {
         final order = context.read<OrderProvider>().activeOrder;
         if (order?.status == OrderStatus.outForDelivery && mounted) {
-          context.go('/order-tracking');
+          context.push('/order-tracking');
         }
       });
 
@@ -53,24 +54,26 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: AppColors.orangeWarm,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: IndexedStack(
-                index: _currentTab,
-                children: [
-                  _buildHomeTab(customer, orders),
-                  _buildOrdersTab(orders),
-                  const RepaymentsScreen(),
-                  _buildProfileTab(customer, auth),
-                ],
+    return DoubleBackToExit(
+      child: Scaffold(
+        backgroundColor: AppColors.orangeWarm,
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: IndexedStack(
+                  index: _currentTab,
+                  children: [
+                    _buildHomeTab(customer, orders),
+                    _buildOrdersTab(orders),
+                    const RepaymentsScreen(),
+                    _buildProfileTab(customer, auth),
+                  ],
+                ),
               ),
-            ),
-            _buildBottomNav(),
-          ],
+              _buildBottomNav(),
+            ],
+          ),
         ),
       ),
     );
@@ -347,9 +350,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () {
         if (canOrder) {
-          context.go('/order');
+          context.push('/order');
         } else {
-          context.go('/credit-application');
+          context.push('/credit-application');
         }
       },
       child: Container(
@@ -511,142 +514,162 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          height: 185,
-          child: vendors.isEmpty
-              ? Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppColors.gray200),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.store_outlined,
-                          size: 36, color: AppColors.gray400),
-                      const SizedBox(height: 8),
-                      Text('No vendors online yet',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(color: AppColors.gray400)),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: vendors.length,
-                  itemBuilder: (_, i) => _vendorCard(vendors[i]),
+        vendors.isEmpty
+            ? Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.gray200),
                 ),
-        ),
+                child: Column(
+                  children: [
+                    const Icon(Icons.store_outlined,
+                        size: 36, color: AppColors.gray400),
+                    const SizedBox(height: 8),
+                    Text('No vendors online yet',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: AppColors.gray400)),
+                  ],
+                ),
+              )
+            : Column(
+                children:
+                    vendors.take(3).map((v) => _vendorCard(v)).toList(),
+              ),
       ],
     );
   }
 
   Widget _vendorCard(VendorModel vendor) {
-    return Container(
-      width: 190,
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.gray200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: AppColors.orange,
-                child: Text(vendor.businessName[0],
-                    style: const TextStyle(
-                        color: AppColors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(vendor.businessName,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color: AppColors.navy,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 11,
-                            ),
-                        overflow: TextOverflow.ellipsis),
-                    Text(vendor.distance,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                                color: AppColors.gray400, fontSize: 10)),
-                  ],
-                ),
-              ),
-            ],
+    final available = vendor.listings.where((l) => l.available).toList();
+    final refills = available
+        .where((l) => l.productType == GasProductType.refill)
+        .toList();
+    final hasFullKit =
+        available.any((l) => l.productType == GasProductType.fullKit);
+    final hasGrillKit =
+        available.any((l) => l.productType == GasProductType.grillKit);
+    final double? refillFrom = refills.isEmpty
+        ? null
+        : refills.map((l) => l.price).reduce((a, b) => a < b ? a : b);
+
+    Widget chip(String label) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: AppColors.gray100,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.gray200),
           ),
-          const SizedBox(height: 8),
-          const Divider(height: 1, color: AppColors.gray200),
-          const SizedBox(height: 8),
-          ...vendor.listings
-              .where((l) => l.available)
-              .map((l) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.local_fire_department_rounded,
-                            color: AppColors.orange, size: 11),
-                        const SizedBox(width: 4),
-                        Text(l.size,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                    color: AppColors.navy,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 11)),
-                        const Spacer(),
-                        Text('KES ${l.price.toStringAsFixed(0)}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                    color: AppColors.orange,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 11)),
-                      ],
-                    ),
+          child: Text(label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray600,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
                   )),
-          const Spacer(),
-          Row(
-            children: [
-              const Icon(Icons.star_rounded,
-                  color: AppColors.warning, size: 11),
-              const SizedBox(width: 2),
-              Text('${vendor.rating}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.navy,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600)),
-              const Spacer(),
-              const Icon(Icons.access_time_rounded,
-                  color: AppColors.gray400, size: 10),
-              const SizedBox(width: 2),
-              Text(vendor.deliveryTime,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.gray400, fontSize: 10)),
+        );
+
+    return GestureDetector(
+      onTap: () => context.push('/order'),
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.gray200),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppColors.orange,
+                  child: Text(vendor.businessName[0].toUpperCase(),
+                      style: const TextStyle(
+                          color: AppColors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(vendor.businessName,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                      color: AppColors.navy,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.success
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text('Online',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: AppColors.success,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    )),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${vendor.distance} · ★ ${vendor.rating.toStringAsFixed(1)} · ${vendor.deliveryTime}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                                color: AppColors.gray400, fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios_rounded,
+                    size: 14, color: AppColors.gray400),
+              ],
+            ),
+            if (refillFrom != null || hasFullKit || hasGrillKit) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  if (refillFrom != null)
+                    chip(
+                        'Refills from KES ${refillFrom.toStringAsFixed(0)}'),
+                  if (hasFullKit) chip('Gas + cylinder'),
+                  if (hasGrillKit) chip('Gas + cylinder + grill'),
+                ],
+              ),
             ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -827,7 +850,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 48),
                         child: ElevatedButton(
-                          onPressed: () => context.go('/order'),
+                          onPressed: () => context.push('/order'),
                           child: const Text('Order gas now'),
                         ),
                       ),
@@ -905,7 +928,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ?.copyWith(color: AppColors.white)),
                 const SizedBox(height: 8),
                 GestureDetector(
-                  onTap: () => context.go('/edit-profile'),
+                  onTap: () => context.push('/edit-profile'),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 6),
@@ -986,7 +1009,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _profileAction(Icons.people_outline_rounded, 'My guarantors',
                     onTap: () => _showGuarantors(context, customer)),
                 _profileAction(Icons.help_outline_rounded, 'Help & support',
-                    onTap: () => context.go('/support')),
+                    onTap: () => context.push('/support')),
                 _profileAction(Icons.info_outline_rounded, 'About MobiGas',
                     onTap: () => _showAbout(context)),
                 const SizedBox(height: 16),

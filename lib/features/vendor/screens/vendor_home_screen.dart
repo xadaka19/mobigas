@@ -9,6 +9,7 @@ import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart'
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
 import 'package:mobigas/features/vendor/screens/stock_loan_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
+import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 
 class VendorHomeScreen extends StatefulWidget {
   const VendorHomeScreen({super.key});
@@ -177,7 +178,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       );
     }
 
-    return Scaffold(
+    return DoubleBackToExit(
+      child: Scaffold(
       backgroundColor: AppColors.orangeWarm,
       body: SafeArea(
         child: Column(
@@ -196,6 +198,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             _buildBottomNav(),
           ],
         ),
+      ),
       ),
     );
   }
@@ -1336,7 +1339,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
-                  onPressed: () => context.go('/vendor-support'),
+                  onPressed: () => context.push('/vendor-support'),
                   icon: const Icon(Icons.support_agent_rounded, size: 18),
                   label: const Text('Help & Support'),
                   style: OutlinedButton.styleFrom(
