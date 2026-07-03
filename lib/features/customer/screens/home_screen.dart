@@ -91,11 +91,13 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 _buildCreditCard(customer),
                 const SizedBox(height: 20),
-                _buildOrderButton(customer),
+                if (!customer.isBankApproved) ...[
+                  _buildApplyCreditCard(),
+                  const SizedBox(height: 20),
+                ],
+                _buildVendorPreview(),
                 const SizedBox(height: 20),
                 _buildHowItWorks(),
-                const SizedBox(height: 20),
-                _buildVendorPreview(),
                 const SizedBox(height: 20),
                 _buildRecentOrders(orders),
               ],
@@ -355,112 +357,57 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildOrderButton(CustomerModel customer) {
-    final hasCredit = customer.isBankApproved;
-    return Column(
-      children: [
-        GestureDetector(
-          onTap: () => context.push('/order'),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.orange,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.orange.withValues(alpha: 0.4),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: AppColors.white.withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.local_fire_department_rounded,
-                      color: AppColors.white, size: 28),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Order gas now',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(
-                              color: AppColors.white,
-                              fontSize: 18,
-                            ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        hasCredit
-                            ? 'Pay with credit or cash on delivery'
-                            : 'Pay cash on delivery · Delivered to your door',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color:
-                                  AppColors.white.withValues(alpha: 0.8),
-                              fontSize: 12,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.arrow_forward_ios_rounded,
-                    color: AppColors.white, size: 18),
-              ],
-            ),
-          ),
+  Widget _buildApplyCreditCard() {
+    return GestureDetector(
+      onTap: () => context.push('/credit-application'),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.navy,
+          borderRadius: BorderRadius.circular(16),
         ),
-        if (!hasCredit) ...[
-          const SizedBox(height: 10),
-          GestureDetector(
-            onTap: () => context.push('/credit-application'),
-            child: Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color: AppColors.navy,
-                borderRadius: BorderRadius.circular(14),
+                color: AppColors.orange.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
               ),
-              child: Row(
+              child: const Icon(Icons.credit_score_rounded,
+                  color: AppColors.orange, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.credit_score_rounded,
-                      color: AppColors.orange, size: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Want gas on credit? Apply for a credit limit',
-                      style:
-                          Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                    ),
+                  Text(
+                    'Want gas on credit?',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: AppColors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
-                  const Icon(Icons.arrow_forward_ios_rounded,
-                      color: AppColors.orange, size: 14),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Apply for a credit limit — order now, repay in 30 days',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.gray400,
+                          fontSize: 11,
+                        ),
+                  ),
                 ],
               ),
             ),
-          ),
-        ],
-      ],
+            const Icon(Icons.arrow_forward_ios_rounded,
+                color: AppColors.orange, size: 14),
+          ],
+        ),
+      ),
     );
   }
 
@@ -548,17 +495,20 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Row(
           children: [
-            Text('Gas vendors near you',
+            Text('Order from vendors near you',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: AppColors.navy,
                       fontWeight: FontWeight.w700,
                     )),
             const Spacer(),
-            Text('${vendors.length} online',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.success,
-                      fontWeight: FontWeight.w600,
-                    )),
+            GestureDetector(
+              onTap: () => context.push('/order'),
+              child: Text('${vendors.length} online →',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.success,
+                        fontWeight: FontWeight.w600,
+                      )),
+            ),
           ],
         ),
         const SizedBox(height: 12),

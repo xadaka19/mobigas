@@ -27,11 +27,16 @@ class _OrderScreenState extends State<OrderScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final auth = context.read<AuthProvider>();
-      context.read<VendorProvider>().loadVendors(
-            lat: auth.customer?.latitude,
-            lng: auth.customer?.longitude,
-          );
+      // Vendors are already loaded on the home screen — only fetch
+      // if the list is empty, so this screen opens instantly.
+      final vendorProvider = context.read<VendorProvider>();
+      if (vendorProvider.vendors.isEmpty && !vendorProvider.isLoading) {
+        final auth = context.read<AuthProvider>();
+        vendorProvider.loadVendors(
+          lat: auth.customer?.latitude,
+          lng: auth.customer?.longitude,
+        );
+      }
     });
   }
 
@@ -355,17 +360,54 @@ class _OrderScreenState extends State<OrderScreen> {
       offers.sort((a, b) => a.$2.price.compareTo(b.$2.price));
     }
 
+    final creditApproved = customer?.isBankApproved ?? false;
+    // Section numbers shift when the payment chooser is hidden.
+    final n2 = creditApproved ? 2 : 1;
+    final n3 = creditApproved ? 3 : 2;
+    final n4 = creditApproved ? 4 : 3;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1) PAYMENT METHOD
-        _sectionTitle('1. How will you pay?'),
-        const SizedBox(height: 10),
-        _paymentMethodCards(customer),
-
-        if (!_isCash && customer != null) ...[
-          const SizedBox(height: 12),
-          _buildCreditCard(customer),
+        if (creditApproved) ...[
+          // Customer has a real choice — show it.
+          _sectionTitle('1. How will you pay?'),
+          const SizedBox(height: 10),
+          _paymentMethodCards(customer),
+          if (!_isCash && customer != null) ...[
+            const SizedBox(height: 12),
+            _buildCreditCard(customer),
+          ],
+        ] else ...[
+          // No credit limit — cash is simply how it works.
+          _infoCard(
+            icon: Icons.payments_outlined,
+            text:
+                'You\'ll pay cash on delivery — directly to the vendor when your gas arrives.',
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: () => context.push('/credit-application'),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.credit_score_rounded,
+                      color: AppColors.orange, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Want to pay later? Apply for a credit limit →',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: AppColors.orange,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          )),
+                ],
+              ),
+            ),
+          ),
         ],
 
         // Loading / empty
@@ -405,18 +447,18 @@ class _OrderScreenState extends State<OrderScreen> {
         ],
 
         if (vendors.isNotEmpty) ...[
-          // 2) PRODUCT TYPE
+          // PRODUCT TYPE
           const SizedBox(height: 20),
-          _sectionTitle('2. What do you need?'),
+          _sectionTitle('$n2. What do you need?'),
           const SizedBox(height: 10),
           ...GasProductType.values
               .where((t) => offeredTypes.contains(t))
               .map((t) => _typeCard(t)),
 
-          // 3) SIZE
+          // SIZE
           if (_selectedType != null) ...[
             const SizedBox(height: 20),
-            _sectionTitle('3. Choose size'),
+            _sectionTitle('$n3. Choose size'),
             const SizedBox(height: 10),
             Wrap(
               spacing: 10,
@@ -433,12 +475,12 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ],
 
-          // 4) VENDOR
+          // VENDOR
           if (_selectedType != null && _selectedSize != null) ...[
             const SizedBox(height: 20),
             Row(
               children: [
-                _sectionTitle('4. Choose vendor'),
+                _sectionTitle('$n4. Choose vendor'),
                 const Spacer(),
                 Text('Cheapest first',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
