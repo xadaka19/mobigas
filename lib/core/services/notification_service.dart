@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/services/delivery_notification_service.dart';
+import 'package:mobigas/core/services/notification_router.dart';
 
 // MUST be top-level function for background messages
 @pragma('vm:entry-point')
@@ -13,10 +14,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Android auto-displays it — don't show a duplicate local notification.
   if (message.notification != null) return;
 
-  // Data-only messages (delivery tracking) — show custom local notification
+  // Data-only messages — route by type.
   final data = message.data;
-  final title = data['title'] ?? 'MobiGas';
-  final body = data['body'] ?? '';
+  final title = data['notificationTitle'] ?? data['title'] ?? '';
+  final body = data['notificationBody'] ?? data['body'] ?? '';
   final type = data['type'] ?? '';
 
   if (type == 'order_update' || type == 'delivery') {
@@ -26,10 +27,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       status: body,
     );
   } else {
-    await DeliveryNotificationService.showDeliveryProgress(
-      vendorName: '',
-      gasSize: title,
-      status: body,
+    // Everything else (credit updates, new orders, payments, etc.)
+    // gets a normal notification with the message's own title.
+    await DeliveryNotificationService.showGeneralNotification(
+      title: title,
+      body: body,
+      type: type,
     );
   }
 }
@@ -69,15 +72,22 @@ class NotificationService {
     });
 
     // Handle notification tap when app in background
+    // (FCM-displayed notifications; local notification taps are
+    // handled inside DeliveryNotificationService via payload).
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       debugPrint('Notification tapped: ${message.data}');
-      _handleNotificationTap(message);
+      NotificationRouter.navigateForType(message.data['type']);
     });
 
-    // Handle notification tap when app terminated
+    // Handle notification tap when app was terminated.
+    // Delay so the splash screen finishes auth + its own redirect
+    // first; otherwise our navigation gets overwritten by the
+    // splash's context.go().
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
-      _handleNotificationTap(initialMessage);
+      Future.delayed(const Duration(seconds: 3), () {
+        NotificationRouter.navigateForType(initialMessage.data['type']);
+      });
     }
   }
 
@@ -124,20 +134,34 @@ class NotificationService {
   static Future<void> _showForegroundNotification(
       RemoteMessage message) async {
     await DeliveryNotificationService.initialize();
-    final title = message.data['title'] ?? 'MobiGas';
-    final body = message.data['body'] ?? '';
-    await DeliveryNotificationService.showDeliveryProgress(
-      vendorName: '',
-      gasSize: title,
-      status: body,
-    );
-  }
 
-  static void _handleNotificationTap(RemoteMessage message) {
-    // Navigation handled by app router based on data
-    final type = message.data['type'] ?? '';
-    debugPrint('Notification type: $type');
-    // TODO: use GoRouter to navigate based on type
+    // In the foreground Android does NOT auto-display FCM notification
+    // payloads, so we show one ourselves — using the message's own
+    // title/body, whether it arrived as a notification block or data.
+    final data = message.data;
+    final title = message.notification?.title ??
+        data['notificationTitle'] ??
+        data['title'] ??
+        '';
+    final body = message.notification?.body ??
+        data['notificationBody'] ??
+        data['body'] ??
+        '';
+    final type = data['type'] ?? '';
+
+    if (type == 'order_update' || type == 'delivery') {
+      await DeliveryNotificationService.showDeliveryProgress(
+        vendorName: data['vendorName'] ?? '',
+        gasSize: data['gasSize'] ?? '',
+        status: body,
+      );
+    } else {
+      await DeliveryNotificationService.showGeneralNotification(
+        title: title,
+        body: body,
+        type: type,
+      );
+    }
   }
 
   static Future<String?> getToken() async {

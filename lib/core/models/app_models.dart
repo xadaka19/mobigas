@@ -34,6 +34,23 @@ extension GasProductTypeExt on GasProductType {
   }
 }
 
+// How the customer pays for an order
+enum PaymentMethod {
+  credit, // Bank pays vendor, customer repays bank within 30 days
+  cash,   // Customer pays vendor cash on delivery
+}
+
+extension PaymentMethodExt on PaymentMethod {
+  String get label {
+    switch (this) {
+      case PaymentMethod.credit:
+        return 'MobiGas Credit';
+      case PaymentMethod.cash:
+        return 'Cash on delivery';
+    }
+  }
+}
+
 // All Kenyan gas brands
 class KenyanGasBrands {
   static const List<String> all = [
@@ -59,10 +76,16 @@ class KenyanGasBrands {
 }
 
 class MobiGasFees {
-  // MobiGas earns 1% of disbursement from bank per order
+  // MobiGas earns 1% of disbursement from bank per credit order
   static const double bankCommissionRate = 0.01;
   // Bank charges customer (bank sets — we show for transparency)
   static const double bankInterestRate = 0.08;
+  // Vendor pays MobiGas 1% customer-finder fee on cash orders,
+  // accrued when the order is confirmed delivered, settled weekly.
+  static const double cashFinderFeeRate = 0.01;
+  // When a vendor's unpaid fees reach this amount (KES), they are
+  // automatically hidden from customers until they settle.
+  static const double vendorFeeLockThreshold = 500;
 }
 
 class GasListing {
@@ -80,14 +103,17 @@ class GasListing {
     this.productType = GasProductType.refill,
   });
 
-  // Bank interest (8%) — bank charges customer
+  // Bank interest (8%) — bank charges customer (credit orders only)
   double get bankInterest => price * MobiGasFees.bankInterestRate;
 
-  // What customer repays to bank
+  // What customer repays to bank (credit orders only)
   double get customerRepayment => price + bankInterest;
 
   // MobiGas earns from bank (1%) — never shown to customer
   double get mobigasCommission => price * MobiGasFees.bankCommissionRate;
+
+  // Vendor owes MobiGas on a cash order (1%) — never shown to customer
+  double get cashFinderFee => price * MobiGasFees.cashFinderFeeRate;
 }
 
 class VendorModel {
@@ -110,6 +136,13 @@ class VendorModel {
   final String distance;
   final String deliveryTime;
 
+  /// Accumulated unpaid customer-finder fees from cash orders (KES).
+  final double feesOwed;
+
+  /// Suspended by admin for unpaid platform fees — receives NO orders
+  /// (credit or cash) until cleared.
+  final bool isSuspended;
+
   const VendorModel({
     required this.id,
     required this.businessName,
@@ -129,7 +162,18 @@ class VendorModel {
     required this.isVerified,
     required this.distance,
     required this.deliveryTime,
+    this.feesOwed = 0.0,
+    this.isSuspended = false,
   });
+
+  /// Automatically locked out of receiving orders because unpaid
+  /// platform fees reached the threshold. Unlocks automatically when
+  /// admin records payment and feesOwed drops below the threshold.
+  bool get isLockedForFees =>
+      feesOwed >= MobiGasFees.vendorFeeLockThreshold;
+
+  /// Vendor can appear to customers and receive orders.
+  bool get canReceiveOrders => !isSuspended && !isLockedForFees;
 }
 
 enum BankApprovalStatus { pending, approved, rejected }
@@ -215,6 +259,13 @@ class OrderModel {
   final String? riderPhone;
   final String partnerBankName;
 
+  /// How the customer pays: credit (bank pays vendor) or cash on delivery.
+  final PaymentMethod paymentMethod;
+
+  /// Customer-finder fee the vendor owes MobiGas for this order
+  /// (cash orders only, 1% of gas price). Frozen at order time.
+  final double finderFee;
+
   const OrderModel({
     required this.orderId,
     required this.customerId,
@@ -235,7 +286,16 @@ class OrderModel {
     this.riderName,
     this.riderPhone,
     required this.partnerBankName,
+    this.paymentMethod = PaymentMethod.credit,
+    this.finderFee = 0.0,
   });
+
+  /// What the customer actually pays in total:
+  /// cash → gas price handed to the vendor;
+  /// credit → gas price + bank interest repaid to the bank.
+  double get customerTotal => paymentMethod == PaymentMethod.cash
+      ? listing.price
+      : listing.customerRepayment;
 }
 
 enum OrderStatus {
@@ -316,4 +376,5 @@ class FeatureFlags {
   static const bool vehicleLeasing = false;       // Vehicle leasing marketplace
   static const bool cargoInsurance = false;       // Cargo insurance
   static const bool embeddedFinance = false;      // Full embedded finance suite
+  static const bool cashOrders = true;            // Cash-on-delivery orders
 }

@@ -7,10 +7,12 @@ class OrderProvider extends ChangeNotifier {
   final List<OrderModel> _orders = [];
   OrderModel? _activeOrder;
   bool _isLoading = false;
+  String? _error;
 
   List<OrderModel> get orders => _orders;
   OrderModel? get activeOrder => _activeOrder;
   bool get isLoading => _isLoading;
+  String? get error => _error;
 
   void watchOrders(String customerId) {
     FirestoreService.watchCustomerOrders(customerId).listen((orders) {
@@ -24,9 +26,13 @@ class OrderProvider extends ChangeNotifier {
     required CustomerModel customer,
     required VendorModel vendor,
     required GasListing listing,
+    required PaymentMethod paymentMethod,
   }) async {
     _isLoading = true;
+    _error = null;
     notifyListeners();
+
+    final isCash = paymentMethod == PaymentMethod.cash;
 
     try {
       final order = OrderModel(
@@ -40,13 +46,18 @@ class OrderProvider extends ChangeNotifier {
         customerLatitude: customer.latitude,
         customerLongitude: customer.longitude,
         listing: listing,
-        bankDisbursementAmount: listing.price,
+        paymentMethod: paymentMethod,
+        // Vendor-side customer-finder fee (1%) — cash orders only.
+        // Never shown to the customer anywhere in the app.
+        finderFee: isCash ? listing.cashFinderFee : 0.0,
+        // No bank involvement on cash orders.
+        bankDisbursementAmount: isCash ? 0.0 : listing.price,
         originationFeeToMobigas:
-            listing.price * MobiGasFees.bankCommissionRate,
+            isCash ? 0.0 : listing.price * MobiGasFees.bankCommissionRate,
         pin: _generatePin(),
         status: OrderStatus.pending,
         createdAt: DateTime.now(),
-        partnerBankName: customer.partnerBankName,
+        partnerBankName: isCash ? '' : customer.partnerBankName,
       );
 
       // Get vendor FCM token for backend to send push notification
@@ -74,20 +85,25 @@ class OrderProvider extends ChangeNotifier {
               'customerFcmToken': customer.fcmToken ?? '',
               'notificationTitle': 'New order received!',
               'notificationBody':
-                  '${customer.name} ordered ${listing.size} gas · KES ${listing.price.toStringAsFixed(0)}',
+                  '${customer.name} ordered ${listing.size} ${_typeLabel(listing.productType)} · KES ${listing.price.toStringAsFixed(0)} · ${isCash ? 'CASH on delivery' : 'Paid by bank credit'}',
+              'notificationType': 'new_order',
             });
           }
         });
       }
 
-      // Update customer credit used
-      await FirestoreService.updateCreditUsed(
-          customer.id, listing.price);
+      // Credit orders reserve the customer's bank credit;
+      // cash orders don't touch it.
+      if (!isCash) {
+        await FirestoreService.updateCreditUsed(
+            customer.id, listing.price);
+      }
 
       _activeOrder = order;
       _orders.insert(0, order);
     } catch (e) {
-      // Handle error
+      debugPrint('placeOrder failed: $e');
+      _error = 'Could not place your order. Please try again.';
     }
 
     _isLoading = false;
@@ -105,6 +121,17 @@ class OrderProvider extends ChangeNotifier {
   void clearActiveOrder() {
     _activeOrder = null;
     notifyListeners();
+  }
+
+  String _typeLabel(GasProductType t) {
+    switch (t) {
+      case GasProductType.refill:
+        return 'refill';
+      case GasProductType.fullKit:
+        return 'gas + cylinder';
+      case GasProductType.grillKit:
+        return 'gas + cylinder + grill';
+    }
   }
 
   String _generatePin() {

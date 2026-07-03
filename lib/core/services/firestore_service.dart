@@ -142,27 +142,13 @@ class FirestoreService {
       'isOnline': false,
       'rating': 0.0,
       'totalReviews': 0,
+      'feesOwed': 0.0,
+      'isSuspended': false,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
-  static Future<List<VendorModel>> getNearbyVendors({
-    required double lat,
-    required double lng,
-  }) async {
-    // TODO: use GeoFlutterFire for radius queries
-    // For now fetch all verified vendors
-    final snap = await FirebaseService.vendors
-        .where('isVerified', isEqualTo: true)
-        .get();
-
-    return snap.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return _vendorFromMap(doc.id, data);
-    }).toList();
-  }
-
-  static VendorModel _vendorFromMap(
+  static VendorModel vendorFromMap(
       String id, Map<String, dynamic> data) {
     final listingsData = data['listings'] as List? ?? [];
     return VendorModel(
@@ -194,6 +180,8 @@ class FirestoreService {
       isVerified: data['isVerified'] ?? false,
       distance: data['distance'] ?? '',
       deliveryTime: data['deliveryTime'] ?? '30–45 min',
+      feesOwed: (data['feesOwed'] ?? 0.0).toDouble(),
+      isSuspended: data['isSuspended'] ?? false,
     );
   }
 
@@ -213,6 +201,9 @@ class FirestoreService {
       'gasKg': order.listing.kg,
       'gasPrice': order.listing.price,
       'gasProductType': order.listing.productType.name,
+      'paymentMethod': order.paymentMethod.name,
+      'finderFee': order.finderFee,
+      'finderFeeAccrued': false,
       'bankDisbursementAmount': order.bankDisbursementAmount,
       'originationFeeToMobigas': order.originationFeeToMobigas,
       'pin': order.pin,
@@ -221,9 +212,11 @@ class FirestoreService {
       'riderName': order.riderName,
       'riderPhone': order.riderPhone,
       'createdAt': FieldValue.serverTimestamp(),
-      'bankRepaymentDueDate': Timestamp.fromDate(
-        DateTime.now().add(const Duration(days: 30)),
-      ),
+      'bankRepaymentDueDate': order.paymentMethod == PaymentMethod.credit
+          ? Timestamp.fromDate(
+              DateTime.now().add(const Duration(days: 30)),
+            )
+          : null,
     });
     return ref.id;
   }
@@ -261,12 +254,62 @@ class FirestoreService {
     final snap = await FirebaseService.orders
         .where('orderId', isEqualTo: orderId)
         .get();
-    if (snap.docs.isNotEmpty) {
-      await snap.docs.first.reference.update({
-        'status': status.name,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+    if (snap.docs.isEmpty) return;
+
+    final docRef = snap.docs.first.reference;
+    final data = snap.docs.first.data() as Map<String, dynamic>;
+
+    await docRef.update({
+      'status': status.name,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Cash orders: accrue the 1% customer-finder fee the vendor owes
+    // MobiGas — only once, and only when delivery is confirmed.
+    if (status == OrderStatus.delivered &&
+        (data['paymentMethod'] ?? 'credit') == 'cash' &&
+        (data['finderFeeAccrued'] ?? false) == false) {
+      final fee = (data['finderFee'] ?? 0).toDouble();
+      final vendorId = data['vendorId'] ?? '';
+      if (fee > 0 && vendorId.isNotEmpty) {
+        await _accrueFinderFee(
+          orderDocRef: docRef,
+          orderId: orderId,
+          vendorId: vendorId,
+          vendorName: data['vendorName'] ?? '',
+          fee: fee,
+          gasPrice: (data['gasPrice'] ?? 0).toDouble(),
+        );
+      }
     }
+  }
+
+  static Future<void> _accrueFinderFee({
+    required DocumentReference orderDocRef,
+    required String orderId,
+    required String vendorId,
+    required String vendorName,
+    required double fee,
+    required double gasPrice,
+  }) async {
+    // Mark accrued first so a retry can't double-charge.
+    await orderDocRef.update({'finderFeeAccrued': true});
+
+    await FirebaseFirestore.instance
+        .collection('vendors')
+        .doc(vendorId)
+        .update({'feesOwed': FieldValue.increment(fee)});
+
+    await FirebaseFirestore.instance.collection('platform_fees').add({
+      'orderId': orderId,
+      'vendorId': vendorId,
+      'vendorName': vendorName,
+      'orderAmount': gasPrice,
+      'fee': fee,
+      'feeType': 'cash_finder_fee',
+      'status': 'accrued', // accrued -> paid (admin marks on settlement)
+      'accruedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   static Future<bool> confirmPin(
@@ -301,6 +344,11 @@ class FirestoreService {
           orElse: () => GasProductType.refill,
         ),
       ),
+      paymentMethod: PaymentMethod.values.firstWhere(
+        (m) => m.name == (data['paymentMethod'] ?? 'credit'),
+        orElse: () => PaymentMethod.credit,
+      ),
+      finderFee: (data['finderFee'] ?? 0).toDouble(),
       bankDisbursementAmount:
           (data['bankDisbursementAmount'] ?? 0).toDouble(),
       originationFeeToMobigas:
@@ -315,6 +363,21 @@ class FirestoreService {
       riderName: data['riderName'],
       riderPhone: data['riderPhone'],
     );
+  }
+
+  // ── PLATFORM FEES ─────────────────────────────────────────────────
+  // Vendor's own accrued/paid finder fees (for the vendor app banner
+  // and fee history screen).
+  static Stream<List<Map<String, dynamic>>> watchVendorFees(
+      String vendorId) {
+    return FirebaseFirestore.instance
+        .collection('platform_fees')
+        .where('vendorId', isEqualTo: vendorId)
+        .orderBy('accruedAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => {'id': doc.id, ...doc.data()})
+            .toList());
   }
 
   // ── BANK APPLICATIONS ─────────────────────────────────────────────
