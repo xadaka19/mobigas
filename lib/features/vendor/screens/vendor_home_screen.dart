@@ -10,6 +10,7 @@ import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
 import 'package:mobigas/features/vendor/screens/stock_loan_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
+import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
 
 class VendorHomeScreen extends StatefulWidget {
   const VendorHomeScreen({super.key});
@@ -123,7 +124,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         kg: data['gasKg'] ?? 0,
         price: (data['gasPrice'] ?? 0).toDouble(),
         available: true,
+        productType: GasProductType.values.firstWhere(
+          (t) => t.name == (data['gasProductType'] ?? 'refill'),
+          orElse: () => GasProductType.refill,
+        ),
       ),
+      paymentMethod: PaymentMethod.values.firstWhere(
+        (m) => m.name == (data['paymentMethod'] ?? 'credit'),
+        orElse: () => PaymentMethod.credit,
+      ),
+      finderFee: (data['finderFee'] ?? 0).toDouble(),
       bankDisbursementAmount:
           (data['bankDisbursementAmount'] ?? 0).toDouble(),
       originationFeeToMobigas:
@@ -209,6 +219,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       child: Column(
         children: [
           _buildVendorHeader(),
+          // Platform fees (cash-order finder fees) banner
+          const VendorFeesBanner(),
           // Setup incomplete banner
           if (_vendorData == null || (_vendorData?['businessName'] ?? '').isEmpty)
             GestureDetector(
@@ -537,10 +549,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
               o.createdAt.month == now.month &&
               o.createdAt.year == now.year;
         }).toList();
+        // Vendor revenue = gas price on every order:
+        // credit orders are paid by the bank, cash orders by the
+        // customer directly — both count as vendor earnings.
         final todayEarnings =
-            todayOrders.fold(0.0, (acc, o) => acc + o.bankDisbursementAmount);
-        final totalEarnings = orders.fold(
-            0.0, (acc, o) => acc + o.bankDisbursementAmount);
+            todayOrders.fold(0.0, (acc, o) => acc + o.listing.price);
+        final totalEarnings =
+            orders.fold(0.0, (acc, o) => acc + o.listing.price);
 
         return Row(
           children: [
@@ -667,6 +682,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     final isAccepted = order.status == OrderStatus.accepted;
     final isOutForDelivery =
         order.status == OrderStatus.outForDelivery;
+    final isCash = order.paymentMethod == PaymentMethod.cash;
 
     Color statusColor = isPending
         ? AppColors.warning
@@ -719,6 +735,27 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                           color: statusColor,
                           fontWeight: FontWeight.w600,
                         )),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isCash
+                        ? AppColors.navy
+                        : AppColors.success.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    isCash ? '💵 CASH on delivery' : 'Bank credit',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: isCash
+                              ? AppColors.white
+                              : AppColors.success,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
                 const Spacer(),
                 Text(order.orderId,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -758,7 +795,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          'KES ${order.bankDisbursementAmount.toStringAsFixed(0)}',
+                          'KES ${order.listing.price.toStringAsFixed(0)}',
                           style: Theme.of(context)
                               .textTheme
                               .titleLarge
@@ -777,6 +814,29 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                     ),
                   ],
                 ),
+                if (isCash) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.navy.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Collect KES ${order.listing.price.toStringAsFixed(0)} from the customer on delivery (cash or M-Pesa to you).',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(
+                            color: AppColors.navy,
+                            fontSize: 11,
+                            height: 1.4,
+                          ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 // Action buttons
                 if (isPending) ...[
@@ -876,6 +936,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   Widget _completedOrderTile(OrderModel order) {
     final dateStr =
         '${order.createdAt.day}/${order.createdAt.month}/${order.createdAt.year}';
+    final isCash = order.paymentMethod == PaymentMethod.cash;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -906,7 +967,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         .textTheme
                         .titleMedium
                         ?.copyWith(fontSize: 14, color: AppColors.navy)),
-                Text('${order.listing.size} · $dateStr',
+                Text(
+                    '${order.listing.size} · ${isCash ? 'Cash' : 'Credit'} · $dateStr',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -915,7 +977,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             ),
           ),
           Text(
-              'KES ${order.bankDisbursementAmount.toStringAsFixed(0)}',
+              'KES ${order.listing.price.toStringAsFixed(0)}',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontSize: 14,
                     color: AppColors.success,
@@ -933,11 +995,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       builder: (context, snap) {
         final orders = snap.data ?? [];
         final total =
-            orders.fold(0.0, (acc, o) => acc + o.bankDisbursementAmount);
+            orders.fold(0.0, (acc, o) => acc + o.listing.price);
         final today = orders.where((o) {
           final now = DateTime.now();
           return o.createdAt.day == now.day;
-        }).fold(0.0, (acc, o) => acc + o.bankDisbursementAmount);
+        }).fold(0.0, (acc, o) => acc + o.listing.price);
 
         return SingleChildScrollView(
           child: Column(
@@ -1003,12 +1065,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       ),
                       child: Column(
                         children: [
-                          _earningsRow('Bank pays vendor directly',
-                              'On PIN confirmation'),
+                          _earningsRow('Credit orders',
+                              'Bank pays your M-Pesa on PIN confirmation'),
+                          _earningsRow('Cash orders',
+                              'Customer pays you directly on delivery'),
                           _earningsRow('Your M-Pesa',
                               _vendorData?['phone'] ?? ''),
-                          _earningsRow('Payment method',
-                              'Instant M-Pesa transfer'),
                         ],
                       ),
                     ),
@@ -1034,7 +1096,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     final isEligible = monthsOnPlatform >= 3 && totalDeliveries >= 30;
     final monthlyRevenue = orders.isEmpty || monthsOnPlatform == 0
         ? 0.0
-        : orders.fold(0.0, (acc, o) => acc + o.bankDisbursementAmount) /
+        : orders.fold(0.0, (acc, o) => acc + o.listing.price) /
             monthsOnPlatform;
 
     return Container(
@@ -1173,17 +1235,21 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.gray600,
                   )),
           const Spacer(),
-          Text(value,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.navy,
-                    fontWeight: FontWeight.w600,
-                  )),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w600,
+                    )),
+          ),
         ],
       ),
     );

@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
 
 class VendorProvider extends ChangeNotifier {
   List<VendorModel> _vendors = [];
@@ -12,8 +13,11 @@ class VendorProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  List<VendorModel> get onlineVendors =>
-      _vendors.where((v) => v.isOnline && v.isVerified).toList();
+  /// Vendors customers can actually order from: online, verified,
+  /// not suspended by admin, and not auto-locked for unpaid fees.
+  List<VendorModel> get onlineVendors => _vendors
+      .where((v) => v.isOnline && v.isVerified && v.canReceiveOrders)
+      .toList();
 
   static const double _defaultRadiusKm = 8.0; // 8km max — practical gas delivery radius
 
@@ -29,7 +33,7 @@ class VendorProvider extends ChangeNotifier {
 
       final allVendors = snap.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
-        return _vendorFromMap(doc.id, data);
+        return FirestoreService.vendorFromMap(doc.id, data);
       }).toList();
 
       // Filter by distance if customer location is available
@@ -62,6 +66,8 @@ class VendorProvider extends ChangeNotifier {
               isVerified: vendor.isVerified,
               distance: _formatDistance(distKm),
               deliveryTime: vendor.deliveryTime,
+              feesOwed: vendor.feesOwed,
+              isSuspended: vendor.isSuspended,
             );
             nearbyVendors.add(updatedVendor);
           }
@@ -96,7 +102,7 @@ class VendorProvider extends ChangeNotifier {
         .snapshots()
         .map((snap) => snap.docs.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
-              return _vendorFromMap(doc.id, data);
+              return FirestoreService.vendorFromMap(doc.id, data);
             }).toList());
   }
 
@@ -118,37 +124,5 @@ class VendorProvider extends ChangeNotifier {
   static String _formatDistance(double km) {
     if (km < 1) return '${(km * 1000).toInt()}m away';
     return '${km.toStringAsFixed(1)}km away';
-  }
-
-  VendorModel _vendorFromMap(String id, Map<String, dynamic> data) {
-    final listingsData = data['listings'] as List? ?? [];
-    return VendorModel(
-      id: id,
-      businessName: data['businessName'] ?? '',
-      ownerName: data['ownerName'] ?? '',
-      phone: data['phone'] ?? '',
-      area: data['area'] ?? '',
-      estate: data['estate'] ?? '',
-      county: data['county'] ?? '',
-      latitude: (data['latitude'] ?? 0.0).toDouble(),
-      longitude: (data['longitude'] ?? 0.0).toDouble(),
-      brands: List<String>.from(data['brands'] ?? []),
-      listings: listingsData.map((l) => GasListing(
-      size: l['size'] ?? '',
-      kg: (l['kg'] ?? 0) as int,
-      price: (l['price'] ?? 0).toDouble(),
-      available: l['available'] ?? false,
-      productType: GasProductType.values.firstWhere(
-        (t) => t.name == (l['productType'] ?? 'refill'),
-        orElse: () => GasProductType.refill,
-      ),
-    )).toList(),
-      rating: (data['rating'] ?? 0.0).toDouble(),
-      totalReviews: (data['totalReviews'] ?? 0) as int,
-      isOnline: data['isOnline'] ?? false,
-      isVerified: data['isVerified'] ?? false,
-      distance: data['distance'] ?? '',
-      deliveryTime: data['deliveryTime'] ?? '30–45 min',
-    );
   }
 }

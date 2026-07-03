@@ -307,6 +307,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontWeight: FontWeight.w800,
                 ),
           ),
+          if (!customer.isBankApproved) ...[
+            const SizedBox(height: 6),
+            Text(
+              'You can still order gas and pay cash on delivery.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400,
+                    fontSize: 11,
+                  ),
+            ),
+          ],
           const SizedBox(height: 16),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
@@ -346,73 +356,111 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildOrderButton(CustomerModel customer) {
-    final canOrder = customer.isBankApproved;
-    return GestureDetector(
-      onTap: () {
-        if (canOrder) {
-          context.push('/order');
-        } else {
-          context.push('/credit-application');
-        }
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: canOrder ? AppColors.orange : AppColors.navy,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: canOrder
-              ? [
-                  BoxShadow(
-                    color: AppColors.orange.withValues(alpha: 0.4),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: AppColors.white.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.local_fire_department_rounded,
-                  color: AppColors.white, size: 28),
+    final hasCredit = customer.isBankApproved;
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: () => context.push('/order'),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.orange,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.orange.withValues(alpha: 0.4),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: AppColors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.local_fire_department_rounded,
+                      color: AppColors.white, size: 28),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Order gas now',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(
+                              color: AppColors.white,
+                              fontSize: 18,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        hasCredit
+                            ? 'Pay with credit or cash on delivery'
+                            : 'Pay cash on delivery · Delivered to your door',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              color:
+                                  AppColors.white.withValues(alpha: 0.8),
+                              fontSize: 12,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios_rounded,
+                    color: AppColors.white, size: 18),
+              ],
+            ),
+          ),
+        ),
+        if (!hasCredit) ...[
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: () => context.push('/credit-application'),
+            child: Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.navy,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
                 children: [
-                  Text(
-                    canOrder ? 'Order gas now' : 'Apply for gas credit',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 18,
-                        ),
+                  const Icon(Icons.credit_score_rounded,
+                      color: AppColors.orange, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Want gas on credit? Apply for a credit limit',
+                      style:
+                          Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: AppColors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                    ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    canOrder
-                        ? 'Delivered to your door · Bank pays vendor'
-                        : 'Add guarantors to get your credit limit',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.white.withValues(alpha: 0.8),
-                          fontSize: 12,
-                        ),
-                  ),
+                  const Icon(Icons.arrow_forward_ios_rounded,
+                      color: AppColors.orange, size: 14),
                 ],
               ),
             ),
-            const Icon(Icons.arrow_forward_ios_rounded,
-                color: AppColors.white, size: 18),
-          ],
-        ),
-      ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -420,12 +468,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final steps = [
       _HowStep(Icons.shopping_cart_outlined, 'Order', 'Pick size & vendor',
           AppColors.orange),
-      _HowStep(Icons.local_shipping_outlined, 'Delivery', 'Bank pays vendor',
+      _HowStep(Icons.local_shipping_outlined, 'Delivery', 'To your door',
           AppColors.navy),
       _HowStep(
           Icons.pin_outlined, 'PIN', 'Confirm delivery', AppColors.success),
       _HowStep(
-          Icons.payment_outlined, 'Repay', 'Via M-Pesa', AppColors.warning),
+          Icons.payment_outlined, 'Pay', 'Cash or credit', AppColors.warning),
     ];
 
     return Column(
@@ -754,6 +802,7 @@ class _HomeScreenState extends State<HomeScreen> {
         statusIcon = Icons.hourglass_top_rounded;
         statusLabel = 'Pending';
     }
+    final isCash = order.paymentMethod == PaymentMethod.cash;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -781,7 +830,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text('${order.listing.size} — ${order.vendorName}',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontSize: 14, color: AppColors.navy)),
-                Text(order.orderId,
+                Text('${order.orderId} · ${isCash ? 'Cash' : 'Credit'}',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -793,7 +842,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                  'KES ${order.listing.customerRepayment.toStringAsFixed(0)}',
+                  'KES ${order.customerTotal.toStringAsFixed(0)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,
                       color: AppColors.navy,
@@ -1529,7 +1578,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ?.copyWith(color: AppColors.gray400)),
             const SizedBox(height: 16),
             Text(
-              'MobiGas connects you with local gas vendors and partner banks to get cooking gas on credit. Cook now, repay within 30 days via M-Pesa.',
+              'MobiGas connects you with local gas vendors for fast delivery — pay cash on delivery, or partner with our banks to get cooking gas on credit and repay within 30 days via M-Pesa.',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme
