@@ -282,6 +282,19 @@ class FirestoreService {
         );
       }
     }
+
+    // Cancelled credit orders: release the customer's reserved bank
+    // credit — only once (guarded so retries can't double-refund).
+    if (status == OrderStatus.cancelled &&
+        (data['paymentMethod'] ?? 'credit') == 'credit' &&
+        (data['creditRefunded'] ?? false) == false) {
+      final price = (data['gasPrice'] ?? 0).toDouble();
+      final customerId = data['customerId'] ?? '';
+      if (price > 0 && customerId.isNotEmpty) {
+        await docRef.update({'creditRefunded': true});
+        await updateCreditUsed(customerId, -price);
+      }
+    }
   }
 
   static Future<void> _accrueFinderFee({

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
@@ -165,17 +166,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   }
 
   Future<void> _declineOrder(OrderModel order) async {
-    await FirebaseService.orders
-        .where('orderId', isEqualTo: order.orderId)
-        .get()
-        .then((snap) {
-      if (snap.docs.isNotEmpty) {
-        snap.docs.first.reference.update({
-          'status': OrderStatus.defaulted.name,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-    });
+    // Goes through the service so a declined CREDIT order releases
+    // the customer's reserved credit automatically.
+    await FirestoreService.updateOrderStatus(
+        order.orderId, OrderStatus.cancelled);
   }
 
   @override

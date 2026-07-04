@@ -63,6 +63,7 @@ dependencies:
   firebase_app_check: ^0.4.5
   device_info_plus: ^13.2.0
   safe_device: ^1.4.0
+  package_info_plus: ^10.2.0
 
 dev_dependencies:
   flutter_test:

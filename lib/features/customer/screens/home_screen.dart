@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/providers/order_provider.dart';
@@ -769,12 +770,18 @@ class _HomeScreenState extends State<HomeScreen> {
         statusIcon = Icons.local_shipping_rounded;
         statusLabel = 'On the way';
         break;
+      case OrderStatus.cancelled:
+        statusColor = AppColors.gray400;
+        statusIcon = Icons.cancel_rounded;
+        statusLabel = 'Cancelled';
+        break;
       default:
         statusColor = AppColors.warning;
         statusIcon = Icons.hourglass_top_rounded;
         statusLabel = 'Pending';
     }
     final isCash = order.paymentMethod == PaymentMethod.cash;
+    final canCancel = order.status == OrderStatus.pending;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -817,7 +824,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   'KES ${order.customerTotal.toStringAsFixed(0)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,
-                      color: AppColors.navy,
+                      color: order.status == OrderStatus.cancelled
+                          ? AppColors.gray400
+                          : AppColors.navy,
                       fontWeight: FontWeight.w700)),
               Container(
                 padding:
@@ -832,7 +841,50 @@ class _HomeScreenState extends State<HomeScreen> {
                         fontSize: 10,
                         fontWeight: FontWeight.w600)),
               ),
+              if (canCancel) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () => _confirmCancelOrder(order),
+                  child: Text('Cancel order',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.error,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          )),
+                ),
+              ],
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmCancelOrder(OrderModel order) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Cancel this order?'),
+        content: Text(
+          '${order.listing.size} from ${order.vendorName} — the vendor hasn\'t accepted it yet.'
+          '${order.paymentMethod == PaymentMethod.credit ? ' Your credit will be released back to you.' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Keep order',
+                style: TextStyle(color: AppColors.gray600)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              context.read<OrderProvider>().cancelOrder(order);
+            },
+            child: const Text('Cancel order',
+                style: TextStyle(
+                    color: AppColors.error, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -1072,10 +1124,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   .textTheme
                   .bodyMedium
                   ?.copyWith(color: AppColors.gray600)),
-          const Spacer(),
-          Text(value,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.navy, fontWeight: FontWeight.w600)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(value,
+                textAlign: TextAlign.right,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.navy, fontWeight: FontWeight.w600)),
+          ),
         ],
       ),
     );
@@ -1543,11 +1600,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     .bodyMedium
                     ?.copyWith(color: AppColors.gray600)),
             const SizedBox(height: 4),
-            Text('Version 1.0.0',
+            FutureBuilder<PackageInfo>(
+              future: PackageInfo.fromPlatform(),
+              builder: (context, snap) => Text(
+                snap.hasData
+                    ? 'Version ${snap.data!.version} (${snap.data!.buildNumber})'
+                    : '',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
-                    ?.copyWith(color: AppColors.gray400)),
+                    ?.copyWith(color: AppColors.gray400),
+              ),
+            ),
             const SizedBox(height: 16),
             Text(
               'MobiGas connects you with local gas vendors for fast delivery — pay cash on delivery, or partner with our banks to get cooking gas on credit and repay within 30 days via M-Pesa.',

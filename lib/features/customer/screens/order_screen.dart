@@ -361,15 +361,25 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     final creditApproved = customer?.isBankApproved ?? false;
+    // Credit is only offered when it can actually buy something — if
+    // every available listing costs more than the customer's remaining
+    // credit, this order is cash and we say so instead of showing a
+    // useless credit option.
+    final creditUsable = creditApproved &&
+        vendors.any((v) => v.listings
+            .any((l) => l.available && customer!.canAfford(l)));
+    if (!creditUsable && _method == PaymentMethod.credit) {
+      _method = PaymentMethod.cash;
+    }
     // Section numbers shift when the payment chooser is hidden.
-    final n2 = creditApproved ? 2 : 1;
-    final n3 = creditApproved ? 3 : 2;
-    final n4 = creditApproved ? 4 : 3;
+    final n2 = creditUsable ? 2 : 1;
+    final n3 = creditUsable ? 3 : 2;
+    final n4 = creditUsable ? 4 : 3;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (creditApproved) ...[
+        if (creditUsable) ...[
           // Customer has a real choice — show it.
           _sectionTitle('1. How will you pay?'),
           const SizedBox(height: 10),
@@ -378,6 +388,13 @@ class _OrderScreenState extends State<OrderScreen> {
             const SizedBox(height: 12),
             _buildCreditCard(customer),
           ],
+        ] else if (creditApproved && vendors.isNotEmpty) ...[
+          // Has credit, but it can't afford anything on offer.
+          _infoCard(
+            icon: Icons.payments_outlined,
+            text:
+                'Your available credit (KES ${customer!.bankCreditAvailable.toStringAsFixed(0)}) is below current gas prices, so this order is cash on delivery. Repay via M-Pesa to free up your credit.',
+          ),
         ] else ...[
           // No credit limit — cash is simply how it works.
           _infoCard(

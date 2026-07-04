@@ -307,6 +307,7 @@ enum OrderStatus {
   repaying,
   completed,
   defaulted,
+  cancelled,
 }
 
 class PartnerBank {

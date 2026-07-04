@@ -118,6 +118,18 @@ class OrderProvider extends ChangeNotifier {
     }
   }
 
+  /// Customer cancels an order the vendor hasn't accepted yet.
+  /// Credit orders get their reserved credit released automatically
+  /// inside updateOrderStatus.
+  Future<void> cancelOrder(OrderModel order) async {
+    if (order.status != OrderStatus.pending) return;
+    await FirestoreService.updateOrderStatus(
+        order.orderId, OrderStatus.cancelled);
+    if (_activeOrder?.orderId == order.orderId) {
+      clearActiveOrder();
+    }
+  }
+
   void clearActiveOrder() {
     _activeOrder = null;
     notifyListeners();
