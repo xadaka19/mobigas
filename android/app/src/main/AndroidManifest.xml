@@ -12,6 +12,12 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:allowBackup="false"
         android:fullBackupContent="false">
+
+        <!-- Google Maps API key -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyDgTS1Amrsksz6IDb28pirGvRLkxucnZG0"/>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

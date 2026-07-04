@@ -18,6 +18,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0;
+  bool _initializedForCustomer = false;
 
   @override
   void initState() {
@@ -30,16 +31,24 @@ class _HomeScreenState extends State<HomeScreen> {
           context.push('/order-tracking');
         }
       });
-
-      final auth = context.read<AuthProvider>();
-      context.read<VendorProvider>().loadVendors(
-            lat: auth.customer?.latitude,
-            lng: auth.customer?.longitude,
-          );
-      if (auth.customer != null) {
-        context.read<OrderProvider>().watchOrders(auth.customer!.id);
-      }
+      _initForCustomer();
     });
+  }
+
+  /// Loads vendors + order stream once the customer object exists.
+  /// Called from initState AND build, because on cold start the
+  /// customer is still hydrating from Firestore when initState runs —
+  /// loading vendors before we have coordinates means no distances.
+  void _initForCustomer() {
+    if (_initializedForCustomer) return;
+    final customer = context.read<AuthProvider>().customer;
+    if (customer == null) return;
+    _initializedForCustomer = true;
+    context.read<VendorProvider>().loadVendors(
+          lat: customer.latitude,
+          lng: customer.longitude,
+        );
+    context.read<OrderProvider>().watchOrders(customer.id);
   }
 
   @override
@@ -52,6 +61,12 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
+    }
+
+    // Customer just became available (cold start) — load vendors with
+    // real coordinates and start the order stream.
+    if (!_initializedForCustomer) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _initForCustomer());
     }
 
     return DoubleBackToExit(
@@ -177,32 +192,37 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          Row(
-            children: [
-              _headerStat('Credit limit',
-                  customer.bankApprovedLimit != null
-                      ? 'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'
-                      : 'Pending'),
-              Container(
-                  width: 1,
-                  height: 36,
-                  color: AppColors.gray600,
-                  margin: const EdgeInsets.symmetric(horizontal: 20)),
-              _headerStat(
-                  'Available',
-                  customer.isBankApproved
-                      ? 'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}'
-                      : 'Pending',
-                  valueColor: AppColors.success),
-              Container(
-                  width: 1,
-                  height: 36,
-                  color: AppColors.gray600,
-                  margin: const EdgeInsets.symmetric(horizontal: 20)),
-              _headerStat('Used',
-                  'KES ${customer.bankCreditUsed.toStringAsFixed(0)}'),
-            ],
-          ),
+          if (customer.isBankApproved)
+            Row(
+              children: [
+                _headerStat('Credit limit',
+                    'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'),
+                Container(
+                    width: 1,
+                    height: 36,
+                    color: AppColors.gray600,
+                    margin: const EdgeInsets.symmetric(horizontal: 20)),
+                _headerStat('Available',
+                    'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}',
+                    valueColor: AppColors.success),
+                Container(
+                    width: 1,
+                    height: 36,
+                    color: AppColors.gray600,
+                    margin: const EdgeInsets.symmetric(horizontal: 20)),
+                _headerStat('Used',
+                    'KES ${customer.bankCreditUsed.toStringAsFixed(0)}'),
+              ],
+            )
+          else
+            Text(
+              'No gas credit yet — order and pay cash on delivery, or apply for a credit limit below.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+            ),
         ],
       ),
     );
@@ -319,39 +339,41 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
             ),
           ],
-          const SizedBox(height: 16),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: usedPercent,
-              backgroundColor: AppColors.white.withValues(alpha: 0.1),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(AppColors.orange),
-              minHeight: 6,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Text(
-                'KES ${customer.bankCreditUsed.toStringAsFixed(0)} used',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.gray400,
-                      fontSize: 11,
-                    ),
+          if (customer.isBankApproved) ...[
+            const SizedBox(height: 16),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: usedPercent,
+                backgroundColor: AppColors.white.withValues(alpha: 0.1),
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(AppColors.orange),
+                minHeight: 6,
               ),
-              const Spacer(),
-              if (customer.partnerBankName.isNotEmpty)
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 Text(
-                  'via ${customer.partnerBankName}',
+                  'KES ${customer.bankCreditUsed.toStringAsFixed(0)} used',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.orange,
+                        color: AppColors.gray400,
                         fontSize: 11,
-                        fontWeight: FontWeight.w600,
                       ),
                 ),
-            ],
-          ),
+                const Spacer(),
+                if (customer.partnerBankName.isNotEmpty)
+                  Text(
+                    'via ${customer.partnerBankName}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.orange,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );
