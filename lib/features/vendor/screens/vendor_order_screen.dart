@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:mobigas/core/services/screen_security_service.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
@@ -88,6 +89,38 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           'riderPhone': _riderPhoneController.text.trim(),
         ...?extra,
       });
+    }
+  }
+
+  /// Hands off to the Google Maps app for turn-by-turn navigation to
+  /// the customer. Falls back to the Maps website if the app intent
+  /// can't launch.
+  Future<void> _openNavigation() async {
+    if (_customerLat == null || _customerLng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'Customer location not available for this order.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+    final appUri = Uri.parse(
+        'google.navigation:q=$_customerLat,$_customerLng&mode=d');
+    final webUri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$_customerLat,$_customerLng&travelmode=driving');
+    try {
+      final launched =
+          await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      await launchUrl(webUri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -547,6 +580,17 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         _infoBox(Icons.location_on_rounded,
             'Your location is being shared with the customer. Tap "I have arrived" when you reach the customer.'),
         const SizedBox(height: 20),
+        ElevatedButton.icon(
+          onPressed: _openNavigation,
+          icon: const Icon(Icons.navigation_rounded, size: 20),
+          label: const Text('Navigate with Google Maps'),
+          style: ElevatedButton.styleFrom(
+            minimumSize: const Size(double.infinity, 52),
+            backgroundColor: AppColors.white,
+            foregroundColor: AppColors.navy,
+          ),
+        ),
+        const SizedBox(height: 12),
         ElevatedButton.icon(
           onPressed: _isLoading ? null : _markArrived,
           icon: const Icon(Icons.location_on_rounded, size: 20),
