@@ -1149,11 +1149,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             const SizedBox(height: 12),
             if (monthsOnPlatform < 3)
               _eligibilityBar('Months on platform',
-                  monthsOnPlatform, 3, '\$monthsOnPlatform/3 months'),
+                  monthsOnPlatform, 3, '$monthsOnPlatform/3 months'),
             const SizedBox(height: 6),
             if (totalDeliveries < 30)
               _eligibilityBar('Total deliveries',
-                  totalDeliveries, 30, '\$totalDeliveries/30 deliveries'),
+                  totalDeliveries, 30, '$totalDeliveries/30 deliveries'),
           ],
           const SizedBox(height: 12),
           ElevatedButton(

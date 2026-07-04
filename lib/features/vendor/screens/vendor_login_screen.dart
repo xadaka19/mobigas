@@ -76,7 +76,7 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Deliver gas. Get paid instantly.',
+                'Deliver gas. Get paid on every order.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: AppColors.gray400,
                     ),
@@ -84,13 +84,13 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
               const Spacer(),
               // Value props
               _valueProp(Icons.payments_rounded,
-                  'Get paid to M-Pesa instantly on every delivery'),
+                  'Get paid on every delivery — M-Pesa or cash'),
               const SizedBox(height: 12),
               _valueProp(Icons.people_outline_rounded,
                   'New customers delivered to you'),
               const SizedBox(height: 12),
               _valueProp(Icons.shield_outlined,
-                  'Bank pays you in seconds — you never wait'),
+                  'Credit orders: the bank pays you in seconds'),
               const Spacer(),
               // Google Sign-In button
               _isLoading

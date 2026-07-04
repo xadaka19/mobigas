@@ -5,6 +5,7 @@ import 'package:pin_code_fields/pin_code_fields.dart';
 import 'package:mobigas/core/services/screen_security_service.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/api_service.dart';
@@ -29,6 +30,11 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   double? _vendorLng;
   double? _customerLat;
   double? _customerLng;
+
+  bool get _isCash => widget.order.paymentMethod == PaymentMethod.cash;
+  bool get _isRefill =>
+      widget.order.listing.productType == GasProductType.refill;
+  String get _amount => widget.order.listing.price.toStringAsFixed(0);
 
   @override
   void initState() {
@@ -126,13 +132,19 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     final data = snap.docs.first.data() as Map<String, dynamic>;
     if (pin == data['pin']) {
       await snap.docs.first.reference.update({
-        'status': OrderStatus.delivered.name,
         'deliveredAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
       });
+      // Status change goes through the service — it also accrues the
+      // 1% customer-finder fee for CASH orders. Do not write the
+      // delivered status directly, or the fee is never charged.
+      await FirestoreService.updateOrderStatus(
+          widget.order.orderId, OrderStatus.delivered);
       LocationService.stopTracking();
-      // Notify backend — triggers bank payment to vendor
-      ApiService.notifyOrderDelivered(widget.order.orderId);
+      // Bank payment trigger — credit orders only; cash was paid
+      // by the customer at the door.
+      if (!_isCash) {
+        ApiService.notifyOrderDelivered(widget.order.orderId);
+      }
       setState(() {
         _step = _Step.confirmed;
         _isLoading = false;
@@ -211,7 +223,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              'KES ${widget.order.bankDisbursementAmount.toStringAsFixed(0)}',
+              _isCash ? 'KES $_amount 💵' : 'KES $_amount',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: AppColors.orange,
                     fontWeight: FontWeight.w700,
@@ -323,9 +335,20 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           _row(Icons.local_fire_department_outlined, 'Gas',
               '${widget.order.listing.size} · ${widget.order.listing.productType.label}'),
           _divider(),
-          _row(Icons.account_balance_outlined, 'You receive',
-              'KES ${widget.order.bankDisbursementAmount.toStringAsFixed(0)} on delivery'),
+          _row(
+              _isCash
+                  ? Icons.payments_rounded
+                  : Icons.account_balance_outlined,
+              'You receive',
+              _isCash
+                  ? 'KES $_amount cash from customer'
+                  : 'KES $_amount from bank on delivery'),
         ])),
+        if (_isCash) ...[
+          const SizedBox(height: 16),
+          _infoBox(Icons.payments_rounded,
+              'CASH ORDER: collect KES $_amount from the customer (cash or M-Pesa to you) when you deliver — before they give you the PIN.'),
+        ],
         const SizedBox(height: 20),
         // Rider assignment
         _card(child: Column(
@@ -492,6 +515,11 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           _divider(),
           _row(Icons.local_fire_department_outlined, 'Delivering',
               widget.order.listing.size),
+          if (_isCash) ...[
+            _divider(),
+            _row(Icons.payments_rounded, 'Collect',
+                'KES $_amount cash / M-Pesa'),
+          ],
         ])),
         const SizedBox(height: 16),
         // Live map
@@ -553,8 +581,13 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               textAlign: TextAlign.center),
         ])),
         const SizedBox(height: 16),
-        _infoBox(Icons.swap_horiz_rounded,
-            'Collect the empty cylinder from customer before handing over the new gas.'),
+        if (_isCash)
+          _infoBox(Icons.payments_rounded,
+              'Collect KES $_amount from the customer NOW (cash or M-Pesa to you) — then ask for the PIN.'),
+        if (_isCash && _isRefill) const SizedBox(height: 12),
+        if (_isRefill)
+          _infoBox(Icons.swap_horiz_rounded,
+              'Collect the empty cylinder from customer before handing over the new gas.'),
         const SizedBox(height: 16),
         _card(child: Column(children: [
           const Icon(Icons.pin_outlined, color: AppColors.orange, size: 40),
@@ -601,8 +634,12 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
             const CircularProgressIndicator(color: AppColors.orange),
           ],
           const SizedBox(height: 12),
-          _row(Icons.payments_rounded, 'You receive',
-              'KES ${widget.order.bankDisbursementAmount.toStringAsFixed(0)} after PIN confirmed'),
+          _row(
+              Icons.payments_rounded,
+              _isCash ? 'You collected' : 'You receive',
+              _isCash
+                  ? 'KES $_amount cash from customer'
+                  : 'KES $_amount after PIN confirmed'),
         ])),
       ],
     );
@@ -646,7 +683,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'KES ${widget.order.bankDisbursementAmount.toStringAsFixed(0)}',
+                    'KES $_amount',
                     style: Theme.of(context)
                         .textTheme
                         .titleLarge
@@ -656,7 +693,10 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                           fontSize: 24,
                         ),
                   ),
-                  Text('Instantly sent to your M-Pesa by ${widget.order.partnerBankName}',
+                  Text(
+                      _isCash
+                          ? 'Collected in cash from the customer'
+                          : 'Instantly sent to your M-Pesa by ${widget.order.partnerBankName.isNotEmpty ? widget.order.partnerBankName : 'the partner bank'}',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
