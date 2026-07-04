@@ -97,29 +97,40 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── HOME TAB ──────────────────────────────────────────────────────
   Widget _buildHomeTab(CustomerModel customer, OrderProvider orders) {
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          _buildHomeHeader(customer),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                _buildCreditCard(customer),
-                const SizedBox(height: 20),
-                if (!customer.isBankApproved) ...[
-                  _buildApplyCreditCard(),
+    return RefreshIndicator(
+      color: AppColors.orange,
+      onRefresh: () async {
+        context.read<OrderProvider>().refreshOrders();
+        await context.read<VendorProvider>().loadVendors(
+              lat: customer.latitude,
+              lng: customer.longitude,
+            );
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            _buildHomeHeader(customer),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  _buildCreditCard(customer),
                   const SizedBox(height: 20),
+                  if (!customer.isBankApproved) ...[
+                    _buildApplyCreditCard(),
+                    const SizedBox(height: 20),
+                  ],
+                  _buildVendorPreview(),
+                  const SizedBox(height: 20),
+                  _buildHowItWorks(),
+                  const SizedBox(height: 20),
+                  _buildRecentOrders(orders),
                 ],
-                _buildVendorPreview(),
-                const SizedBox(height: 20),
-                _buildHowItWorks(),
-                const SizedBox(height: 20),
-                _buildRecentOrders(orders),
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -930,10 +941,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: orders.orders.length,
-                  itemBuilder: (_, i) => _orderTile(orders.orders[i]),
+              : RefreshIndicator(
+                  color: AppColors.orange,
+                  onRefresh: () =>
+                      context.read<OrderProvider>().refreshOrders(),
+                  child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    itemCount: orders.orders.length,
+                    itemBuilder: (_, i) => _orderTile(orders.orders[i]),
+                  ),
                 ),
         ),
       ],

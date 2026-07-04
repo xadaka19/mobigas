@@ -21,7 +21,7 @@ class OrderTrackingScreen extends StatefulWidget {
 class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   GoogleMapController? _mapController;
   StreamSubscription? _orderSubscription;
-  
+
   LatLng? _riderLocation;
   LatLng? _customerLocation;
   OrderModel? _order;
@@ -29,6 +29,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   bool _pinRevealed = false;
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
+
+  bool get _isCash => _order?.paymentMethod == PaymentMethod.cash;
 
   @override
   void initState() {
@@ -60,7 +62,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           .listen((doc) {
         if (!mounted) return;
         final data = doc.data() as Map<String, dynamic>;
-        
+
         setState(() {
           _status = OrderStatus.values.firstWhere(
             (e) => e.name == data['status'],
@@ -95,7 +97,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           DeliveryNotificationService.cancelDeliveryNotification();
           DeliveryNotificationService.showDeliveryConfirmed(
             gasSize: _order?.listing.size ?? '',
-            amount: _order?.listing.customerRepayment.toStringAsFixed(0) ?? '',
+            amount: _order?.customerTotal.toStringAsFixed(0) ?? '',
+            isCash: _isCash,
           );
           context.go('/delivery-confirmed');
         }
@@ -386,12 +389,26 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                   ],
                 ),
               ),
-              Text(
-                'KES ${order.listing.customerRepayment.toStringAsFixed(0)}',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.orange,
-                      fontWeight: FontWeight.w700,
-                    ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    // Cash: gas price only. Credit: price + interest.
+                    'KES ${order.customerTotal.toStringAsFixed(0)}',
+                    style:
+                        Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: AppColors.orange,
+                              fontWeight: FontWeight.w700,
+                            ),
+                  ),
+                  Text(
+                    _isCash ? 'Pay on delivery' : 'Repay in 30 days',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.gray400,
+                          fontSize: 10,
+                        ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -461,7 +478,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Show this PIN to the rider when gas is delivered',
+                  _isCash
+                      ? 'Pay the vendor KES ${order.customerTotal.toStringAsFixed(0)} first (cash or M-Pesa), then show this PIN'
+                      : 'Show this PIN to the rider when gas is delivered',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                         fontSize: 11,

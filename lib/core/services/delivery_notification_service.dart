@@ -94,6 +94,7 @@ class DeliveryNotificationService {
   static Future<void> showDeliveryConfirmed({
     required String gasSize,
     required String amount,
+    bool isCash = false,
   }) async {
     await initialize();
     final androidDetails = AndroidNotificationDetails(
@@ -109,7 +110,9 @@ class DeliveryNotificationService {
     await _plugin.show(
       id: 1002,
       title: 'Gas delivered! ✅',
-      body: '$gasSize delivered · Repay KES $amount within 30 days',
+      body: isCash
+          ? '$gasSize delivered · Paid KES $amount in cash — thank you!'
+          : '$gasSize delivered · Repay KES $amount within 30 days',
       notificationDetails: details,
       payload: 'order_update',
     );

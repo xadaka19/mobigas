@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
@@ -8,6 +9,8 @@ class OrderProvider extends ChangeNotifier {
   OrderModel? _activeOrder;
   bool _isLoading = false;
   String? _error;
+  String? _customerId;
+  StreamSubscription<List<OrderModel>>? _ordersSub;
 
   List<OrderModel> get orders => _orders;
   OrderModel? get activeOrder => _activeOrder;
@@ -15,11 +18,34 @@ class OrderProvider extends ChangeNotifier {
   String? get error => _error;
 
   void watchOrders(String customerId) {
-    FirestoreService.watchCustomerOrders(customerId).listen((orders) {
-      _orders.clear();
-      _orders.addAll(orders);
+    _customerId = customerId;
+    // Cancel any previous subscription so we never stack listeners,
+    // and always attach onError — an unhandled stream error kills the
+    // stream silently and the list stops updating forever.
+    _ordersSub?.cancel();
+    _ordersSub =
+        FirestoreService.watchCustomerOrders(customerId).listen((orders) {
+      _orders
+        ..clear()
+        ..addAll(orders);
       notifyListeners();
+    }, onError: (e) {
+      debugPrint('Orders stream error: $e');
     });
+  }
+
+  /// Pull-to-refresh: re-subscribes the orders stream (also revives it
+  /// if a previous error killed it).
+  Future<void> refreshOrders() async {
+    if (_customerId != null) {
+      watchOrders(_customerId!);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ordersSub?.cancel();
+    super.dispose();
   }
 
   Future<void> placeOrder({
