@@ -793,7 +793,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final isCash = order.paymentMethod == PaymentMethod.cash;
     final canCancel = order.status == OrderStatus.pending;
-    return Container(
+    final canTrack = order.status == OrderStatus.pending ||
+        order.status == OrderStatus.accepted ||
+        order.status == OrderStatus.outForDelivery;
+    final tile = Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -868,6 +871,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+    );
+
+    if (!canTrack) return tile;
+
+    // In-progress orders reopen the live tracking screen — otherwise
+    // a customer who navigates away has no way back to the map.
+    return GestureDetector(
+      onTap: () {
+        context.read<OrderProvider>().setActiveOrder(order);
+        context.push('/order-tracking');
+      },
+      child: tile,
     );
   }
 

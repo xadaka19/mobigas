@@ -144,6 +144,13 @@ class OrderProvider extends ChangeNotifier {
     }
   }
 
+  /// Re-select an order as the active one — used when the customer
+  /// taps an in-progress order tile to reopen the tracking screen.
+  void setActiveOrder(OrderModel order) {
+    _activeOrder = order;
+    notifyListeners();
+  }
+
   /// Customer cancels an order the vendor hasn't accepted yet.
   /// Credit orders get their reserved credit released automatically
   /// inside updateOrderStatus.
