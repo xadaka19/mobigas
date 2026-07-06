@@ -8,6 +8,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/widgets/location_picker_widget.dart';
@@ -77,6 +78,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late TextEditingController _idOrBrnController; // National ID or BRN
   late TextEditingController _phoneController;
   late TextEditingController _deliveryTimeController;
+  late TextEditingController _referralCodeController;
   String _paymentMethod = 'mpesa'; // mpesa, till, paybill
   late TextEditingController _tillController;
   late TextEditingController _paybillController;
@@ -176,6 +178,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         text: d['nationalId'] ?? d['businessRegNumber'] ?? '');
     _phoneController = TextEditingController(text: d['phone'] ?? '');
     _deliveryTimeController = TextEditingController(text: d['deliveryTime'] ?? '20–40 min');
+    _referralCodeController =
+        TextEditingController(text: d['referredByCode'] ?? '');
     _tillController = TextEditingController(text: d['tillNumber'] ?? '');
     _paybillController = TextEditingController(text: d['paybillNumber'] ?? '');
     _paybillAccountController = TextEditingController(text: d['paybillAccount'] ?? '');
@@ -253,6 +257,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _customBrandController.dispose();
     _parentVendorNameController.dispose();
     _parentEpraNumberController.dispose();
+    _referralCodeController.dispose();
     super.dispose();
   }
 
@@ -443,6 +448,24 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           'verifiedBy': null,
         },
       }, SetOptions(merge: true));
+
+      // Only on first creation, and only if a code was actually
+      // entered — referredByCode is permanent, never re-processed on
+      // later edits.
+      final referralCode = _referralCodeController.text.trim();
+      if (isNewVendor && referralCode.isNotEmpty) {
+        try {
+          await FirestoreService.recordReferralSignup(
+            code: referralCode,
+            referredId: _vendorId,
+            referredType: 'vendor',
+            referredName: _businessNameController.text.trim(),
+          );
+        } catch (_) {
+          // Invalid/unknown code — don't block the vendor's setup
+          // over it, just silently skip linking a referral.
+        }
+      }
 
       if (mounted) {
         Navigator.pop(context, true);
@@ -741,6 +764,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         _field('Delivery time', _deliveryTimeController,
             Icons.access_time_rounded,
             hint: 'e.g. 20–40 min'),
+        const SizedBox(height: 16),
+        _buildReferralCodeField(),
       ],
     );
   }
@@ -1798,6 +1823,41 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     if (file != null) {
       setState(() => _certificateFile = File(file.path));
     }
+  }
+
+  Widget _buildReferralCodeField() {
+    final alreadySet =
+        (widget.existingData?['referredByCode'] ?? '').toString().isNotEmpty;
+    if (alreadySet) {
+      // Permanent once set — never editable again, matching the
+      // model's referredByCode contract.
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.white.withValues(alpha: 0.15)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.card_giftcard_rounded,
+                color: AppColors.orange, size: 20),
+            const SizedBox(width: 10),
+            Text('Referred by: ',
+                style: const TextStyle(color: AppColors.gray400, fontSize: 13)),
+            Text(_referralCodeController.text,
+                style: const TextStyle(
+                    color: AppColors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700)),
+          ],
+        ),
+      );
+    }
+    return _field(
+        'Referral code (optional)', _referralCodeController,
+        Icons.card_giftcard_rounded,
+        hint: 'e.g. PAT-7F3K — enter once, can\'t be changed later');
   }
 
   Widget _buildCertificateUpload() {

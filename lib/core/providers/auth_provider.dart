@@ -116,6 +116,7 @@ class AuthProvider extends ChangeNotifier {
     required double longitude,
     required String password,
     required List<GuarantorModel> guarantors,
+    String? referralCode,
   }) async {
     _state = AuthState.loading;
     _error = null;
@@ -212,6 +213,22 @@ class AuthProvider extends ChangeNotifier {
       final selfieUrl = await selfieUploadFuture;
       if (selfieUrl != null) {
         await FirebaseService.users.doc(uid).update({'selfieUrl': selfieUrl});
+      }
+
+      // Optional — a customer isn't blocked from signing up over an
+      // invalid/mistyped code; recordReferralSignup silently no-ops
+      // if the code doesn't resolve to anyone.
+      if (referralCode != null && referralCode.trim().isNotEmpty) {
+        try {
+          await FirestoreService.recordReferralSignup(
+            code: referralCode.trim(),
+            referredId: uid,
+            referredType: 'customer',
+            referredName: name,
+          );
+        } catch (_) {
+          // Don't let a referral hiccup block a successful signup.
+        }
       }
 
       _customer = customer;

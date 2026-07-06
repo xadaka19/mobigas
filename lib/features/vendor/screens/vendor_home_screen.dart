@@ -12,6 +12,7 @@ import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
 import 'package:mobigas/features/vendor/screens/stock_loan_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_statistics_screen.dart';
+import 'package:mobigas/features/shared/refer_earn_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
 
@@ -1568,6 +1569,27 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   icon: Icons.local_gas_station_outlined,
                   label: 'Edit gas prices & products',
                   mode: VendorEditMode.pricesOnly,
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ReferEarnScreen(
+                        ownerId: _vendorId,
+                        ownerType: 'vendor',
+                        ownerName: _vendorData?['businessName'] ?? '',
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.card_giftcard_rounded, size: 16),
+                  label: const Text('Refer & Earn'),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 44),
+                    backgroundColor: AppColors.success.withValues(alpha: 0.15),
+                    foregroundColor: AppColors.success,
+                    elevation: 0,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(

@@ -131,6 +131,8 @@ class FirestoreService {
           .toList(),
       selfieUrl: data['selfieUrl'],
       fcmToken: data['fcmToken'],
+      referralCode: data['referralCode'] ?? '',
+      referredByCode: data['referredByCode'],
     );
   }
 
@@ -195,6 +197,8 @@ class FirestoreService {
       weighingScalePhotoUrl: data['weighingScalePhotoUrl'] ?? '',
       premisesPhotoUrl: data['premisesPhotoUrl'] ?? '',
       businessType: data['businessType'] ?? '',
+      referralCode: data['referralCode'] ?? '',
+      referredByCode: data['referredByCode'],
     );
   }
 
@@ -409,6 +413,224 @@ class FirestoreService {
         .map((snap) => snap.docs
             .map((doc) => {'id': doc.id, ...doc.data()})
             .toList());
+  }
+
+  // ── REFERRALS ─────────────────────────────────────────────────────
+  // Every customer/vendor gets a shareable code (generated lazily,
+  // the first time their referral screen opens). Qualification
+  // (pending -> qualified) and the reward amount are only ever set by
+  // Cloud Functions (see functions/src/index.ts: onCustomerReferralCheck,
+  // onVendorReferralCheck) — never by a client write, so the reward
+  // can't be gamed by editing Firestore directly.
+
+  static const List<String> _codeChars =
+      ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N',
+       'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+       '2', '3', '4', '5', '6', '7', '8', '9'];
+
+  static String _randomSuffix(int length) {
+    final rand = DateTime.now().microsecondsSinceEpoch;
+    final buffer = StringBuffer();
+    var seed = rand;
+    for (var i = 0; i < length; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      buffer.write(_codeChars[seed % _codeChars.length]);
+    }
+    return buffer.toString();
+  }
+
+  /// Returns the owner's existing referral code, or generates and
+  /// saves a new unique one (prefix from their name + 4 random
+  /// chars, e.g. "PAT-7F3K"). collectionRef is FirebaseService.users
+  /// or FirebaseService.vendors depending on ownerType.
+  static Future<String> getOrCreateReferralCode({
+    required String ownerId,
+    required String ownerType, // 'customer' | 'vendor'
+    required String ownerName,
+  }) async {
+    final collectionRef =
+        ownerType == 'vendor' ? FirebaseService.vendors : FirebaseService.users;
+    final ownerDoc = await collectionRef.doc(ownerId).get();
+    final existing =
+        (ownerDoc.data() as Map<String, dynamic>?)?['referralCode'] as String?;
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    final prefix = ownerName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .first
+        .toUpperCase()
+        .replaceAll(RegExp(r'[^A-Z]'), '')
+        .padRight(3, 'X')
+        .substring(0, 3);
+
+    // Retry on the rare collision rather than assuming one attempt
+    // is always unique.
+    for (var attempt = 0; attempt < 5; attempt++) {
+      final code = '$prefix-${_randomSuffix(4)}';
+      final codeDoc =
+          await FirebaseFirestore.instance.collection('referral_codes').doc(code).get();
+      if (!codeDoc.exists) {
+        await FirebaseFirestore.instance.collection('referral_codes').doc(code).set({
+          'ownerId': ownerId,
+          'ownerType': ownerType,
+          'ownerName': ownerName,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        await collectionRef.doc(ownerId).update({'referralCode': code});
+        return code;
+      }
+    }
+    throw Exception('Could not generate a unique referral code — try again.');
+  }
+
+  /// Looks up who owns a code, for validating input at signup.
+  /// Returns null if the code doesn't exist.
+  static Future<Map<String, dynamic>?> lookupReferralCode(
+      String code) async {
+    if (code.trim().isEmpty) return null;
+    final doc = await FirebaseFirestore.instance
+        .collection('referral_codes')
+        .doc(code.trim().toUpperCase())
+        .get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  /// Called once, at signup, after a valid code was entered. Links
+  /// the new user/vendor to their referrer and creates the pending
+  /// referral record the Cloud Function will later qualify.
+  /// Reads the current referral reward rates — set from the admin
+  /// dashboard, applied live to every new signup from this point on.
+  /// Falls back to zero (not null) if admin hasn't configured rates
+  /// yet, so a referral is still recorded rather than crashing —
+  /// just with no reward until admin sets real numbers.
+  static Future<Map<String, double>> getReferralRewardRates() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('platform_settings')
+        .doc('referral_rewards')
+        .get();
+    final data = doc.data();
+    return {
+      'customerReward': (data?['customerReward'] ?? 0).toDouble(),
+      'vendorReward': (data?['vendorReward'] ?? 0).toDouble(),
+    };
+  }
+
+  static Future<void> recordReferralSignup({
+    required String code,
+    required String referredId,
+    required String referredType, // 'customer' | 'vendor'
+    required String referredName,
+  }) async {
+    final owner = await lookupReferralCode(code);
+    if (owner == null) return; // invalid code — silently ignored
+
+    final normalizedCode = code.trim().toUpperCase();
+    final collectionRef =
+        referredType == 'vendor' ? FirebaseService.vendors : FirebaseService.users;
+    await collectionRef.doc(referredId).update({
+      'referredByCode': normalizedCode,
+    });
+
+    // Reward amount is locked in HERE, at signup, using whatever rate
+    // admin has configured right now — a later rate change in the
+    // dashboard only affects new signups from that point forward,
+    // never retroactively changes what an existing referral was
+    // already promised.
+    final rates = await getReferralRewardRates();
+    final rewardAmount = referredType == 'vendor'
+        ? rates['vendorReward']!
+        : rates['customerReward']!;
+
+    await FirebaseFirestore.instance.collection('referrals').add({
+      'referrerId': owner['ownerId'],
+      'referrerType': owner['ownerType'],
+      'referrerName': owner['ownerName'],
+      'referredId': referredId,
+      'referredType': referredType,
+      'referredName': referredName,
+      'code': normalizedCode,
+      'status': ReferralStatus.pending.name,
+      'rewardAmount': rewardAmount,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Saves how a referrer wants to be paid — reused by both apps.
+  /// payoutMethod: 'mpesa' | 'bank'. payoutCadence: '14days' | '30days'.
+  static Future<void> savePayoutPreferences({
+    required String ownerId,
+    required String ownerType, // 'customer' | 'vendor'
+    required String payoutMethod,
+    required String payoutCadence,
+    String? mpesaNumber,
+    String? bankName,
+    String? bankAccountNumber,
+    String? bankAccountName,
+  }) async {
+    final collectionRef =
+        ownerType == 'vendor' ? FirebaseService.vendors : FirebaseService.users;
+    await collectionRef.doc(ownerId).update({
+      'payoutMethod': payoutMethod,
+      'payoutCadence': payoutCadence,
+      'payoutMpesaNumber': mpesaNumber ?? '',
+      'payoutBankName': bankName ?? '',
+      'payoutBankAccountNumber': bankAccountNumber ?? '',
+      'payoutBankAccountName': bankAccountName ?? '',
+      'payoutPreferencesUpdatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Loads a referrer's current payout preferences, for prefilling
+  /// the form and for the admin dashboard to know how/when to pay.
+  static Future<Map<String, dynamic>> getPayoutPreferences({
+    required String ownerId,
+    required String ownerType,
+  }) async {
+    final collectionRef =
+        ownerType == 'vendor' ? FirebaseService.vendors : FirebaseService.users;
+    final doc = await collectionRef.doc(ownerId).get();
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    return {
+      'payoutMethod': data['payoutMethod'] ?? '',
+      'payoutCadence': data['payoutCadence'] ?? '',
+      'payoutMpesaNumber': data['payoutMpesaNumber'] ?? '',
+      'payoutBankName': data['payoutBankName'] ?? '',
+      'payoutBankAccountNumber': data['payoutBankAccountNumber'] ?? '',
+      'payoutBankAccountName': data['payoutBankAccountName'] ?? '',
+    };
+  }
+
+  /// Live stream of everyone a given referrer has referred — used by
+  /// their own Refer & Earn dashboard.
+  static Stream<List<ReferralModel>> watchMyReferrals(String referrerId) {
+    return FirebaseFirestore.instance
+        .collection('referrals')
+        .where('referrerId', isEqualTo: referrerId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              return ReferralModel(
+                id: d.id,
+                referrerId: data['referrerId'] ?? '',
+                referrerType: data['referrerType'] ?? '',
+                referrerName: data['referrerName'] ?? '',
+                referredId: data['referredId'] ?? '',
+                referredType: data['referredType'] ?? '',
+                referredName: data['referredName'] ?? '',
+                code: data['code'] ?? '',
+                status: ReferralStatus.values.firstWhere(
+                  (s) => s.name == data['status'],
+                  orElse: () => ReferralStatus.pending,
+                ),
+                rewardAmount: (data['rewardAmount'] ?? 0).toDouble(),
+                createdAt:
+                    (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+                qualifiedAt: (data['qualifiedAt'] as Timestamp?)?.toDate(),
+                paidAt: (data['paidAt'] as Timestamp?)?.toDate(),
+              );
+            }).toList());
   }
 
   // ── BANK APPLICATIONS ─────────────────────────────────────────────

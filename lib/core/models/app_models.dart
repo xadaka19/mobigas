@@ -123,6 +123,54 @@ class StockLoanRequirements {
   static const int minDeliveries = 100;
 }
 
+/// Referral reward rates are NOT hardcoded here — they live in
+/// Firestore (platform_settings/referral_rewards), editable from the
+/// admin dashboard and applied live to every new signup. See
+/// FirestoreService.getReferralRewardRates / recordReferralSignup.
+
+enum ReferralStatus {
+  pending, // signed up with the code, hasn't qualified yet
+  qualified, // reward earned — awaiting payout
+  paid, // admin has recorded payment to the referrer
+}
+
+/// One referral relationship: someone referred a customer or a
+/// vendor using a code. Qualification (and the reward amount it
+/// locks in) is only ever set server-side by Cloud Functions — a
+/// referral can't be marked qualified by a client write, so the
+/// reward can't be gamed by editing Firestore directly.
+class ReferralModel {
+  final String id;
+  final String referrerId;
+  final String referrerType; // 'customer' | 'vendor'
+  final String referrerName;
+  final String referredId;
+  final String referredType; // 'customer' | 'vendor'
+  final String referredName;
+  final String code;
+  final ReferralStatus status;
+  final double rewardAmount;
+  final DateTime createdAt;
+  final DateTime? qualifiedAt;
+  final DateTime? paidAt;
+
+  const ReferralModel({
+    required this.id,
+    required this.referrerId,
+    required this.referrerType,
+    required this.referrerName,
+    required this.referredId,
+    required this.referredType,
+    required this.referredName,
+    required this.code,
+    required this.status,
+    required this.rewardAmount,
+    required this.createdAt,
+    this.qualifiedAt,
+    this.paidAt,
+  });
+}
+
 class GasListing {
   final String size;
   final int kg;
@@ -204,6 +252,11 @@ class VendorModel {
   /// previously have to prove registration at all; now they do).
   final String businessType;
 
+  /// This vendor's own code to share with others.
+  final String referralCode;
+  /// The referral code THEY entered at setup, if any — permanent.
+  final String? referredByCode;
+
   const VendorModel({
     required this.id,
     required this.businessName,
@@ -238,6 +291,8 @@ class VendorModel {
     this.weighingScalePhotoUrl = '',
     this.premisesPhotoUrl = '',
     this.businessType = '',
+    this.referralCode = '',
+    this.referredByCode,
   });
 
   /// True once every required compliance document has at least one
@@ -302,6 +357,12 @@ class CustomerModel {
   final String? selfieUrl;
   final String? fcmToken;
 
+  /// This customer's own code to share with others.
+  final String referralCode;
+  /// The referral code THEY entered at signup, if any — permanent,
+  /// never changes after registration.
+  final String? referredByCode;
+
   const CustomerModel({
     required this.id,
     required this.name,
@@ -322,6 +383,8 @@ class CustomerModel {
     required this.guarantors,
     this.selfieUrl,
     this.fcmToken,
+    this.referralCode = '',
+    this.referredByCode,
   });
 
   double get bankCreditAvailable =>
