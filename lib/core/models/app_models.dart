@@ -2,7 +2,9 @@
 enum GasProductType {
   refill,           // Gas refill only (most common)
   fullKit,          // Gas + New cylinder
-  grillKit,         // 6kg Gas + Cylinder + Stove/Grill + Regulator + Pipe
+  grillKit,         // 6kg Gas + Cylinder + Burner/Grill + Regulator + Pipe
+  burner,           // Standalone burner — fits 3kg or 6kg cylinders
+  regulator,        // Standalone regulator — fits 13kg cylinders
 }
 
 extension GasProductTypeExt on GasProductType {
@@ -13,7 +15,11 @@ extension GasProductTypeExt on GasProductType {
       case GasProductType.fullKit:
         return 'Full Kit (Gas + Cylinder)';
       case GasProductType.grillKit:
-        return 'Grill Kit (Gas + Cylinder + Stove + Grill)';
+        return 'Grill Kit (Gas + Cylinder + Burner + Grill)';
+      case GasProductType.burner:
+        return 'Burner';
+      case GasProductType.regulator:
+        return 'Regulator';
     }
   }
 
@@ -24,14 +30,34 @@ extension GasProductTypeExt on GasProductType {
       case GasProductType.fullKit:
         return 'New gas cylinder + gas — no empty cylinder needed';
       case GasProductType.grillKit:
-        return '6kg gas + cylinder + LPG stove + grill — complete package';
+        return '6kg gas + cylinder + LPG burner + grill — complete package';
+      case GasProductType.burner:
+        return 'Standalone gas burner — no gas or cylinder included';
+      case GasProductType.regulator:
+        return 'Standalone gas regulator — no gas or cylinder included';
     }
   }
 
+  // "Size" here means cylinder compatibility, not gas quantity — a
+  // burner/regulator carries no gas, but only fits certain cylinders.
   bool isAvailableForSize(String size) {
-    if (this == GasProductType.grillKit) return size == '6kg';
-    return true;
+    switch (this) {
+      case GasProductType.grillKit:
+        return size == '6kg';
+      case GasProductType.burner:
+        return size == '3kg' || size == '6kg';
+      case GasProductType.regulator:
+        return size == '13kg';
+      default:
+        return true;
+    }
   }
+
+  /// True for products that don't actually contain gas — used to
+  /// skip "have your empty cylinder ready" / cylinder-exchange copy
+  /// that only makes sense for gas-containing orders.
+  bool get isAccessoryOnly =>
+      this == GasProductType.burner || this == GasProductType.regulator;
 }
 
 // How the customer pays for an order
@@ -86,6 +112,15 @@ class MobiGasFees {
   // When a vendor's unpaid fees reach this amount (KES), they are
   // automatically hidden from customers until they settle.
   static const double vendorFeeLockThreshold = 500;
+}
+
+/// Eligibility thresholds for the Stock Boost Loan — a vendor needs
+/// BOTH conditions met, not either. Single source of truth so the
+/// numbers shown in the vendor app's progress bars always match the
+/// numbers actually enforced in the eligibility check.
+class StockLoanRequirements {
+  static const int minMonthsOnPlatform = 3;
+  static const int minDeliveries = 100;
 }
 
 class GasListing {
@@ -146,11 +181,24 @@ class VendorModel {
   // ── Verification documents ──────────────────────────────────────
   // Uploaded once during onboarding; reviewed by admin before
   // isVerified is set to true. All fields empty until submitted.
+  // Two of these are "either/or" pairs — a vendor satisfies the
+  // requirement with whichever one they can actually get, not both:
+  //   - weighingScaleCertUrl  OR  weighingScalePhotoUrl
+  //   - brandAuthorizationUrl OR  dealerAssociationLetterUrl
+  final String epraCertificateUrl;
   final String brandAuthorizationUrl;
+  final String dealerAssociationLetterUrl;
   final String businessPermitUrl;
+  final String businessRegistrationUrl;
   final String fireCertificateUrl;
   final String weighingScaleCertUrl;
+  final String weighingScalePhotoUrl;
   final String premisesPhotoUrl;
+
+  /// 'sole' | 'registered' | 'petrol_station' — determines whether
+  /// businessRegistrationUrl is required (sole proprietors didn't
+  /// previously have to prove registration at all; now they do).
+  final String businessType;
 
   const VendorModel({
     required this.id,
@@ -173,23 +221,40 @@ class VendorModel {
     required this.deliveryTime,
     this.feesOwed = 0.0,
     this.isSuspended = false,
+    this.epraCertificateUrl = '',
     this.brandAuthorizationUrl = '',
+    this.dealerAssociationLetterUrl = '',
     this.businessPermitUrl = '',
+    this.businessRegistrationUrl = '',
     this.fireCertificateUrl = '',
     this.weighingScaleCertUrl = '',
+    this.weighingScalePhotoUrl = '',
     this.premisesPhotoUrl = '',
+    this.businessType = '',
   });
 
-  /// All five mandatory compliance documents have been uploaded.
-  /// True the moment a vendor finishes the upload step — independent
-  /// of admin approval (isVerified), so the UI can distinguish
-  /// "nothing submitted yet" from "submitted, awaiting review".
-  bool get documentsSubmitted =>
-      brandAuthorizationUrl.isNotEmpty &&
-      businessPermitUrl.isNotEmpty &&
-      fireCertificateUrl.isNotEmpty &&
-      weighingScaleCertUrl.isNotEmpty &&
-      premisesPhotoUrl.isNotEmpty;
+  /// True once every required compliance document has at least one
+  /// acceptable form uploaded — independent of admin approval
+  /// (isVerified), so the UI can distinguish "nothing submitted yet"
+  /// from "submitted, awaiting review".
+  bool get documentsSubmitted {
+    final hasScaleProof =
+        weighingScaleCertUrl.isNotEmpty || weighingScalePhotoUrl.isNotEmpty;
+    final hasBrandProof = brandAuthorizationUrl.isNotEmpty ||
+        dealerAssociationLetterUrl.isNotEmpty;
+    // Registered companies and petrol stations already prove this via
+    // their Step-1 certificate (Certificate of Incorporation) — only
+    // sole proprietors need the separate BRS business-name document.
+    final hasBusinessReg =
+        businessType != 'sole' || businessRegistrationUrl.isNotEmpty;
+    return epraCertificateUrl.isNotEmpty &&
+        businessPermitUrl.isNotEmpty &&
+        fireCertificateUrl.isNotEmpty &&
+        premisesPhotoUrl.isNotEmpty &&
+        hasScaleProof &&
+        hasBrandProof &&
+        hasBusinessReg;
+  }
 
   /// Automatically locked out of receiving orders because unpaid
   /// platform fees reached the threshold. Unlocks automatically when

@@ -32,12 +32,22 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // A null value means "no change this session"; the save step falls
   // back to whatever URL already exists rather than wiping it.
   final Map<String, File?> _docFiles = {
+    'epraCertificateUrl': null,
+    'businessRegistrationUrl': null,
     'brandAuthorizationUrl': null,
+    'dealerAssociationLetterUrl': null,
     'businessPermitUrl': null,
     'fireCertificateUrl': null,
     'weighingScaleCertUrl': null,
+    'weighingScalePhotoUrl': null,
     'premisesPhotoUrl': null,
   };
+
+  // Either/or toggles — true means "show the ideal document's upload
+  // slot", false means "show the fallback's upload slot instead".
+  // Defaulted in initState based on whichever the vendor already has.
+  late bool _hasScaleCert;
+  late bool _hasBrandAuth;
 
   // Step 1 - Business
   late TextEditingController _businessNameController;
@@ -75,9 +85,21 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     '6kg': false,
     '13kg': false,
   };
-  // Grill kit (6kg only: gas + cylinder + stove + grill)
+  // Grill kit (6kg only: gas + cylinder + burner + grill)
   final TextEditingController _grillKitPriceController = TextEditingController();
   bool _grillKitAvailable = false;
+  // Burner — fits 3kg or 6kg cylinders only, no gas included
+  final Map<String, TextEditingController> _burnerPriceControllers = {
+    '3kg': TextEditingController(),
+    '6kg': TextEditingController(),
+  };
+  final Map<String, bool> _burnerAvailable = {
+    '3kg': false,
+    '6kg': false,
+  };
+  // Regulator — fits 13kg cylinders only, no gas included
+  final TextEditingController _regulatorPriceController = TextEditingController();
+  bool _regulatorAvailable = false;
 
   // Step 2 - Location (Google Places)
   String _selectedAddress = '';
@@ -92,6 +114,12 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     super.initState();
     final d = widget.existingData ?? {};
     _businessType = d['businessType'] ?? 'sole';
+    // Default to the "ideal document" side unless they've already
+    // gone down the fallback path — then keep them there so their
+    // existing upload stays visible instead of appearing to vanish.
+    _hasScaleCert = (d['weighingScalePhotoUrl'] ?? '').toString().isEmpty;
+    _hasBrandAuth =
+        (d['dealerAssociationLetterUrl'] ?? '').toString().isEmpty;
     _businessNameController =
         TextEditingController(text: d['businessName'] ?? '');
     _ownerNameController =
@@ -125,6 +153,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       } else if (productType == 'grillKit') {
         _grillKitPriceController.text = price;
         _grillKitAvailable = available;
+      } else if (productType == 'burner' &&
+          _burnerPriceControllers.containsKey(size)) {
+        _burnerPriceControllers[size]!.text = price;
+        _burnerAvailable[size] = available;
+      } else if (productType == 'regulator') {
+        _regulatorPriceController.text = price;
+        _regulatorAvailable = available;
       }
     }
 
@@ -165,6 +200,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     for (final c in _priceControllers.values) { c.dispose(); }
     for (final c in _fullKitPriceControllers.values) { c.dispose(); }
     _grillKitPriceController.dispose();
+    for (final c in _burnerPriceControllers.values) { c.dispose(); }
+    _regulatorPriceController.dispose();
     _customBrandController.dispose();
     super.dispose();
   }
@@ -268,6 +305,28 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           'price': double.tryParse(_grillKitPriceController.text) ?? 0.0,
           'available': true,
           'productType': 'grillKit',
+        });
+      }
+      // Burner — 3kg or 6kg only, no gas
+      for (final e in _burnerPriceControllers.entries) {
+        if (_burnerAvailable[e.key] == true) {
+          listings.add({
+            'size': e.key,
+            'kg': e.key == '3kg' ? 3 : 6,
+            'price': double.tryParse(e.value.text) ?? 0.0,
+            'available': true,
+            'productType': 'burner',
+          });
+        }
+      }
+      // Regulator — 13kg only, no gas
+      if (_regulatorAvailable) {
+        listings.add({
+          'size': '13kg',
+          'kg': 13,
+          'price': double.tryParse(_regulatorPriceController.text) ?? 0.0,
+          'available': true,
+          'productType': 'regulator',
         });
       }
 
@@ -846,7 +905,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         // Grill Kit Section
         _sectionHeader('Grill Kit — 6kg only'),
         const SizedBox(height: 4),
-        Text('Gas + Cylinder + LPG Stove + Grill — complete package',
+        Text('Gas + Cylinder + LPG Burner + Grill — complete package',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppColors.gray400, fontSize: 11)),
         const SizedBox(height: 10),
@@ -854,6 +913,31 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             available: _grillKitAvailable,
             onToggle: (v) => setState(() => _grillKitAvailable = v),
             label: 'Grill Kit (6kg)'),
+        const SizedBox(height: 24),
+        _sectionHeader('Burner — fits 3kg or 6kg cylinders'),
+        const SizedBox(height: 4),
+        Text('Standalone burner sold on its own — no gas or cylinder included',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.gray400, fontSize: 11)),
+        const SizedBox(height: 10),
+        ..._burnerPriceControllers.entries.map((e) => _productRow(
+              e.key,
+              e.value,
+              available: _burnerAvailable[e.key] ?? false,
+              onToggle: (v) => setState(() => _burnerAvailable[e.key] = v),
+              label: 'Burner (${e.key})',
+            )),
+        const SizedBox(height: 24),
+        _sectionHeader('Regulator — fits 13kg cylinders'),
+        const SizedBox(height: 4),
+        Text('Standalone regulator sold on its own — no gas or cylinder included',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.gray400, fontSize: 11)),
+        const SizedBox(height: 10),
+        _productRow('13kg', _regulatorPriceController,
+            available: _regulatorAvailable,
+            onToggle: (v) => setState(() => _regulatorAvailable = v),
+            label: 'Regulator (13kg)'),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
@@ -899,20 +983,28 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         const SizedBox(height: 4),
         Text(
           'Customers only see verified vendors. You can finish setup now and '
-          'add these later, but you won\'t be able to go online until all '
-          'five are uploaded and approved by MobiGas.',
+          'add these later, but you won\'t be able to go online until '
+          'everything below is uploaded and approved by MobiGas.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: AppColors.gray400, fontSize: 12, height: 1.4),
         ),
         const SizedBox(height: 20),
         _buildVerificationDocUpload(
-          docKey: 'brandAuthorizationUrl',
-          title: 'Brand authorization letter',
+          docKey: 'epraCertificateUrl',
+          title: 'EPRA certificate',
           description:
-              'Written consent to sell from the gas brand(s) you stock '
-              '(e.g. an appointment letter from Total Gas, K-Gas, Hashi, '
-              'Africa Gas, etc.)',
+              'Your EPRA operating certificate/license for LPG retail',
         ),
+        if (_businessType == 'sole') ...[
+          const SizedBox(height: 16),
+          _buildVerificationDocUpload(
+            docKey: 'businessRegistrationUrl',
+            title: 'Business name registration certificate',
+            description:
+                'From eCitizen / the Business Registration Service — '
+                'required even for a sole proprietorship',
+          ),
+        ],
         const SizedBox(height: 16),
         _buildVerificationDocUpload(
           docKey: 'businessPermitUrl',
@@ -928,19 +1020,89 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ),
         const SizedBox(height: 16),
         _buildVerificationDocUpload(
-          docKey: 'weighingScaleCertUrl',
-          title: 'Weighing scale calibration certificate',
-          description:
-              'From the Department of Weights and Measures',
-        ),
-        const SizedBox(height: 16),
-        _buildVerificationDocUpload(
           docKey: 'premisesPhotoUrl',
           title: 'Photo of your retail point',
           description:
               'Showing the cylinder holding cage and neighbouring '
               'premises — required by EPRA',
         ),
+        const SizedBox(height: 20),
+        // ── Weighing scale: certificate OR a photo of the scale ────
+        Text('Weighing scale',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 10),
+        Row(children: [
+          _altToggleTab(
+            label: 'I have a calibration certificate',
+            selected: _hasScaleCert,
+            onTap: () => setState(() => _hasScaleCert = true),
+          ),
+          const SizedBox(width: 8),
+          _altToggleTab(
+            label: "I don't have one",
+            selected: !_hasScaleCert,
+            onTap: () => setState(() => _hasScaleCert = false),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        if (_hasScaleCert)
+          _buildVerificationDocUpload(
+            docKey: 'weighingScaleCertUrl',
+            title: 'Weighing scale calibration certificate',
+            description: 'From the Department of Weights and Measures',
+          )
+        else
+          _buildVerificationDocUpload(
+            docKey: 'weighingScalePhotoUrl',
+            title: 'Photo of your weighing scale',
+            description:
+                'Clear photo showing the scale is rated for at least '
+                '300kg — accepted in place of a calibration certificate',
+          ),
+        const SizedBox(height: 20),
+        // ── Brand authorization: brand letter OR association letter ─
+        Text('Brand authorization',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 10),
+        Row(children: [
+          _altToggleTab(
+            label: 'I have a brand authorization letter',
+            selected: _hasBrandAuth,
+            onTap: () => setState(() => _hasBrandAuth = true),
+          ),
+          const SizedBox(width: 8),
+          _altToggleTab(
+            label: "I don't have one",
+            selected: !_hasBrandAuth,
+            onTap: () => setState(() => _hasBrandAuth = false),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        if (_hasBrandAuth)
+          _buildVerificationDocUpload(
+            docKey: 'brandAuthorizationUrl',
+            title: 'Brand authorization letter',
+            description:
+                'Written consent to sell from the gas brand(s) you stock '
+                '(e.g. an appointment letter from Total Gas, K-Gas, '
+                'Hashi, Africa Gas, etc.)',
+          )
+        else
+          _buildVerificationDocUpload(
+            docKey: 'dealerAssociationLetterUrl',
+            title: 'Independent dealer association letter',
+            description:
+                'Authorization letter from an independent LPG dealer '
+                'association, in place of a direct brand letter',
+          ),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
@@ -970,6 +1132,45 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Small pill-style tab used for the two either/or document choices
+  /// (weighing scale, brand authorization) — same visual language as
+  /// the business-type tabs, sized for two-option rows.
+  Widget _altToggleTab({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.orange
+                : AppColors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected
+                  ? AppColors.orange
+                  : AppColors.white.withValues(alpha: 0.1),
+            ),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: selected ? AppColors.white : AppColors.gray400,
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
     );
   }
 

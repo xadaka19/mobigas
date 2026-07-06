@@ -365,7 +365,13 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           _row(Icons.location_on_outlined, 'Deliver to',
               widget.order.customerArea),
           _divider(),
-          _row(Icons.local_fire_department_outlined, 'Gas',
+          _row(
+              widget.order.listing.productType.isAccessoryOnly
+                  ? Icons.build_outlined
+                  : Icons.local_fire_department_outlined,
+              widget.order.listing.productType.isAccessoryOnly
+                  ? 'Product'
+                  : 'Gas',
               '${widget.order.listing.size} · ${widget.order.listing.productType.label}'),
           _divider(),
           _row(

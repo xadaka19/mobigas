@@ -182,11 +182,16 @@ class FirestoreService {
       deliveryTime: data['deliveryTime'] ?? '30–45 min',
       feesOwed: (data['feesOwed'] ?? 0.0).toDouble(),
       isSuspended: data['isSuspended'] ?? false,
+      epraCertificateUrl: data['epraCertificateUrl'] ?? '',
       brandAuthorizationUrl: data['brandAuthorizationUrl'] ?? '',
+      dealerAssociationLetterUrl: data['dealerAssociationLetterUrl'] ?? '',
       businessPermitUrl: data['businessPermitUrl'] ?? '',
+      businessRegistrationUrl: data['businessRegistrationUrl'] ?? '',
       fireCertificateUrl: data['fireCertificateUrl'] ?? '',
       weighingScaleCertUrl: data['weighingScaleCertUrl'] ?? '',
+      weighingScalePhotoUrl: data['weighingScalePhotoUrl'] ?? '',
       premisesPhotoUrl: data['premisesPhotoUrl'] ?? '',
+      businessType: data['businessType'] ?? '',
     );
   }
 

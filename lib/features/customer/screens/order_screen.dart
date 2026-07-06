@@ -161,7 +161,11 @@ class _OrderScreenState extends State<OrderScreen> {
       case GasProductType.fullKit:
         return 'New cylinder + gas — no empty cylinder needed';
       case GasProductType.grillKit:
-        return '6kg gas + cylinder + stove + grill — complete starter package';
+        return '6kg gas + cylinder + burner + grill — complete starter package';
+      case GasProductType.burner:
+        return 'Standalone burner — fits 3kg or 6kg cylinders, no gas included';
+      case GasProductType.regulator:
+        return 'Standalone regulator — fits 13kg cylinders, no gas included';
     }
   }
 
@@ -173,6 +177,10 @@ class _OrderScreenState extends State<OrderScreen> {
         return Icons.propane_tank_outlined;
       case GasProductType.grillKit:
         return Icons.outdoor_grill_rounded;
+      case GasProductType.burner:
+        return Icons.whatshot_rounded;
+      case GasProductType.regulator:
+        return Icons.speed_rounded;
     }
   }
 
@@ -184,6 +192,10 @@ class _OrderScreenState extends State<OrderScreen> {
         return 'Gas + cylinder';
       case GasProductType.grillKit:
         return 'Gas + cylinder + grill';
+      case GasProductType.burner:
+        return 'Burner';
+      case GasProductType.regulator:
+        return 'Regulator';
     }
   }
 

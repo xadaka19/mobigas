@@ -10,6 +10,7 @@ import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart'
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
 import 'package:mobigas/features/vendor/screens/stock_loan_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
+import 'package:mobigas/features/vendor/screens/vendor_statistics_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
 
@@ -60,21 +61,33 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     }
   }
 
+  /// Mirrors VendorModel.documentsSubmitted (app_models.dart) — kept
+  /// as a raw-map check here since this screen reads _vendorData
+  /// directly rather than through the model. Update both together.
+  bool get _documentsSubmitted {
+    String s(String key) => (_vendorData?[key] ?? '').toString();
+    final hasScaleProof =
+        s('weighingScaleCertUrl').isNotEmpty || s('weighingScalePhotoUrl').isNotEmpty;
+    final hasBrandProof =
+        s('brandAuthorizationUrl').isNotEmpty || s('dealerAssociationLetterUrl').isNotEmpty;
+    final isSole = (_vendorData?['businessType'] ?? 'sole') == 'sole';
+    final hasBusinessReg = !isSole || s('businessRegistrationUrl').isNotEmpty;
+    return s('epraCertificateUrl').isNotEmpty &&
+        s('businessPermitUrl').isNotEmpty &&
+        s('fireCertificateUrl').isNotEmpty &&
+        s('premisesPhotoUrl').isNotEmpty &&
+        hasScaleProof &&
+        hasBrandProof &&
+        hasBusinessReg;
+  }
+
   Future<void> _toggleOnline() async {
     // Going online requires admin-approved verification, not just
     // self-reported document upload — documentsSubmitted is spoofable
     // (a vendor could upload blank images), so it's not a real gate.
     // isVerified is the only flag a human has actually checked.
     if (_vendorData?['isVerified'] != true) {
-      final docsIn = (_vendorData?['brandAuthorizationUrl'] ?? '')
-              .toString()
-              .isNotEmpty &&
-          (_vendorData?['businessPermitUrl'] ?? '').toString().isNotEmpty &&
-          (_vendorData?['fireCertificateUrl'] ?? '').toString().isNotEmpty &&
-          (_vendorData?['weighingScaleCertUrl'] ?? '')
-              .toString()
-              .isNotEmpty &&
-          (_vendorData?['premisesPhotoUrl'] ?? '').toString().isNotEmpty;
+      final docsIn = _documentsSubmitted;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(docsIn
@@ -148,8 +161,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         (m) => m.name == (data['paymentMethod'] ?? 'credit'),
         orElse: () => PaymentMethod.credit,
       ),
-      finderFee: (data['finderFee'] ?? 0).toDouble(),
-      bankDisbursementAmount:
+        finderFee: (data['finderFee'] ?? 0).toDouble(),
+        bankDisbursementAmount:
           (data['bankDisbursementAmount'] ?? 0).toDouble(),
       originationFeeToMobigas:
           (data['originationFeeToMobigas'] ?? 0).toDouble(),
@@ -183,7 +196,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     // Goes through the service so a declined CREDIT order releases
     // the customer's reserved credit automatically.
     await FirestoreService.updateOrderStatus(
-        order.orderId, OrderStatus.cancelled);
+      order.orderId, OrderStatus.cancelled);
   }
 
   @override
@@ -293,11 +306,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
               ),
             )
-          else if ((_vendorData?['brandAuthorizationUrl'] ?? '').isEmpty ||
-              (_vendorData?['businessPermitUrl'] ?? '').isEmpty ||
-              (_vendorData?['fireCertificateUrl'] ?? '').isEmpty ||
-              (_vendorData?['weighingScaleCertUrl'] ?? '').isEmpty ||
-              (_vendorData?['premisesPhotoUrl'] ?? '').isEmpty)
+          else if (!_documentsSubmitted)
             // No customer will see this vendor until these are
             // submitted AND approved — but they can go online and
             // prepare their shop in the meantime.
@@ -344,7 +353,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Upload your business permit, fire certificate, brand authorization, scale calibration and a shop photo — customers only see verified vendors',
+                            'Upload your EPRA certificate, business permit, fire certificate and the rest — customers only see verified vendors',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
@@ -1133,9 +1142,68 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                               'Bank pays your M-Pesa on PIN confirmation'),
                           _earningsRow('Cash orders',
                               'Customer pays you directly on delivery'),
-                          _earningsRow('Your M-Pesa',
+                                              _earningsRow('Your M-Pesa',
                               _vendorData?['phone'] ?? ''),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => VendorStatisticsScreen(
+                              vendorData: _vendorData ?? {}),
+                        ),
+                      ),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.navy,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: AppColors.orange.withValues(alpha: 0.2),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.bar_chart_rounded,
+                                  color: AppColors.orange, size: 22),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Statistics & Reports',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                              color: AppColors.white,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                      'Month-on-month sales, fulfillment rate, PDF export',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                              color: AppColors.gray400,
+                                              fontSize: 11)),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.arrow_forward_ios_rounded,
+                                color: AppColors.orange, size: 14),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -1157,7 +1225,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         monthsOnPlatform = DateTime.now().difference(joined).inDays ~/ 30;
       } catch (_) {}
     }
-    final isEligible = monthsOnPlatform >= 3 && totalDeliveries >= 30;
+    final isEligible = monthsOnPlatform >= StockLoanRequirements.minMonthsOnPlatform &&
+        totalDeliveries >= StockLoanRequirements.minDeliveries;
     final monthlyRevenue = orders.isEmpty || monthsOnPlatform == 0
         ? 0.0
         : orders.fold(0.0, (acc, o) => acc + o.listing.price) /
@@ -1217,13 +1286,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   fontSize: 13)),
           if (!isEligible) ...[
             const SizedBox(height: 12),
-            if (monthsOnPlatform < 3)
-              _eligibilityBar('Months on platform',
-                  monthsOnPlatform, 3, '$monthsOnPlatform/3 months'),
+            if (monthsOnPlatform < StockLoanRequirements.minMonthsOnPlatform)
+              _eligibilityBar(
+                  'Months on platform',
+                  monthsOnPlatform,
+                  StockLoanRequirements.minMonthsOnPlatform,
+                  '$monthsOnPlatform/${StockLoanRequirements.minMonthsOnPlatform} months'),
             const SizedBox(height: 6),
-            if (totalDeliveries < 30)
-              _eligibilityBar('Total deliveries',
-                  totalDeliveries, 30, '$totalDeliveries/30 deliveries'),
+            if (totalDeliveries < StockLoanRequirements.minDeliveries)
+              _eligibilityBar(
+                  'Total deliveries',
+                  totalDeliveries,
+                  StockLoanRequirements.minDeliveries,
+                  '$totalDeliveries/${StockLoanRequirements.minDeliveries} deliveries'),
           ],
           const SizedBox(height: 12),
           ElevatedButton(
@@ -1254,7 +1329,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   ? 'Apply for stock loan'
                   : monthsOnPlatform == 0
                       ? 'Start delivering to unlock'
-                      : 'Keep delivering — ${3 - monthsOnPlatform} month${(3 - monthsOnPlatform) == 1 ? '' : 's'} to go',
+                      : 'Keep delivering — ${StockLoanRequirements.minMonthsOnPlatform - monthsOnPlatform} month${(StockLoanRequirements.minMonthsOnPlatform - monthsOnPlatform) == 1 ? '' : 's'} to go',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -1507,18 +1582,28 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.gray200),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: AppColors.orange, size: 20),
-          const SizedBox(width: 12),
-          Text(label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.gray600,
-                  )),
-          const Spacer(),
-          Flexible(
+          Row(
+            children: [
+              Icon(icon, color: AppColors.orange, size: 20),
+              const SizedBox(width: 12),
+              Text(label,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.gray600,
+                      )),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Full-width line for the value — a phone number has no
+          // spaces to wrap on, so squeezing it into the same row as
+          // the label (as before) forced Flutter to hard-break it
+          // mid-digit whenever it didn't fit. Giving it the whole
+          // tile width on its own line means it never has to.
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
             child: Text(value,
-                textAlign: TextAlign.right,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.navy,
                       fontWeight: FontWeight.w600,

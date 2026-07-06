@@ -176,6 +176,10 @@ class OrderProvider extends ChangeNotifier {
         return 'gas + cylinder';
       case GasProductType.grillKit:
         return 'gas + cylinder + grill';
+      case GasProductType.burner:
+        return 'burner';
+      case GasProductType.regulator:
+        return 'regulator';
     }
   }
 
