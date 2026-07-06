@@ -143,6 +143,15 @@ class VendorModel {
   /// (credit or cash) until cleared.
   final bool isSuspended;
 
+  // ── Verification documents ──────────────────────────────────────
+  // Uploaded once during onboarding; reviewed by admin before
+  // isVerified is set to true. All fields empty until submitted.
+  final String brandAuthorizationUrl;
+  final String businessPermitUrl;
+  final String fireCertificateUrl;
+  final String weighingScaleCertUrl;
+  final String premisesPhotoUrl;
+
   const VendorModel({
     required this.id,
     required this.businessName,
@@ -164,7 +173,23 @@ class VendorModel {
     required this.deliveryTime,
     this.feesOwed = 0.0,
     this.isSuspended = false,
+    this.brandAuthorizationUrl = '',
+    this.businessPermitUrl = '',
+    this.fireCertificateUrl = '',
+    this.weighingScaleCertUrl = '',
+    this.premisesPhotoUrl = '',
   });
+
+  /// All five mandatory compliance documents have been uploaded.
+  /// True the moment a vendor finishes the upload step — independent
+  /// of admin approval (isVerified), so the UI can distinguish
+  /// "nothing submitted yet" from "submitted, awaiting review".
+  bool get documentsSubmitted =>
+      brandAuthorizationUrl.isNotEmpty &&
+      businessPermitUrl.isNotEmpty &&
+      fireCertificateUrl.isNotEmpty &&
+      weighingScaleCertUrl.isNotEmpty &&
+      premisesPhotoUrl.isNotEmpty;
 
   /// Automatically locked out of receiving orders because unpaid
   /// platform fees reached the threshold. Unlocks automatically when
@@ -172,7 +197,11 @@ class VendorModel {
   bool get isLockedForFees =>
       feesOwed >= MobiGasFees.vendorFeeLockThreshold;
 
-  /// Vendor can appear to customers and receive orders.
+  /// Vendor can appear to customers and receive orders. isVerified is
+  /// checked separately at every call site today (order_screen.dart,
+  /// vendor_provider.dart) — kept that way rather than folded in here,
+  /// so this getter's meaning ("financially in good standing") stays
+  /// distinct from "compliance-approved".
   bool get canReceiveOrders => !isSuspended && !isLockedForFees;
 }
 

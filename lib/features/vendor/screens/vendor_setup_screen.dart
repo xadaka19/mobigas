@@ -19,13 +19,25 @@ class VendorSetupScreen extends StatefulWidget {
 }
 
 class _VendorSetupScreenState extends State<VendorSetupScreen> {
-  int _step = 0; // 0=business, 1=location, 2=gas products
+  int _step = 0; // 0=business, 1=location, 2=gas products, 3=verification docs
   bool _isSaving = false;
 
   // Business type
   String _businessType = 'sole'; // sole, registered, petrol_station
   File? _certificateFile;
   bool _isUploadingCert = false; // ignore: prefer_final_fields
+
+  // Step 3 - Verification documents (EPRA compliance) — new files picked
+  // this session, keyed by the Firestore field they'll be saved to.
+  // A null value means "no change this session"; the save step falls
+  // back to whatever URL already exists rather than wiping it.
+  final Map<String, File?> _docFiles = {
+    'brandAuthorizationUrl': null,
+    'businessPermitUrl': null,
+    'fireCertificateUrl': null,
+    'weighingScaleCertUrl': null,
+    'premisesPhotoUrl': null,
+  };
 
   // Step 1 - Business
   late TextEditingController _businessNameController;
@@ -185,8 +197,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Upload certificate if selected
-      String? certificateUrl;
+      final isNewVendor = widget.existingData == null;
+
+      // Business certificate / ID (Step 0). Preserve the existing URL
+      // by default — only overwrite it if a new file was picked this
+      // session. Previously this silently wrote null (wiping the
+      // upload) on every edit that didn't re-pick a file.
+      String? certificateUrl =
+          widget.existingData?['certificateUrl'] as String?;
       if (_certificateFile != null) {
         setState(() => _isUploadingCert = true);
         final ref = FirebaseStorage.instance
@@ -196,6 +214,27 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         await ref.putFile(_certificateFile!);
         certificateUrl = await ref.getDownloadURL();
         setState(() => _isUploadingCert = false);
+      }
+
+      // Verification documents (Step 3) — same preserve-unless-replaced
+      // rule. Uploading a NEW document here means something changed
+      // and MobiGas needs to re-review, so it also resets isVerified.
+      final docUrls = <String, String>{};
+      var anyNewVerificationDoc = false;
+      for (final key in _docFiles.keys) {
+        final file = _docFiles[key];
+        if (file != null) {
+          anyNewVerificationDoc = true;
+          final ref = FirebaseStorage.instance
+              .ref()
+              .child('vendor_documents')
+              .child(_vendorId)
+              .child(key);
+          await ref.putFile(file);
+          docUrls[key] = await ref.getDownloadURL();
+        } else {
+          docUrls[key] = (widget.existingData?[key] as String?) ?? '';
+        }
       }
 
       final listings = <Map<String, dynamic>>[];
@@ -254,16 +293,39 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             .where((b) => !KenyanGasBrands.all.contains(b))
             .toList(),
         'listings': listings,
-        'isVerified': false,
-        'isOnline': false,
-        'rating': 0.0,
-        'totalReviews': 0,
         'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty ? _deliveryTimeController.text.trim() : '20–40 min',
         'updatedAt': FieldValue.serverTimestamp(),
         'certificateUrl': certificateUrl,
-        'createdAt': widget.existingData == null
+        'brandAuthorizationUrl': docUrls['brandAuthorizationUrl'],
+        'businessPermitUrl': docUrls['businessPermitUrl'],
+        'fireCertificateUrl': docUrls['fireCertificateUrl'],
+        'weighingScaleCertUrl': docUrls['weighingScaleCertUrl'],
+        'premisesPhotoUrl': docUrls['premisesPhotoUrl'],
+        'createdAt': isNewVendor
             ? FieldValue.serverTimestamp()
             : widget.existingData!['createdAt'],
+        // These fields represent accumulated or admin-controlled state
+        // (verification decision, live/offline status, rating history).
+        // They are ONLY defaulted on first creation. On every later
+        // edit they are omitted entirely so the merge leaves whatever
+        // is already in Firestore untouched — previously this block
+        // unconditionally reset all four on every single save, so a
+        // verified, online vendor with real reviews would silently
+        // lose their badge, go offline, and have their rating wiped
+        // just by updating a gas price.
+        if (isNewVendor) ...{
+          'isVerified': false,
+          'isOnline': false,
+          'rating': 0.0,
+          'totalReviews': 0,
+        },
+        // A brand-new verification document invalidates any prior
+        // approval — force MobiGas to re-review it.
+        if (!isNewVendor && anyNewVerificationDoc) ...{
+          'isVerified': false,
+          'verifiedAt': null,
+          'verifiedBy': null,
+        },
       }, SetOptions(merge: true));
 
       if (mounted) {
@@ -299,7 +361,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                     ? _buildStep0()
                     : _step == 1
                         ? _buildStep1()
-                        : _buildStep2(),
+                        : _step == 2
+                            ? _buildStep2()
+                            : _buildStep3(),
               ),
             ),
             _buildFooter(),
@@ -310,6 +374,12 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   }
 
   Widget _buildHeader() {
+    final titles = [
+      'Business details',
+      'Your location',
+      'Gas products & prices',
+      'Verification documents',
+    ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Row(
@@ -325,17 +395,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _step == 0
-                      ? 'Business details'
-                      : _step == 1
-                          ? 'Your location'
-                          : 'Gas products & prices',
+                  titles[_step],
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: AppColors.white,
                       ),
                 ),
                 Text(
-                  'Step ${_step + 1} of 3',
+                  'Step ${_step + 1} of 4',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                       ),
@@ -352,7 +418,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
-        children: List.generate(3, (i) {
+        children: List.generate(4, (i) {
           return Expanded(
             child: Row(
               children: [
@@ -368,7 +434,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                     ),
                   ),
                 ),
-                if (i < 2) const SizedBox(width: 4),
+                if (i < 3) const SizedBox(width: 4),
               ],
             ),
           );
@@ -820,6 +886,205 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     );
   }
 
+  // ── STEP 3: VERIFICATION DOCUMENTS ───────────────────────────────
+  Widget _buildStep3() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Get your verified badge',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 4),
+        Text(
+          'Customers only see verified vendors. You can finish setup now and '
+          'add these later, but you won\'t be able to go online until all '
+          'five are uploaded and approved by MobiGas.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray400, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 20),
+        _buildVerificationDocUpload(
+          docKey: 'brandAuthorizationUrl',
+          title: 'Brand authorization letter',
+          description:
+              'Written consent to sell from the gas brand(s) you stock '
+              '(e.g. an appointment letter from Total Gas, K-Gas, Hashi, '
+              'Africa Gas, etc.)',
+        ),
+        const SizedBox(height: 16),
+        _buildVerificationDocUpload(
+          docKey: 'businessPermitUrl',
+          title: 'County business permit',
+          description:
+              'Your Single Business Permit from the county government',
+        ),
+        const SizedBox(height: 16),
+        _buildVerificationDocUpload(
+          docKey: 'fireCertificateUrl',
+          title: 'Fire clearance certificate',
+          description: 'Valid fire safety certificate for your premises',
+        ),
+        const SizedBox(height: 16),
+        _buildVerificationDocUpload(
+          docKey: 'weighingScaleCertUrl',
+          title: 'Weighing scale calibration certificate',
+          description:
+              'From the Department of Weights and Measures',
+        ),
+        const SizedBox(height: 16),
+        _buildVerificationDocUpload(
+          docKey: 'premisesPhotoUrl',
+          title: 'Photo of your retail point',
+          description:
+              'Showing the cylinder holding cage and neighbouring '
+              'premises — required by EPRA',
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.orange.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: AppColors.orange.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline_rounded,
+                  color: AppColors.orange, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'MobiGas reviews documents manually — you\'ll be notified once approved. Uploading a replacement document sends it back for re-review.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.orange,
+                        height: 1.4,
+                        fontSize: 11,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickVerificationDoc(String docKey) async {
+    final picker = ImagePicker();
+    final file = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 90,
+    );
+    if (file != null) {
+      setState(() => _docFiles[docKey] = File(file.path));
+    }
+  }
+
+  Widget _buildVerificationDocUpload({
+    required String docKey,
+    required String title,
+    required String description,
+  }) {
+    final newFile = _docFiles[docKey];
+    final existingUrl = widget.existingData?[docKey] as String?;
+    final hasDoc = newFile != null ||
+        (existingUrl != null && existingUrl.isNotEmpty);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 4),
+        Text(description,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: AppColors.gray400, fontSize: 11)),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: () => _pickVerificationDoc(docKey),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: hasDoc
+                  ? AppColors.success.withValues(alpha: 0.1)
+                  : AppColors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: hasDoc
+                    ? AppColors.success.withValues(alpha: 0.4)
+                    : AppColors.white.withValues(alpha: 0.2),
+                width: hasDoc ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  hasDoc
+                      ? Icons.check_circle_rounded
+                      : Icons.upload_file_rounded,
+                  color: hasDoc ? AppColors.success : AppColors.gray400,
+                  size: 28,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hasDoc
+                            ? newFile != null
+                                ? 'Document selected ✓'
+                                : 'Document already uploaded ✓'
+                            : 'Tap to upload document',
+                        style: TextStyle(
+                          color: hasDoc
+                              ? AppColors.success
+                              : AppColors.gray400,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      Text(
+                        hasDoc
+                            ? 'Tap to replace'
+                            : 'JPG, PNG accepted',
+                        style: const TextStyle(
+                            color: AppColors.gray600, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (newFile != null) ...[
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              newFile,
+              height: 100,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildFooter() {
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -871,20 +1136,24 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   );
                   return;
                 }
-                if (_step < 2) {
+                if (_step == 2 && !_step2Valid) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                          'Select at least one brand and set a price'),
+                      backgroundColor: AppColors.error,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+                // Step 3 (verification docs) has no hard gate here —
+                // a vendor can finish setup without them and upload
+                // later; going online is what's actually blocked
+                // until all five are approved (see vendor home screen).
+                if (_step < 3) {
                   setState(() => _step++);
                 } else {
-                  if (!_step2Valid) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                            'Select at least one brand and set a price'),
-                        backgroundColor: AppColors.error,
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                    return;
-                  }
                   _save();
                 }
               },
@@ -896,7 +1165,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                           strokeWidth: 2.5,
                           color: AppColors.white),
                     )
-                  : Text(_step < 2 ? 'Continue' : 'Save & go live'),
+                  : Text(_step < 3 ? 'Continue' : 'Save profile'),
             ),
           ),
         ],

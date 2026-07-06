@@ -61,15 +61,29 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   }
 
   Future<void> _toggleOnline() async {
+    // Going online requires admin-approved verification, not just
+    // self-reported document upload — documentsSubmitted is spoofable
+    // (a vendor could upload blank images), so it's not a real gate.
+    // isVerified is the only flag a human has actually checked.
     if (_vendorData?['isVerified'] != true) {
+      final docsIn = (_vendorData?['brandAuthorizationUrl'] ?? '')
+              .toString()
+              .isNotEmpty &&
+          (_vendorData?['businessPermitUrl'] ?? '').toString().isNotEmpty &&
+          (_vendorData?['fireCertificateUrl'] ?? '').toString().isNotEmpty &&
+          (_vendorData?['weighingScaleCertUrl'] ?? '')
+              .toString()
+              .isNotEmpty &&
+          (_vendorData?['premisesPhotoUrl'] ?? '').toString().isNotEmpty;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text(
-              'Your account is pending approval. You cannot go online yet.'),
+          content: Text(docsIn
+              ? 'Your documents are under review. You can go online as soon as MobiGas approves your account.'
+              : 'Upload your verification documents before going online.'),
           backgroundColor: AppColors.warning,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
       return;
@@ -279,7 +293,81 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
               ),
             )
+          else if ((_vendorData?['brandAuthorizationUrl'] ?? '').isEmpty ||
+              (_vendorData?['businessPermitUrl'] ?? '').isEmpty ||
+              (_vendorData?['fireCertificateUrl'] ?? '').isEmpty ||
+              (_vendorData?['weighingScaleCertUrl'] ?? '').isEmpty ||
+              (_vendorData?['premisesPhotoUrl'] ?? '').isEmpty)
+            // No customer will see this vendor until these are
+            // submitted AND approved — but they can go online and
+            // prepare their shop in the meantime.
+            GestureDetector(
+              onTap: () async {
+                final done = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        VendorSetupScreen(existingData: _vendorData),
+                  ),
+                );
+                if (done == true) _loadVendorData();
+              },
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: AppColors.orange.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.fact_check_outlined,
+                        color: AppColors.orange, size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Get your verified badge',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  color: AppColors.orange,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Upload your business permit, fire certificate, brand authorization, scale calibration and a shop photo — customers only see verified vendors',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: AppColors.orange,
+                                  height: 1.4,
+                                  fontSize: 11,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded,
+                        color: AppColors.orange, size: 14),
+                  ],
+                ),
+              ),
+            )
           else if (_vendorData?['isVerified'] != true)
+            // All five documents are in — now it's on MobiGas, not
+            // the vendor. Informational only; does not block going
+            // online, and there's nothing actionable left for them
+            // to tap here.
             Container(
               width: double.infinity,
               margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -300,7 +388,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Pending verification',
+                          'Documents under review',
                           style: Theme.of(context)
                               .textTheme
                               .titleMedium
@@ -312,7 +400,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'MobiGas is reviewing your details before activating your account.',
+                          'MobiGas is verifying your documents. You can prepare orders now — customers will see you as soon as you\'re approved.',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
@@ -323,35 +411,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                               ),
                         ),
                       ],
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () async {
-                      final done = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => VendorSetupScreen(
-                              existingData: _vendorData),
-                        ),
-                      );
-                      if (done == true) _loadVendorData();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color:
-                            AppColors.warning.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text('Edit',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: AppColors.warning,
-                                fontWeight: FontWeight.w600,
-                              )),
                     ),
                   ),
                 ],
@@ -461,6 +520,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   }
 
   Widget _buildOnlineToggle() {
+    final isVerified = _vendorData?['isVerified'] == true;
     return GestureDetector(
       onTap: _toggleOnline,
       child: AnimatedContainer(
@@ -468,9 +528,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: _isOnline ? AppColors.success : AppColors.gray400,
+          color: !isVerified
+              ? AppColors.gray400.withValues(alpha: 0.5)
+              : _isOnline
+                  ? AppColors.success
+                  : AppColors.gray400,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: _isOnline
+          boxShadow: _isOnline && isVerified
               ? [
                   BoxShadow(
                     color: AppColors.success.withValues(alpha: 0.4),
@@ -490,9 +554,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                _isOnline
-                    ? Icons.wifi_rounded
-                    : Icons.wifi_off_rounded,
+                !isVerified
+                    ? Icons.lock_outline_rounded
+                    : _isOnline
+                        ? Icons.wifi_rounded
+                        : Icons.wifi_off_rounded,
                 color: AppColors.white,
                 size: 28,
               ),
@@ -503,9 +569,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    _isOnline
-                        ? 'You are online'
-                        : 'You are offline',
+                    !isVerified
+                        ? 'Locked until verified'
+                        : _isOnline
+                            ? 'You are online'
+                            : 'You are offline',
                     style: Theme.of(context)
                         .textTheme
                         .titleLarge
@@ -515,9 +583,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         ),
                   ),
                   Text(
-                    _isOnline
-                        ? 'Receiving new orders · Tap to go offline'
-                        : 'Not receiving orders · Tap to go online',
+                    !isVerified
+                        ? 'Complete verification above to unlock'
+                        : _isOnline
+                            ? 'Receiving new orders · Tap to go offline'
+                            : 'Not receiving orders · Tap to go online',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.white.withValues(alpha: 0.8),
                           fontSize: 12,
