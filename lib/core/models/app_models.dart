@@ -181,11 +181,15 @@ class VendorModel {
   // ── Verification documents ──────────────────────────────────────
   // Uploaded once during onboarding; reviewed by admin before
   // isVerified is set to true. All fields empty until submitted.
-  // Two of these are "either/or" pairs — a vendor satisfies the
+  // Three of these are "either/or" pairs — a vendor satisfies the
   // requirement with whichever one they can actually get, not both:
+  //   - epraCertificateUrl    OR  subDealerAuthorizationUrl
   //   - weighingScaleCertUrl  OR  weighingScalePhotoUrl
   //   - brandAuthorizationUrl OR  dealerAssociationLetterUrl
   final String epraCertificateUrl;
+  final String subDealerAuthorizationUrl;
+  final String parentVendorName;
+  final String parentEpraNumber;
   final String brandAuthorizationUrl;
   final String dealerAssociationLetterUrl;
   final String businessPermitUrl;
@@ -222,6 +226,9 @@ class VendorModel {
     this.feesOwed = 0.0,
     this.isSuspended = false,
     this.epraCertificateUrl = '',
+    this.subDealerAuthorizationUrl = '',
+    this.parentVendorName = '',
+    this.parentEpraNumber = '',
     this.brandAuthorizationUrl = '',
     this.dealerAssociationLetterUrl = '',
     this.businessPermitUrl = '',
@@ -238,6 +245,8 @@ class VendorModel {
   /// (isVerified), so the UI can distinguish "nothing submitted yet"
   /// from "submitted, awaiting review".
   bool get documentsSubmitted {
+    final hasEpraProof =
+        epraCertificateUrl.isNotEmpty || subDealerAuthorizationUrl.isNotEmpty;
     final hasScaleProof =
         weighingScaleCertUrl.isNotEmpty || weighingScalePhotoUrl.isNotEmpty;
     final hasBrandProof = brandAuthorizationUrl.isNotEmpty ||
@@ -247,7 +256,7 @@ class VendorModel {
     // sole proprietors need the separate BRS business-name document.
     final hasBusinessReg =
         businessType != 'sole' || businessRegistrationUrl.isNotEmpty;
-    return epraCertificateUrl.isNotEmpty &&
+    return hasEpraProof &&
         businessPermitUrl.isNotEmpty &&
         fireCertificateUrl.isNotEmpty &&
         premisesPhotoUrl.isNotEmpty &&
@@ -360,6 +369,13 @@ class OrderModel {
   /// (cash orders only, 1% of gas price). Frozen at order time.
   final double finderFee;
 
+  /// 'customer' | 'vendor' | null — who cancelled this order. Both
+  /// paths write status=cancelled, so this is the only way to tell
+  /// "customer changed their mind" from "vendor declined the order"
+  /// apart afterward. Null for orders cancelled before this field
+  /// existed, or for any order that was never cancelled.
+  final String? cancelledBy;
+
   const OrderModel({
     required this.orderId,
     required this.customerId,
@@ -382,6 +398,7 @@ class OrderModel {
     required this.partnerBankName,
     this.paymentMethod = PaymentMethod.credit,
     this.finderFee = 0.0,
+    this.cancelledBy,
   });
 
   /// What the customer actually pays in total:

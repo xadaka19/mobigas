@@ -183,6 +183,9 @@ class FirestoreService {
       feesOwed: (data['feesOwed'] ?? 0.0).toDouble(),
       isSuspended: data['isSuspended'] ?? false,
       epraCertificateUrl: data['epraCertificateUrl'] ?? '',
+      subDealerAuthorizationUrl: data['subDealerAuthorizationUrl'] ?? '',
+      parentVendorName: data['parentVendorName'] ?? '',
+      parentEpraNumber: data['parentEpraNumber'] ?? '',
       brandAuthorizationUrl: data['brandAuthorizationUrl'] ?? '',
       dealerAssociationLetterUrl: data['dealerAssociationLetterUrl'] ?? '',
       businessPermitUrl: data['businessPermitUrl'] ?? '',
@@ -260,7 +263,8 @@ class FirestoreService {
   }
 
   static Future<void> updateOrderStatus(
-      String orderId, OrderStatus status) async {
+      String orderId, OrderStatus status,
+      {String? cancelledBy}) async {
     final snap = await FirebaseService.orders
         .where('orderId', isEqualTo: orderId)
         .get();
@@ -272,6 +276,9 @@ class FirestoreService {
     await docRef.update({
       'status': status.name,
       'updatedAt': FieldValue.serverTimestamp(),
+      // Only cancellation ever sets this — never overwrite it with
+      // null on other status transitions.
+      if (cancelledBy != null) 'cancelledBy': cancelledBy,
     });
 
     // Cash orders: accrue the 1% customer-finder fee the vendor owes
@@ -372,6 +379,7 @@ class FirestoreService {
         orElse: () => PaymentMethod.credit,
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
+      cancelledBy: data['cancelledBy'],
       bankDisbursementAmount:
           (data['bankDisbursementAmount'] ?? 0).toDouble(),
       originationFeeToMobigas:

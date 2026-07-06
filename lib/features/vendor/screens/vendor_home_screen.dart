@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,18 +27,42 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   bool _isOnline = false;
   Map<String, dynamic>? _vendorData;
   bool _isLoadingVendor = true;
+  StreamSubscription<User?>? _authSub;
 
   String get _vendorId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   @override
   void initState() {
     super.initState();
+    // BUG FIX: reading currentUser once, right here, could catch
+    // Firebase Auth mid-restore on a fresh install/cold start — the
+    // session is being silently re-established (especially with
+    // Google Sign-In's cached Play Services credential) but hasn't
+    // finished yet, so currentUser is still null for a moment. The
+    // old code saw an empty _vendorId, gave up immediately, and
+    // never tried again — leaving the screen blank until the vendor
+    // manually logged out and back in. Listening instead guarantees
+    // we load the profile the moment a real user becomes available,
+    // however long that takes.
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user != null) _loadVendorData();
+    });
+    // Also try immediately, in case auth is already resolved (the
+    // normal case for anyone who didn't just reinstall).
     _loadVendorData();
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadVendorData() async {
     if (_vendorId.isEmpty) {
-      setState(() => _isLoadingVendor = false);
+      // Don't give up permanently — authStateChanges will call this
+      // again once a user actually becomes available.
+      if (mounted) setState(() => _isLoadingVendor = false);
       return;
     }
     try {
@@ -66,13 +91,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   /// directly rather than through the model. Update both together.
   bool get _documentsSubmitted {
     String s(String key) => (_vendorData?[key] ?? '').toString();
+    final hasEpraProof =
+        s('epraCertificateUrl').isNotEmpty || s('subDealerAuthorizationUrl').isNotEmpty;
     final hasScaleProof =
         s('weighingScaleCertUrl').isNotEmpty || s('weighingScalePhotoUrl').isNotEmpty;
     final hasBrandProof =
         s('brandAuthorizationUrl').isNotEmpty || s('dealerAssociationLetterUrl').isNotEmpty;
     final isSole = (_vendorData?['businessType'] ?? 'sole') == 'sole';
     final hasBusinessReg = !isSole || s('businessRegistrationUrl').isNotEmpty;
-    return s('epraCertificateUrl').isNotEmpty &&
+    return hasEpraProof &&
         s('businessPermitUrl').isNotEmpty &&
         s('fireCertificateUrl').isNotEmpty &&
         s('premisesPhotoUrl').isNotEmpty &&
@@ -161,8 +188,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         (m) => m.name == (data['paymentMethod'] ?? 'credit'),
         orElse: () => PaymentMethod.credit,
       ),
-        finderFee: (data['finderFee'] ?? 0).toDouble(),
-        bankDisbursementAmount:
+      finderFee: (data['finderFee'] ?? 0).toDouble(),
+      cancelledBy: data['cancelledBy'],
+      bankDisbursementAmount:
           (data['bankDisbursementAmount'] ?? 0).toDouble(),
       originationFeeToMobigas:
           (data['originationFeeToMobigas'] ?? 0).toDouble(),
@@ -196,7 +224,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     // Goes through the service so a declined CREDIT order releases
     // the customer's reserved credit automatically.
     await FirestoreService.updateOrderStatus(
-      order.orderId, OrderStatus.cancelled);
+        order.orderId, OrderStatus.cancelled,
+        cancelledBy: 'vendor');
   }
 
   @override
@@ -315,8 +344,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 final done = await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        VendorSetupScreen(existingData: _vendorData),
+                    builder: (_) => VendorSetupScreen(
+                        existingData: _vendorData,
+                        mode: VendorEditMode.documentsOnly),
                   ),
                 );
                 if (done == true) _loadVendorData();
@@ -1522,25 +1552,22 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                     'Brands',
                     (_vendorData?['brands'] as List?)?.join(', ') ?? ''),
                 const SizedBox(height: 8),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    final done = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            VendorSetupScreen(existingData: _vendorData),
-                      ),
-                    );
-                    if (done == true) _loadVendorData();
-                  },
-                  icon: const Icon(Icons.edit_rounded, size: 16),
-                  label: const Text('Edit business & gas prices'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        AppColors.orange.withValues(alpha: 0.15),
-                    foregroundColor: AppColors.orange,
-                    elevation: 0,
-                  ),
+                _editEntryButton(
+                  icon: Icons.store_outlined,
+                  label: 'Edit business details',
+                  mode: VendorEditMode.businessOnly,
+                ),
+                const SizedBox(height: 10),
+                _editEntryButton(
+                  icon: Icons.location_on_outlined,
+                  label: 'Edit location',
+                  mode: VendorEditMode.locationOnly,
+                ),
+                const SizedBox(height: 10),
+                _editEntryButton(
+                  icon: Icons.local_gas_station_outlined,
+                  label: 'Edit gas prices & products',
+                  mode: VendorEditMode.pricesOnly,
                 ),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
@@ -1569,6 +1596,33 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _editEntryButton({
+    required IconData icon,
+    required String label,
+    required VendorEditMode mode,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: () async {
+        final done = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                VendorSetupScreen(existingData: _vendorData, mode: mode),
+          ),
+        );
+        if (done == true) _loadVendorData();
+      },
+      icon: Icon(icon, size: 16),
+      label: Text(label),
+      style: ElevatedButton.styleFrom(
+        minimumSize: const Size(double.infinity, 44),
+        backgroundColor: AppColors.orange.withValues(alpha: 0.15),
+        foregroundColor: AppColors.orange,
+        elevation: 0,
       ),
     );
   }

@@ -5,13 +5,17 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
-import 'package:mobigas/core/services/firebase_service.dart';
-import 'package:mobigas/core/models/app_models.dart';
 
 /// Detailed sales & fulfillment statistics for a vendor, with a
 /// month-on-month breakdown and a PDF export — built specifically so
 /// a vendor can hand their MobiGas transaction history to ANY bank,
 /// not just MobiGas's partner banks, as independent proof of income.
+///
+/// Reads from two Cloud Function-maintained aggregate collections
+/// rather than the vendor's raw order history, so this screen stays
+/// fast (at most 12 document reads for the trend, 1 for lifetime
+/// totals) no matter how many orders a vendor accumulates over time.
+/// See functions/src/index.ts: onOrderStatusChange, backfillVendorStats.
 class VendorStatisticsScreen extends StatefulWidget {
   final Map<String, dynamic> vendorData;
   const VendorStatisticsScreen({super.key, required this.vendorData});
@@ -22,95 +26,95 @@ class VendorStatisticsScreen extends StatefulWidget {
 }
 
 class _MonthStat {
-  final DateTime month; // first day of the month, for sorting/labeling
-  int fulfilled = 0;
-  int cancelled = 0;
-  double cashSales = 0;
-  double creditSales = 0;
+  final DateTime month;
+  final int fulfilled;
+  final int customerCancelled;
+  final int vendorDeclined;
+  final int otherCancelled;
+  final double cashSales;
+  final double creditSales;
+  final int defaulted;
+
+  const _MonthStat({
+    required this.month,
+    this.fulfilled = 0,
+    this.customerCancelled = 0,
+    this.vendorDeclined = 0,
+    this.otherCancelled = 0,
+    this.cashSales = 0,
+    this.creditSales = 0,
+    this.defaulted = 0,
+  });
+
+  int get totalCancelled =>
+      customerCancelled + vendorDeclined + otherCancelled;
   double get totalSales => cashSales + creditSales;
-  _MonthStat(this.month);
+
+  factory _MonthStat.empty(DateTime month) => _MonthStat(month: month);
+
+  factory _MonthStat.fromDoc(DateTime month, Map<String, dynamic> d) {
+    return _MonthStat(
+      month: month,
+      fulfilled: (d['fulfilled'] ?? 0) as int,
+      customerCancelled: (d['customerCancelled'] ?? 0) as int,
+      vendorDeclined: (d['vendorDeclined'] ?? 0) as int,
+      otherCancelled: (d['otherCancelled'] ?? 0) as int,
+      cashSales: (d['cashSales'] ?? 0).toDouble(),
+      creditSales: (d['creditSales'] ?? 0).toDouble(),
+      defaulted: (d['defaulted'] ?? 0) as int,
+    );
+  }
 }
 
 class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
   String get _vendorId => FirebaseAuth.instance.currentUser?.uid ?? '';
   bool _isGeneratingPdf = false;
 
-  Stream<List<OrderModel>> get _allOrdersStream {
-    return FirebaseService.orders
-        .where('vendorId', isEqualTo: _vendorId)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snap) => snap.docs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              return _orderFromMap(doc.id, data);
-            }).toList());
+  /// Lifetime running totals — one document, updated by the Cloud
+  /// Function on every order that reaches delivered/cancelled/defaulted.
+  Stream<DocumentSnapshot<Map<String, dynamic>>> get _alltimeStream {
+    return FirebaseFirestore.instance
+        .collection('vendor_stats_alltime')
+        .doc(_vendorId)
+        .snapshots();
   }
 
-  OrderModel _orderFromMap(String docId, Map<String, dynamic> data) {
-    return OrderModel(
-      orderId: data['orderId'] ?? docId,
-      customerId: data['customerId'] ?? '',
-      vendorId: data['vendorId'] ?? '',
-      vendorName: data['vendorName'] ?? '',
-      vendorPhone: data['vendorPhone'] ?? '',
-      customerName: data['customerName'] ?? '',
-      customerArea: data['customerArea'] ?? '',
-      listing: GasListing(
-        size: data['gasSize'] ?? '',
-        kg: data['gasKg'] ?? 0,
-        price: (data['gasPrice'] ?? 0).toDouble(),
-        available: true,
-        productType: GasProductType.values.firstWhere(
-          (t) => t.name == (data['gasProductType'] ?? 'refill'),
-          orElse: () => GasProductType.refill,
-        ),
-      ),
-      paymentMethod: PaymentMethod.values.firstWhere(
-        (m) => m.name == (data['paymentMethod'] ?? 'credit'),
-        orElse: () => PaymentMethod.credit,
-      ),
-      finderFee: (data['finderFee'] ?? 0).toDouble(),
-      bankDisbursementAmount: (data['bankDisbursementAmount'] ?? 0).toDouble(),
-      originationFeeToMobigas:
-          (data['originationFeeToMobigas'] ?? 0).toDouble(),
-      pin: data['pin'] ?? '',
-      status: OrderStatus.values.firstWhere(
-        (e) => e.name == data['status'],
-        orElse: () => OrderStatus.pending,
-      ),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      partnerBankName: data['partnerBankName'] ?? '',
-      riderName: data['riderName'],
-      riderPhone: data['riderPhone'],
-    );
-  }
-
-  /// Builds a continuous last-12-months series (including months with
-  /// zero orders) — a bank reviewing this wants to see the shape of
-  /// the business over time, not just months where something happened.
-  List<_MonthStat> _monthlyBreakdown(List<OrderModel> orders) {
+  /// Last 12 months of per-month aggregate docs — at most 12 reads
+  /// regardless of how many orders exist outside that window.
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+      get _monthlyStream {
     final now = DateTime.now();
-    final months = <String, _MonthStat>{};
+    final start = DateTime(now.year, now.month - 11, 1);
+    final startKey =
+        '${start.year}-${start.month.toString().padLeft(2, '0')}';
+    return FirebaseFirestore.instance
+        .collection('vendor_stats_monthly')
+        .where('vendorId', isEqualTo: _vendorId)
+        .where('yearMonth', isGreaterThanOrEqualTo: startKey)
+        .orderBy('yearMonth')
+        .snapshots()
+        .map((snap) => snap.docs);
+  }
+
+  /// Merges the sparse monthly docs (only months with activity have a
+  /// doc) into a continuous 12-month series — a bank reviewing this
+  /// wants to see the shape of the business over time, including
+  /// quiet months, not just months where something happened.
+  List<_MonthStat> _continuousMonths(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    final now = DateTime.now();
+    final byKey = <String, Map<String, dynamic>>{
+      for (final d in docs) d.data()['yearMonth']: d.data(),
+    };
+    final result = <_MonthStat>[];
     for (int i = 11; i >= 0; i--) {
       final m = DateTime(now.year, now.month - i, 1);
-      months['${m.year}-${m.month}'] = _MonthStat(m);
+      final key = '${m.year}-${m.month.toString().padLeft(2, '0')}';
+      final data = byKey[key];
+      result.add(
+          data != null ? _MonthStat.fromDoc(m, data) : _MonthStat.empty(m));
     }
-    for (final o in orders) {
-      final key = '${o.createdAt.year}-${o.createdAt.month}';
-      final stat = months[key];
-      if (stat == null) continue; // outside the 12-month window
-      if (o.status == OrderStatus.delivered) {
-        stat.fulfilled++;
-        if (o.paymentMethod == PaymentMethod.cash) {
-          stat.cashSales += o.listing.price;
-        } else {
-          stat.creditSales += o.listing.price;
-        }
-      } else if (o.status == OrderStatus.cancelled) {
-        stat.cancelled++;
-      }
-    }
-    return months.values.toList();
+    return result;
   }
 
   String _monthLabel(DateTime m) {
@@ -130,120 +134,179 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
           children: [
             _buildHeader(),
             Expanded(
-              child: StreamBuilder<List<OrderModel>>(
-                stream: _allOrdersStream,
-                builder: (context, snap) {
-                  if (!snap.hasData) {
-                    return const Center(
-                        child: CircularProgressIndicator(
-                            color: AppColors.orange));
+              child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: _alltimeStream,
+                builder: (context, alltimeSnap) {
+                  if (alltimeSnap.hasError) {
+                    return _errorView(alltimeSnap.error.toString());
                   }
-                  final orders = snap.data!;
-                  final delivered = orders
-                      .where((o) => o.status == OrderStatus.delivered)
-                      .toList();
-                  final cancelled = orders
-                      .where((o) => o.status == OrderStatus.cancelled)
-                      .length;
-                  final defaulted = orders
-                      .where((o) => o.status == OrderStatus.defaulted)
-                      .length;
-                  final cashSales = delivered
-                      .where((o) => o.paymentMethod == PaymentMethod.cash)
-                      .fold(0.0, (a, o) => a + o.listing.price);
-                  final creditSales = delivered
-                      .where((o) => o.paymentMethod == PaymentMethod.credit)
-                      .fold(0.0, (a, o) => a + o.listing.price);
-                  final totalSales = cashSales + creditSales;
-                  final fulfillmentRate = (delivered.length + cancelled) == 0
-                      ? 0.0
-                      : delivered.length / (delivered.length + cancelled);
-                  final monthly = _monthlyBreakdown(orders);
+                  return StreamBuilder<
+                      List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                    stream: _monthlyStream,
+                    builder: (context, monthlySnap) {
+                      if (monthlySnap.hasError) {
+                        return _errorView(monthlySnap.error.toString());
+                      }
+                      if (!alltimeSnap.hasData || !monthlySnap.hasData) {
+                        return const Center(
+                            child: CircularProgressIndicator(
+                                color: AppColors.orange));
+                      }
+                      final a = alltimeSnap.data!.data() ?? {};
+                      final fulfilled = (a['fulfilled'] ?? 0) as int;
+                      final customerCancelled =
+                          (a['customerCancelled'] ?? 0) as int;
+                      final vendorDeclined = (a['vendorDeclined'] ?? 0) as int;
+                      final otherCancelled = (a['otherCancelled'] ?? 0) as int;
+                      final totalCancelled = customerCancelled +
+                          vendorDeclined +
+                          otherCancelled;
+                      final defaulted = (a['defaulted'] ?? 0) as int;
+                      final cashSales = (a['cashSales'] ?? 0).toDouble();
+                      final creditSales = (a['creditSales'] ?? 0).toDouble();
+                      final totalSales = cashSales + creditSales;
+                      final fulfillmentRate =
+                          (fulfilled + totalCancelled) == 0
+                              ? 0.0
+                              : fulfilled / (fulfilled + totalCancelled);
+                      final monthly = _continuousMonths(monthlySnap.data!);
 
-                  return SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Overview',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                    color: AppColors.navy,
-                                    fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 12),
-                        _summaryGrid(
-                          totalSales: totalSales,
-                          cashSales: cashSales,
-                          creditSales: creditSales,
-                          fulfilled: delivered.length,
-                          cancelled: cancelled,
-                          defaulted: defaulted,
-                          fulfillmentRate: fulfillmentRate,
-                        ),
-                        const SizedBox(height: 28),
-                        Row(
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Month-on-month',
+                            Text('Overview',
                                 style: Theme.of(context)
                                     .textTheme
                                     .titleMedium
                                     ?.copyWith(
                                         color: AppColors.navy,
                                         fontWeight: FontWeight.w700)),
-                            const Spacer(),
-                            Text('Last 12 months',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: AppColors.gray400)),
+                            const SizedBox(height: 12),
+                            _summaryGrid(
+                              totalSales: totalSales,
+                              cashSales: cashSales,
+                              creditSales: creditSales,
+                              fulfilled: fulfilled,
+                              cancelled: totalCancelled,
+                              fulfillmentRate: fulfillmentRate,
+                            ),
+                            const SizedBox(height: 12),
+                            _cancellationBreakdown(
+                              customerCancelled,
+                              vendorDeclined,
+                              otherCancelled,
+                            ),
+                            const SizedBox(height: 28),
+                            Row(
+                              children: [
+                                Text('Month-on-month',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                            color: AppColors.navy,
+                                            fontWeight: FontWeight.w700)),
+                                const Spacer(),
+                                Text('Last 12 months',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(color: AppColors.gray400)),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            _monthlyTable(monthly),
+                            const SizedBox(height: 28),
+                            ElevatedButton.icon(
+                              onPressed: _isGeneratingPdf
+                                  ? null
+                                  : () => _sharePdf(
+                                      fulfilled,
+                                      customerCancelled,
+                                      vendorDeclined,
+                                      otherCancelled,
+                                      defaulted,
+                                      monthly,
+                                      totalSales,
+                                      cashSales,
+                                      creditSales,
+                                      fulfillmentRate),
+                              icon: _isGeneratingPdf
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppColors.white),
+                                    )
+                                  : const Icon(Icons.picture_as_pdf_rounded,
+                                      size: 20),
+                              label: Text(_isGeneratingPdf
+                                  ? 'Preparing report...'
+                                  : 'Share PDF report'),
+                              style: ElevatedButton.styleFrom(
+                                minimumSize: const Size(double.infinity, 52),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Share this report with any bank as proof of your MobiGas sales history — not limited to MobiGas partner banks.',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                      color: AppColors.gray400,
+                                      height: 1.4,
+                                      fontSize: 11),
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        _monthlyTable(monthly),
-                        const SizedBox(height: 28),
-                        ElevatedButton.icon(
-                          onPressed: _isGeneratingPdf
-                              ? null
-                              : () => _sharePdf(
-                                  delivered, cancelled, defaulted, monthly,
-                                  totalSales, cashSales, creditSales,
-                                  fulfillmentRate),
-                          icon: _isGeneratingPdf
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppColors.white),
-                                )
-                              : const Icon(Icons.picture_as_pdf_rounded,
-                                  size: 20),
-                          label: Text(_isGeneratingPdf
-                              ? 'Preparing report...'
-                              : 'Share PDF report'),
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 52),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Share this report with any bank as proof of your MobiGas sales history — not limited to MobiGas partner banks.',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                  color: AppColors.gray400,
-                                  height: 1.4,
-                                  fontSize: 11),
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   );
                 },
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Shown instead of an infinite spinner if either aggregate stream
+  /// errors — most likely a missing Firestore composite index on
+  /// vendor_stats_monthly (vendorId + yearMonth), which this query
+  /// requires. The console/logcat error contains a direct link that
+  /// creates the index in one click.
+  Widget _errorView(String error) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                color: AppColors.error, size: 48),
+            const SizedBox(height: 16),
+            Text('Could not load statistics',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(color: AppColors.navy)),
+            const SizedBox(height: 8),
+            Text(
+              error.contains('failed-precondition') ||
+                      error.contains('index')
+                  ? 'This usually means a required database index hasn\'t been created yet. Check the app console/logs for a link that creates it automatically.'
+                  : error,
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: AppColors.gray400, height: 1.5),
             ),
           ],
         ),
@@ -295,7 +358,6 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
     required double creditSales,
     required int fulfilled,
     required int cancelled,
-    required int defaulted,
     required double fulfillmentRate,
   }) {
     final cards = [
@@ -351,6 +413,44 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
               ))
           .toList(),
     );
+  }
+
+  /// Breaks the aggregate "Orders cancelled" figure down by who
+  /// cancelled — a bank cares whether a vendor is unreliable
+  /// (declining orders themselves) versus just serving customers who
+  /// change their minds. "Not recorded" only appears for orders
+  /// cancelled before this tracking existed.
+  Widget _cancellationBreakdown(
+      int customerCancelled, int vendorDeclined, int otherCancelled) {
+    if (customerCancelled + vendorDeclined + otherCancelled == 0) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.gray200),
+      ),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 4,
+        children: [
+          _breakdownItem('Cancelled by customer', customerCancelled),
+          _breakdownItem('Declined by vendor', vendorDeclined),
+          if (otherCancelled > 0)
+            _breakdownItem('Not recorded', otherCancelled),
+        ],
+      ),
+    );
+  }
+
+  Widget _breakdownItem(String label, int value) {
+    return Text('$label: $value',
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: AppColors.gray600, fontSize: 11));
   }
 
   Widget _monthlyTable(List<_MonthStat> monthly) {
@@ -435,8 +535,10 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
   }
 
   Future<void> _sharePdf(
-    List<OrderModel> delivered,
-    int cancelled,
+    int fulfilled,
+    int customerCancelled,
+    int vendorDeclined,
+    int otherCancelled,
     int defaulted,
     List<_MonthStat> monthly,
     double totalSales,
@@ -478,7 +580,9 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
               pw.SizedBox(height: 4),
               pw.Text('Vendor Sales & Fulfillment Statement',
                   style: pw.TextStyle(
-                      fontSize: 12, color: gray, fontStyle: pw.FontStyle.italic)),
+                      fontSize: 12,
+                      color: gray,
+                      fontStyle: pw.FontStyle.italic)),
               pw.Divider(color: navy, thickness: 1),
               pw.SizedBox(height: 8),
             ],
@@ -526,10 +630,13 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
             pw.SizedBox(height: 20),
             pw.Text('Summary',
                 style: pw.TextStyle(
-                    fontSize: 13, fontWeight: pw.FontWeight.bold, color: navy)),
+                    fontSize: 13,
+                    fontWeight: pw.FontWeight.bold,
+                    color: navy)),
             pw.SizedBox(height: 8),
             pw.Table(
-              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              border:
+                  pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
               columnWidths: const {
                 0: pw.FlexColumnWidth(2),
                 1: pw.FlexColumnWidth(1),
@@ -540,8 +647,12 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                 _pdfRow('Cash sales', 'KES ${cashSales.toStringAsFixed(0)}'),
                 _pdfRow(
                     'Credit sales', 'KES ${creditSales.toStringAsFixed(0)}'),
-                _pdfRow('Orders fulfilled', '${delivered.length}'),
-                _pdfRow('Orders cancelled', '$cancelled'),
+                _pdfRow('Orders fulfilled', '$fulfilled'),
+                _pdfRow('Cancelled by customer', '$customerCancelled'),
+                _pdfRow('Declined by vendor', '$vendorDeclined'),
+                if (otherCancelled > 0)
+                  _pdfRow('Cancelled (reason not recorded)',
+                      '$otherCancelled'),
                 if (defaulted > 0)
                   _pdfRow('Credit orders defaulted', '$defaulted'),
                 _pdfRow('Fulfillment rate',
@@ -551,16 +662,21 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
             pw.SizedBox(height: 20),
             pw.Text('Month-on-month (last 12 months)',
                 style: pw.TextStyle(
-                    fontSize: 13, fontWeight: pw.FontWeight.bold, color: navy)),
+                    fontSize: 13,
+                    fontWeight: pw.FontWeight.bold,
+                    color: navy)),
             pw.SizedBox(height: 8),
             pw.Table(
-              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              border:
+                  pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
               columnWidths: const {
-                0: pw.FlexColumnWidth(1.5),
-                1: pw.FlexColumnWidth(1),
-                2: pw.FlexColumnWidth(1.2),
-                3: pw.FlexColumnWidth(1.2),
-                4: pw.FlexColumnWidth(1.2),
+                0: pw.FlexColumnWidth(1.3),
+                1: pw.FlexColumnWidth(0.8),
+                2: pw.FlexColumnWidth(1),
+                3: pw.FlexColumnWidth(1),
+                4: pw.FlexColumnWidth(1),
+                5: pw.FlexColumnWidth(0.9),
+                6: pw.FlexColumnWidth(0.9),
               },
               children: [
                 pw.TableRow(
@@ -568,9 +684,11 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                   children: [
                     _pdfHeaderCell('Month'),
                     _pdfHeaderCell('Orders'),
-                    _pdfHeaderCell('Cash (KES)'),
-                    _pdfHeaderCell('Credit (KES)'),
-                    _pdfHeaderCell('Total (KES)'),
+                    _pdfHeaderCell('Cash'),
+                    _pdfHeaderCell('Credit'),
+                    _pdfHeaderCell('Total'),
+                    _pdfHeaderCell('Cust.\nCancel'),
+                    _pdfHeaderCell('Vendor\nDecline'),
                   ],
                 ),
                 ...monthly.map((m) => pw.TableRow(children: [
@@ -579,6 +697,8 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                       _pdfCell(m.cashSales.toStringAsFixed(0)),
                       _pdfCell(m.creditSales.toStringAsFixed(0)),
                       _pdfCell(m.totalSales.toStringAsFixed(0)),
+                      _pdfCell('${m.customerCancelled}'),
+                      _pdfCell('${m.vendorDeclined}'),
                     ])),
               ],
             ),
@@ -615,19 +735,20 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
         child: pw.Text(value,
             style: pw.TextStyle(
                 fontSize: 10,
-                fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+                fontWeight:
+                    bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
       ),
     ]);
   }
 
   pw.Widget _pdfHeaderCell(String text) => pw.Padding(
-        padding: const pw.EdgeInsets.all(6),
+        padding: const pw.EdgeInsets.all(4),
         child: pw.Text(text,
-            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
       );
 
   pw.Widget _pdfCell(String text) => pw.Padding(
-        padding: const pw.EdgeInsets.all(6),
-        child: pw.Text(text, style: const pw.TextStyle(fontSize: 9)),
+        padding: const pw.EdgeInsets.all(4),
+        child: pw.Text(text, style: const pw.TextStyle(fontSize: 8)),
       );
 }

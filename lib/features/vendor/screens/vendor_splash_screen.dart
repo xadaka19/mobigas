@@ -63,7 +63,31 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
       return;
     }
 
-    await Future.delayed(const Duration(milliseconds: 1800));
+    // Run the branded splash delay and the real auth determination
+    // concurrently — whichever takes longer is what we actually wait
+    // on. This is both a correctness fix and a speed fix:
+    //
+    // BUG FIX: the old code read FirebaseAuth.instance.currentUser
+    // synchronously AFTER a fixed 1800ms delay. On a fresh install,
+    // Firebase's silently-restored session can still be resolving at
+    // that exact moment (cold start + SDK init + Google Play
+    // Services credential handshake, all happening for the first
+    // time) — so currentUser could read null even though a valid
+    // session was a moment from restoring, sending a genuinely
+    // logged-in vendor to the login screen. Waiting for the FIRST
+    // real authStateChanges() event instead guarantees the correct
+    // answer no matter how long Firebase actually takes.
+    //
+    // SPEED FIX: previously this delay ran BEFORE the auth check even
+    // started, making total wait time 1800ms + auth-check-time. Now
+    // both run at once, so total wait is max(authCheckTime, 1800ms)
+    // — the fixed delay only exists to keep the brand splash on
+    // screen long enough to not flash, not to gate the real check.
+    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
+    final userFuture = FirebaseAuth.instance.authStateChanges().first;
+
+    final user = await userFuture;
+    await splashDelay;
     if (!mounted) return;
 
     // Request location permission early
@@ -73,11 +97,10 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     }
 
     if (!mounted) return;
-    final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      if (mounted) context.go('/vendor-home');
+      context.go('/vendor-home');
     } else {
-      if (mounted) context.go('/vendor-login');
+      context.go('/vendor-login');
     }
   }
 

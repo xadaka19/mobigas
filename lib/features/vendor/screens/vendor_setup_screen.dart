@@ -5,14 +5,35 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/widgets/location_picker_widget.dart';
 
+/// Which part of the vendor profile this screen instance edits.
+/// fullOnboarding is the original 4-step wizard, used only for a
+/// brand-new vendor who has nothing set up yet. Every other mode is a
+/// single-purpose screen — a vendor tweaking their gas prices
+/// shouldn't have to click through business details, location, and
+/// documents to get there, and vice versa.
+enum VendorEditMode {
+  fullOnboarding,
+  businessOnly,
+  locationOnly,
+  pricesOnly,
+  documentsOnly,
+}
+
 class VendorSetupScreen extends StatefulWidget {
   final Map<String, dynamic>? existingData;
-  const VendorSetupScreen({super.key, this.existingData});
+  final VendorEditMode mode;
+  const VendorSetupScreen({
+    super.key,
+    this.existingData,
+    this.mode = VendorEditMode.fullOnboarding,
+  });
 
   @override
   State<VendorSetupScreen> createState() => _VendorSetupScreenState();
@@ -33,6 +54,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // back to whatever URL already exists rather than wiping it.
   final Map<String, File?> _docFiles = {
     'epraCertificateUrl': null,
+    'subDealerAuthorizationUrl': null,
     'businessRegistrationUrl': null,
     'brandAuthorizationUrl': null,
     'dealerAssociationLetterUrl': null,
@@ -101,13 +123,23 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   final TextEditingController _regulatorPriceController = TextEditingController();
   bool _regulatorAvailable = false;
 
-  // Step 2 - Location (Google Places)
+  // Step 2 - Location (Google Places, or GPS auto-detect)
   String _selectedAddress = '';
   double _selectedLat = 0.0;
   double _selectedLng = 0.0;
+  // Whether the location picker is actively showing (vs. the saved
+  // summary view). Starts true only when there's nothing saved yet.
+  late bool _isEditingLocation;
+  bool _isDetectingLocation = false;
   final List<String> _availableBrands = List<String>.from(KenyanGasBrands.all);
   final List<String> _selectedBrands = [];
   final TextEditingController _customBrandController = TextEditingController();
+
+  // EPRA certificate either/or: own certificate, or a sub-dealer /
+  // agent authorization from an already-licensed parent vendor.
+  late bool _hasOwnEpra;
+  late TextEditingController _parentVendorNameController;
+  late TextEditingController _parentEpraNumberController;
 
   @override
   void initState() {
@@ -120,6 +152,22 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _hasScaleCert = (d['weighingScalePhotoUrl'] ?? '').toString().isEmpty;
     _hasBrandAuth =
         (d['dealerAssociationLetterUrl'] ?? '').toString().isEmpty;
+    _hasOwnEpra = (d['subDealerAuthorizationUrl'] ?? '').toString().isEmpty;
+    // BUG FIX: these three were never restored from existing data,
+    // so re-opening setup to edit ANYTHING silently started the
+    // location step blank — failing its own validation unless the
+    // vendor re-picked their address from scratch every single time.
+    _selectedAddress = d['address'] ?? '';
+    _selectedLat = (d['latitude'] ?? 0.0).toDouble();
+    _selectedLng = (d['longitude'] ?? 0.0).toDouble();
+    // Location is "set once" — only show the picker if there's
+    // nothing saved yet. An existing address shows as a summary with
+    // an explicit Edit action instead of re-prompting every time.
+    _isEditingLocation = _selectedAddress.isEmpty;
+    _parentVendorNameController =
+        TextEditingController(text: d['parentVendorName'] ?? '');
+    _parentEpraNumberController =
+        TextEditingController(text: d['parentEpraNumber'] ?? '');
     _businessNameController =
         TextEditingController(text: d['businessName'] ?? '');
     _ownerNameController =
@@ -203,6 +251,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     for (final c in _burnerPriceControllers.values) { c.dispose(); }
     _regulatorPriceController.dispose();
     _customBrandController.dispose();
+    _parentVendorNameController.dispose();
+    _parentEpraNumberController.dispose();
     super.dispose();
   }
 
@@ -355,10 +405,17 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty ? _deliveryTimeController.text.trim() : '20–40 min',
         'updatedAt': FieldValue.serverTimestamp(),
         'certificateUrl': certificateUrl,
+        'epraCertificateUrl': docUrls['epraCertificateUrl'],
+        'subDealerAuthorizationUrl': docUrls['subDealerAuthorizationUrl'],
+        'parentVendorName': _parentVendorNameController.text.trim(),
+        'parentEpraNumber': _parentEpraNumberController.text.trim(),
         'brandAuthorizationUrl': docUrls['brandAuthorizationUrl'],
+        'dealerAssociationLetterUrl': docUrls['dealerAssociationLetterUrl'],
         'businessPermitUrl': docUrls['businessPermitUrl'],
+        'businessRegistrationUrl': docUrls['businessRegistrationUrl'],
         'fireCertificateUrl': docUrls['fireCertificateUrl'],
         'weighingScaleCertUrl': docUrls['weighingScaleCertUrl'],
+        'weighingScalePhotoUrl': docUrls['weighingScalePhotoUrl'],
         'premisesPhotoUrl': docUrls['premisesPhotoUrl'],
         'createdAt': isNewVendor
             ? FieldValue.serverTimestamp()
@@ -406,6 +463,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.mode != VendorEditMode.fullOnboarding) {
+      return _buildFocusedScaffold();
+    }
     return Scaffold(
       backgroundColor: AppColors.navy,
       body: SafeArea(
@@ -428,6 +488,121 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             _buildFooter(),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Single-purpose screen for businessOnly/locationOnly/pricesOnly/
+  /// documentsOnly — no step indicator, no forced walk through
+  /// unrelated sections, a direct Save button. Reuses the exact same
+  /// _buildStepN() content and _save() logic as the full wizard, so
+  /// there's only one source of truth for what each section contains.
+  Widget _buildFocusedScaffold() {
+    final title = switch (widget.mode) {
+      VendorEditMode.businessOnly => 'Edit business details',
+      VendorEditMode.locationOnly => 'Edit location',
+      VendorEditMode.pricesOnly => 'Edit gas prices & products',
+      VendorEditMode.documentsOnly => 'Verification documents',
+      VendorEditMode.fullOnboarding => '',
+    };
+    final content = switch (widget.mode) {
+      VendorEditMode.businessOnly => _buildStep0(),
+      VendorEditMode.locationOnly => _buildStep1(),
+      VendorEditMode.pricesOnly => _buildStep2(),
+      VendorEditMode.documentsOnly => _buildStep3(),
+      VendorEditMode.fullOnboarding => const SizedBox.shrink(),
+    };
+
+    return Scaffold(
+      backgroundColor: AppColors.navy,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: const Icon(Icons.close_rounded,
+                        color: AppColors.white, size: 24),
+                  ),
+                  const SizedBox(width: 16),
+                  Text(title,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(color: AppColors.white)),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: content,
+              ),
+            ),
+            _buildFocusedFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFocusedFooter() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+          24, 12, 24, MediaQuery.of(context).padding.bottom + 16),
+      decoration: BoxDecoration(
+        color: AppColors.navy,
+        border: Border(
+            top: BorderSide(color: AppColors.white.withValues(alpha: 0.1))),
+      ),
+      child: ElevatedButton(
+        onPressed: _isSaving
+            ? null
+            : () {
+                // Validate only the section actually being edited —
+                // sections not shown in this mode keep whatever was
+                // already loaded from existingData, untouched.
+                if (widget.mode == VendorEditMode.businessOnly &&
+                    !_step0Valid) {
+                  _showFocusedError(
+                      'Please fill in all business details');
+                  return;
+                }
+                if (widget.mode == VendorEditMode.locationOnly &&
+                    !_step1Valid) {
+                  _showFocusedError('Please set your business location');
+                  return;
+                }
+                if (widget.mode == VendorEditMode.pricesOnly &&
+                    !_step2Valid) {
+                  _showFocusedError(
+                      'Select at least one brand and set a price');
+                  return;
+                }
+                // documentsOnly has no hard gate — same as onboarding.
+                _save();
+              },
+        child: _isSaving
+            ? const SizedBox(
+                height: 22,
+                width: 22,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.5, color: AppColors.white),
+              )
+            : const Text('Save changes'),
+      ),
+    );
+  }
+
+  void _showFocusedError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -572,6 +747,61 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   // ── STEP 1: LOCATION ─────────────────────────────────────────────
   Widget _buildStep1() {
+    // Location is set once. If we already have one and the vendor
+    // hasn't tapped Edit, show a summary card instead of re-prompting
+    // for location on every visit — this was previously forced every
+    // time because the underlying state was never restored from the
+    // saved data (fixed in initState), compounding the re-ask problem.
+    if (_selectedAddress.isNotEmpty && !_isEditingLocation) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Business location',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 13,
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w600,
+                  )),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(14),
+              border:
+                  Border.all(color: AppColors.white.withValues(alpha: 0.15)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.location_on_rounded,
+                    color: AppColors.orange, size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(_selectedAddress,
+                      style: const TextStyle(
+                          color: AppColors.white, fontSize: 14, height: 1.4)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => setState(() => _isEditingLocation = true),
+            icon: const Icon(Icons.edit_location_alt_rounded, size: 18),
+            label: const Text('Edit location'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.orange,
+              side: const BorderSide(color: AppColors.orange),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // No saved location yet, or the vendor tapped Edit — GPS
+    // auto-detect is the primary path; manual search remains
+    // available as a fallback, exactly as before.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -582,10 +812,47 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   fontWeight: FontWeight.w600,
                 )),
         const SizedBox(height: 4),
-        Text('Search and select your exact business address',
+        Text('Use your current location, or search for your address',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppColors.gray400, fontSize: 12)),
         const SizedBox(height: 12),
+        ElevatedButton.icon(
+          onPressed: _isDetectingLocation ? null : _useCurrentLocation,
+          icon: _isDetectingLocation
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.white),
+                )
+              : const Icon(Icons.my_location_rounded, size: 18),
+          label: Text(
+              _isDetectingLocation ? 'Detecting...' : 'Use my current location'),
+          style: ElevatedButton.styleFrom(
+            minimumSize: const Size(double.infinity, 48),
+            backgroundColor: AppColors.success,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+                child:
+                    Divider(color: AppColors.white.withValues(alpha: 0.2))),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text('OR TYPE MANUALLY',
+                  style: TextStyle(
+                      color: AppColors.gray400,
+                      fontSize: 10,
+                      letterSpacing: 0.5)),
+            ),
+            Expanded(
+                child:
+                    Divider(color: AppColors.white.withValues(alpha: 0.2))),
+          ],
+        ),
+        const SizedBox(height: 14),
         LocationPickerWidget(
           hint: 'e.g. Total Station, Mirema Drive, Nairobi...',
           darkMode: true,
@@ -622,8 +889,72 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             ],
           ),
         ),
+        if (widget.existingData?['address'] != null) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton(
+              onPressed: () => setState(() {
+                _isEditingLocation = false;
+                _selectedAddress = widget.existingData!['address'] ?? '';
+                _selectedLat =
+                    (widget.existingData!['latitude'] ?? 0.0).toDouble();
+                _selectedLng =
+                    (widget.existingData!['longitude'] ?? 0.0).toDouble();
+              }),
+              child: Text('Cancel',
+                  style: TextStyle(color: AppColors.gray400)),
+            ),
+          ),
+        ],
       ],
     );
+  }
+
+  Future<void> _useCurrentLocation() async {
+    setState(() => _isDetectingLocation = true);
+    try {
+      final pos = await LocationService.getCurrentPosition();
+      String address =
+          'Near ${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+      try {
+        // geocoding v5.0.0 breaking change: placemarkFromCoordinates
+        // is no longer a top-level function — it's a method on a
+        // Geocoding instance.
+        final geocoding = Geocoding();
+        final placemarks =
+            await geocoding.placemarkFromCoordinates(pos.latitude, pos.longitude);
+        if (placemarks.isNotEmpty) {
+          final p = placemarks.first;
+          final parts = [p.street, p.subLocality, p.locality, p.administrativeArea]
+              .where((s) => s != null && s.trim().isNotEmpty)
+              .toList();
+          if (parts.isNotEmpty) address = parts.join(', ');
+        }
+      } catch (_) {
+        // Reverse geocoding failed (offline, no plus-code data, etc.)
+        // — keep the coordinate-based fallback label above; the real
+        // lat/lng is still accurate and that's what delivery actually
+        // depends on.
+      }
+      if (!mounted) return;
+      setState(() {
+        _selectedAddress = address;
+        _selectedLat = pos.latitude;
+        _selectedLng = pos.longitude;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Could not get your location. Check location permissions, or type your address instead.'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+    if (mounted) setState(() => _isDetectingLocation = false);
   }
 
 
@@ -989,12 +1320,52 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               color: AppColors.gray400, fontSize: 12, height: 1.4),
         ),
         const SizedBox(height: 20),
-        _buildVerificationDocUpload(
-          docKey: 'epraCertificateUrl',
-          title: 'EPRA certificate',
-          description:
-              'Your EPRA operating certificate/license for LPG retail',
-        ),
+        Text('EPRA certificate',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 10),
+        Row(children: [
+          _altToggleTab(
+            label: 'I have my own EPRA certificate',
+            selected: _hasOwnEpra,
+            onTap: () => setState(() => _hasOwnEpra = true),
+          ),
+          const SizedBox(width: 8),
+          _altToggleTab(
+            label: "I'm a sub-dealer / agent",
+            selected: !_hasOwnEpra,
+            onTap: () => setState(() => _hasOwnEpra = false),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        if (_hasOwnEpra)
+          _buildVerificationDocUpload(
+            docKey: 'epraCertificateUrl',
+            title: 'EPRA certificate',
+            description:
+                'Your EPRA operating certificate/license for LPG retail',
+          )
+        else ...[
+          _buildVerificationDocUpload(
+            docKey: 'subDealerAuthorizationUrl',
+            title: 'Sub-dealer / agent authorization letter',
+            description:
+                'A letter or agreement showing you sell on behalf of an '
+                'already EPRA-licensed vendor — accepted in place of your '
+                'own EPRA certificate',
+          ),
+          const SizedBox(height: 12),
+          _field('Parent vendor / licensed business name',
+              _parentVendorNameController, Icons.store_outlined,
+              hint: 'e.g. Total Kenya Ltd, K-Gas main distributor'),
+          const SizedBox(height: 12),
+          _field('Parent vendor EPRA certificate number',
+              _parentEpraNumberController, Icons.badge_outlined,
+              hint: 'If known — helps MobiGas verify faster'),
+        ],
         if (_businessType == 'sole') ...[
           const SizedBox(height: 16),
           _buildVerificationDocUpload(

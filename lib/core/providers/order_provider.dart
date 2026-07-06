@@ -157,7 +157,8 @@ class OrderProvider extends ChangeNotifier {
   Future<void> cancelOrder(OrderModel order) async {
     if (order.status != OrderStatus.pending) return;
     await FirestoreService.updateOrderStatus(
-        order.orderId, OrderStatus.cancelled);
+        order.orderId, OrderStatus.cancelled,
+        cancelledBy: 'customer');
     if (_activeOrder?.orderId == order.orderId) {
       clearActiveOrder();
     }

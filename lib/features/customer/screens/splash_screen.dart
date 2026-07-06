@@ -76,7 +76,32 @@ class _SplashScreenState extends State<SplashScreen>
       }
     }
 
-    await Future.delayed(const Duration(milliseconds: 1800));
+    // Run the branded splash delay and the real auth determination
+    // concurrently — whichever takes longer is what we actually wait
+    // on. This is both a correctness fix and a speed fix:
+    //
+    // BUG FIX: the old code read FirebaseAuth.instance.currentUser
+    // synchronously AFTER a fixed 1800ms delay — and by this point
+    // there was already a security check and a signature verification
+    // stacked in front of it, both real async work. On a fresh
+    // install, Firebase's silently-restored session can still be
+    // resolving by the time all of that finishes, so currentUser
+    // could read null even though a valid session was a moment from
+    // restoring — sending a genuinely logged-in customer to
+    // onboarding/login instead of home. Waiting for the FIRST real
+    // authStateChanges() event instead guarantees the correct answer
+    // no matter how long Firebase actually takes.
+    //
+    // SPEED FIX: the fixed delay previously ran BEFORE the auth check
+    // even started, making total wait time 1800ms + auth-check-time
+    // on top of the security/signature checks. Now the delay and the
+    // auth check run at once, so this stage takes
+    // max(authCheckTime, 1800ms) instead of the sum of both.
+    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
+    final userFuture = FirebaseAuth.instance.authStateChanges().first;
+
+    final user = await userFuture;
+    await splashDelay;
     if (!mounted) return;
 
     // Request location permission
@@ -86,8 +111,6 @@ class _SplashScreenState extends State<SplashScreen>
     }
     if (!mounted) return;
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (!mounted) return;
     if (user != null) {
       context.go('/home');
     } else {
