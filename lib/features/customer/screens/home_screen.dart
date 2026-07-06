@@ -9,6 +9,7 @@ import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/customer/screens/repayments_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
+import 'package:mobigas/features/shared/refer_earn_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -1094,6 +1095,9 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
+                if ((customer.email ?? '').isNotEmpty)
+                  _profileTile(Icons.email_outlined, 'Email',
+                      customer.email!),
                 _profileTile(Icons.badge_outlined, 'National ID',
                     customer.nationalId),
                 _profileTile(Icons.location_on_outlined, 'Location',
@@ -1111,6 +1115,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 8),
                 _profileAction(Icons.lock_outline_rounded, 'Change password',
                     onTap: () => _showChangePassword(context)),
+                _profileAction(Icons.card_giftcard_rounded, 'Refer & Earn',
+                    onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ReferEarnScreen(
+                              ownerId: customer.id,
+                              ownerType: 'customer',
+                              ownerName: customer.name,
+                            ),
+                          ),
+                        )),
                 _profileAction(Icons.people_outline_rounded, 'My guarantors',
                     onTap: () => _showGuarantors(context, customer)),
                 _profileAction(Icons.help_outline_rounded, 'Help & support',

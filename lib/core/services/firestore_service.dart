@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 
@@ -10,27 +11,42 @@ class FirestoreService {
     required String nationalId,
     String? deviceFingerprint,
   }) async {
-    final phoneSnap = await FirebaseService.users
+    // Checked across BOTH users and vendors — previously this only
+    // checked customers, so the same phone/ID could be reused to
+    // create a vendor account with zero detection, and vice versa.
+    final phoneSnapUsers = await FirebaseService.users
+        .where('phone', isEqualTo: phone)
+        .limit(1)
+        .get();
+    final phoneSnapVendors = await FirebaseService.vendors
         .where('phone', isEqualTo: phone)
         .limit(1)
         .get();
 
-    final idSnap = await FirebaseService.users
+    final idSnapUsers = await FirebaseService.users
+        .where('nationalId', isEqualTo: nationalId)
+        .limit(1)
+        .get();
+    final idSnapVendors = await FirebaseService.vendors
         .where('nationalId', isEqualTo: nationalId)
         .limit(1)
         .get();
 
-
     bool deviceFlagged = false;
     if (deviceFingerprint != null) {
-      final deviceSnap = await FirebaseService.users
+      final deviceSnapUsers = await FirebaseService.users
           .where("deviceFingerprint", isEqualTo: deviceFingerprint)
           .get();
-      deviceFlagged = deviceSnap.docs.isNotEmpty;
+      final deviceSnapVendors = await FirebaseService.vendors
+          .where("deviceFingerprint", isEqualTo: deviceFingerprint)
+          .get();
+      deviceFlagged =
+          deviceSnapUsers.docs.isNotEmpty || deviceSnapVendors.docs.isNotEmpty;
     }
     return {
-      'phoneTaken': phoneSnap.docs.isNotEmpty,
-      'idTaken': idSnap.docs.isNotEmpty,
+      'phoneTaken':
+          phoneSnapUsers.docs.isNotEmpty || phoneSnapVendors.docs.isNotEmpty,
+      'idTaken': idSnapUsers.docs.isNotEmpty || idSnapVendors.docs.isNotEmpty,
       'deviceFlagged': deviceFlagged,
     };
   }
@@ -516,44 +532,33 @@ class FirestoreService {
     };
   }
 
+  /// Normalizes a Kenyan phone number so "0712345678", "+254712345678",
+  /// and "254712345678" are all recognized as the SAME identity.
+  /// Records a referral signup — moved server-side (Cloud Function)
+  /// so a modified/rooted client can never skip or spoof the identity
+  /// fraud guard (the function reads phone/National ID/email from
+  /// the referred person's own already-created Firestore doc, not
+  /// from client-supplied values). deviceFingerprint is the one
+  /// value still passed from here, since there's no server-side
+  /// equivalent for it. Silently no-ops on any failure (invalid code,
+  /// transient error, etc.) — never blocks a successful signup.
   static Future<void> recordReferralSignup({
     required String code,
-    required String referredId,
     required String referredType, // 'customer' | 'vendor'
-    required String referredName,
+    String? deviceFingerprint,
   }) async {
-    final owner = await lookupReferralCode(code);
-    if (owner == null) return; // invalid code — silently ignored
-
-    final normalizedCode = code.trim().toUpperCase();
-    final collectionRef =
-        referredType == 'vendor' ? FirebaseService.vendors : FirebaseService.users;
-    await collectionRef.doc(referredId).update({
-      'referredByCode': normalizedCode,
-    });
-
-    // Reward amount is locked in HERE, at signup, using whatever rate
-    // admin has configured right now — a later rate change in the
-    // dashboard only affects new signups from that point forward,
-    // never retroactively changes what an existing referral was
-    // already promised.
-    final rates = await getReferralRewardRates();
-    final rewardAmount = referredType == 'vendor'
-        ? rates['vendorReward']!
-        : rates['customerReward']!;
-
-    await FirebaseFirestore.instance.collection('referrals').add({
-      'referrerId': owner['ownerId'],
-      'referrerType': owner['ownerType'],
-      'referrerName': owner['ownerName'],
-      'referredId': referredId,
-      'referredType': referredType,
-      'referredName': referredName,
-      'code': normalizedCode,
-      'status': ReferralStatus.pending.name,
-      'rewardAmount': rewardAmount,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('recordReferralSignup');
+      await callable.call({
+        'code': code,
+        'referredType': referredType,
+        if (deviceFingerprint != null) 'deviceFingerprint': deviceFingerprint,
+      });
+    } catch (_) {
+      // Invalid code, no profile yet, or a transient failure — never
+      // let a referral hiccup block a successful signup.
+    }
   }
 
   /// Saves how a referrer wants to be paid — reused by both apps.

@@ -222,9 +222,8 @@ class AuthProvider extends ChangeNotifier {
         try {
           await FirestoreService.recordReferralSignup(
             code: referralCode.trim(),
-            referredId: uid,
             referredType: 'customer',
-            referredName: name,
+            deviceFingerprint: deviceFingerprint,
           );
         } catch (_) {
           // Don't let a referral hiccup block a successful signup.

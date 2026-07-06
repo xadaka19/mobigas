@@ -231,7 +231,7 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                           icon: Icons.store_rounded,
                           list: vendorRefs,
                           rewardEach: _vendorRate,
-                          qualifyHint: 'earns when MobiGas verifies them',
+                          qualifyHint: 'earns when they complete their first order',
                         ),
                         const SizedBox(height: 24),
                         _payoutPreferencesCard(),

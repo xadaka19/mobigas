@@ -457,9 +457,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         try {
           await FirestoreService.recordReferralSignup(
             code: referralCode,
-            referredId: _vendorId,
             referredType: 'vendor',
-            referredName: _businessNameController.text.trim(),
+            // TODO: vendor signup doesn't capture a device
+            // fingerprint yet (customer app does, via
+            // DeviceFingerprintService, in auth_provider.dart's
+            // register()). Wiring the same check into the vendor's
+            // Google Sign-In flow closes this gap — ask for
+            // wherever that account gets created (likely
+            // google_auth_service.dart or vendor_login_screen.dart).
           );
         } catch (_) {
           // Invalid/unknown code — don't block the vendor's setup
