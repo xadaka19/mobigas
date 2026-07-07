@@ -33,6 +33,7 @@ class OrderProvider extends ChangeNotifier {
     _ordersSub =
         FirestoreService.watchCustomerOrders(customerId).listen((orders) {
       _watchRetryAttempt = 0; // a successful snapshot resets backoff
+      _error = null;
       _orders
         ..clear()
         ..addAll(orders);
@@ -45,12 +46,23 @@ class OrderProvider extends ChangeNotifier {
       // single transient error meant orders simply never appeared
       // again until the customer manually pulled to refresh. Retry
       // with backoff instead, up to 5 times, so it recovers on its
-      // own.
+      // own for transient failures.
       if (_watchRetryAttempt < 5) {
         _watchRetryAttempt++;
         Future.delayed(Duration(milliseconds: 800 * _watchRetryAttempt), () {
           if (_customerId == customerId) _subscribeOrders(customerId);
         });
+      } else {
+        // Retries exhausted — this is very likely a PERMANENT
+        // failure (e.g. a missing Firestore composite index), not a
+        // transient one, since retrying an identical query just
+        // fails identically every time. Surface it instead of
+        // leaving the orders list silently, permanently blank.
+        _error = e.toString().contains('failed-precondition') ||
+                e.toString().contains('index')
+            ? 'Could not load orders — a required database index is missing. Contact support.'
+            : 'Could not load your orders. Pull down to try again.';
+        notifyListeners();
       }
     });
   }
@@ -90,6 +102,7 @@ class OrderProvider extends ChangeNotifier {
         vendorPhone: vendor.phone,
         customerName: customer.name,
         customerArea: '${customer.estate}, ${customer.area}',
+        customerPhone: customer.phone,
         customerLatitude: customer.latitude,
         customerLongitude: customer.longitude,
         listing: listing,

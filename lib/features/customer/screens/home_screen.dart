@@ -9,6 +9,7 @@ import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/customer/screens/repayments_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -173,34 +174,57 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const Spacer(),
-              GestureDetector(
-                onTap: () => _showNotifications(context),
-                child: Stack(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: AppColors.orange.withValues(alpha: 0.2),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.notifications_outlined,
-                          color: AppColors.orange, size: 22),
-                    ),
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: AppColors.orange,
-                          shape: BoxShape.circle,
+              StreamBuilder<List<Map<String, dynamic>>>(
+                stream: FirestoreService.watchNotifications(customer.id),
+                builder: (context, snap) {
+                  final unreadCount = (snap.data ?? [])
+                      .where((n) => n['read'] != true)
+                      .length;
+                  return GestureDetector(
+                    onTap: () =>
+                        _showNotifications(context, customer.id),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: AppColors.orange.withValues(alpha: 0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.notifications_outlined,
+                              color: AppColors.orange, size: 22),
                         ),
-                      ),
+                        if (unreadCount > 0)
+                          Positioned(
+                            top: -2,
+                            right: -2,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              constraints: const BoxConstraints(
+                                  minWidth: 18, minHeight: 18),
+                              decoration: BoxDecoration(
+                                color: AppColors.error,
+                                borderRadius: BorderRadius.circular(9),
+                                border: Border.all(
+                                    color: AppColors.navy, width: 1.5),
+                              ),
+                              child: Text(
+                                unreadCount > 9 ? '9+' : '$unreadCount',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    color: AppColors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
             ],
           ),
@@ -586,9 +610,17 @@ class _HomeScreenState extends State<HomeScreen> {
         available.any((l) => l.productType == GasProductType.fullKit);
     final hasGrillKit =
         available.any((l) => l.productType == GasProductType.grillKit);
-    final double? refillFrom = refills.isEmpty
-        ? null
-        : refills.map((l) => l.price).reduce((a, b) => a < b ? a : b);
+    // BUG FIX: previously just the minimum price across every size —
+    // if a vendor's 3kg was cheapest but their 6kg/13kg were pricier,
+    // the card said "from KES 800" with no indication that price was
+    // ONLY for 3kg, misleading anyone who actually wants a different
+    // size. Now the label names the size that price applies to.
+    GasListing? cheapestRefill;
+    for (final l in refills) {
+      if (cheapestRefill == null || l.price < cheapestRefill.price) {
+        cheapestRefill = l;
+      }
+    }
 
     Widget chip(String label) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -687,15 +719,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     size: 14, color: AppColors.gray400),
               ],
             ),
-            if (refillFrom != null || hasFullKit || hasGrillKit) ...[
+            if (cheapestRefill != null || hasFullKit || hasGrillKit) ...[
               const SizedBox(height: 10),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  if (refillFrom != null)
+                  if (cheapestRefill != null)
                     chip(
-                        'Refills from KES ${refillFrom.toStringAsFixed(0)}'),
+                        '${cheapestRefill.size} refill from KES ${cheapestRefill.price.toStringAsFixed(0)}'),
                   if (hasFullKit) chip('Gas + cylinder'),
                   if (hasGrillKit) chip('Gas + cylinder + grill'),
                 ],
@@ -933,7 +965,39 @@ class _HomeScreenState extends State<HomeScreen> {
           ]),
         ),
         Expanded(
-          child: orders.orders.isEmpty
+          child: orders.error != null && orders.orders.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline_rounded,
+                            size: 56, color: AppColors.error),
+                        const SizedBox(height: 16),
+                        Text('Could not load your orders',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(color: AppColors.navy)),
+                        const SizedBox(height: 8),
+                        Text(orders.error!,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppColors.gray400)),
+                        const SizedBox(height: 20),
+                        OutlinedButton(
+                          onPressed: () =>
+                              context.read<OrderProvider>().refreshOrders(),
+                          child: const Text('Try again'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : orders.orders.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1116,6 +1180,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _profileAction(Icons.lock_outline_rounded, 'Change password',
                     onTap: () => _showChangePassword(context)),
                 _profileAction(Icons.card_giftcard_rounded, 'Refer & Earn',
+                    highlight: true,
                     onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -1186,25 +1251,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _profileAction(IconData icon, String label,
-      {VoidCallback? onTap}) {
+      {VoidCallback? onTap, bool highlight = false}) {
+    final iconColor = highlight ? AppColors.success : AppColors.orange;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
-        tileColor: AppColors.white,
+        tileColor: highlight
+            ? AppColors.success.withValues(alpha: 0.08)
+            : AppColors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: AppColors.gray200),
+          side: BorderSide(
+              color: highlight
+                  ? AppColors.success.withValues(alpha: 0.3)
+                  : AppColors.gray200),
         ),
-        leading: Icon(icon, color: AppColors.navy, size: 20),
+        leading: Icon(icon, color: iconColor, size: 20),
         title: Text(label,
             style: Theme.of(context)
                 .textTheme
                 .bodyMedium
-                ?.copyWith(color: AppColors.navy)),
-        trailing: const Icon(Icons.arrow_forward_ios_rounded,
-            size: 14, color: AppColors.gray400),
+                ?.copyWith(
+                    color: highlight ? AppColors.success : AppColors.navy,
+                    fontWeight: highlight ? FontWeight.w600 : FontWeight.w400)),
+        trailing: Icon(Icons.arrow_forward_ios_rounded,
+            size: 14,
+            color: highlight ? AppColors.success : AppColors.gray400),
         onTap: onTap ?? () {},
       ),
     );
@@ -1504,64 +1578,209 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showNotifications(BuildContext context) {
+  void _showNotifications(BuildContext context, String customerId) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => Container(
-        height: MediaQuery.of(context).size.height * 0.6,
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text('Notifications',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(color: AppColors.navy)),
-                const Spacer(),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Close',
-                      style: TextStyle(color: AppColors.orange)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.notifications_none_rounded,
-                        size: 64, color: AppColors.gray400),
-                    const SizedBox(height: 12),
-                    Text('No notifications yet',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(color: AppColors.gray600)),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Order updates and payment reminders\nwill appear here',
-                      textAlign: TextAlign.center,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          height: MediaQuery.of(context).size.height * 0.75,
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('Notifications',
                       style: Theme.of(context)
                           .textTheme
-                          .bodySmall
-                          ?.copyWith(color: AppColors.gray400),
-                    ),
-                  ],
+                          .titleLarge
+                          ?.copyWith(color: AppColors.navy)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () =>
+                        FirestoreService.markAllNotificationsRead(
+                            customerId),
+                    child: Text('Mark all read',
+                        style: TextStyle(
+                            color: AppColors.orange, fontSize: 13)),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('Close',
+                        style: TextStyle(color: AppColors.orange)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: FirestoreService.watchNotifications(customerId),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.orange));
+                    }
+                    final notifications = snap.data!;
+                    if (notifications.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.notifications_none_rounded,
+                                size: 64, color: AppColors.gray400),
+                            const SizedBox(height: 12),
+                            Text('No notifications yet',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(color: AppColors.gray600)),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Order updates and payment reminders\nwill appear here',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: AppColors.gray400),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      itemCount: notifications.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        final n = notifications[i];
+                        final isRead = n['read'] == true;
+                        final createdAt = n['createdAt'] as DateTime?;
+                        return Dismissible(
+                          key: ValueKey(n['id']),
+                          direction: DismissDirection.endToStart,
+                          onDismissed: (_) => FirestoreService
+                              .deleteNotification(n['id'] as String),
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 20),
+                            decoration: BoxDecoration(
+                              color: AppColors.error,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.delete_outline_rounded,
+                                color: AppColors.white),
+                          ),
+                          child: GestureDetector(
+                            onTap: () {
+                              if (!isRead) {
+                                FirestoreService.markNotificationRead(
+                                    n['id'] as String);
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: isRead
+                                    ? AppColors.white
+                                    : AppColors.orange
+                                        .withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: isRead
+                                        ? AppColors.gray200
+                                        : AppColors.orange
+                                            .withValues(alpha: 0.3)),
+                              ),
+                              child: Row(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  if (!isRead)
+                                    Container(
+                                      margin:
+                                          const EdgeInsets.only(top: 5),
+                                      width: 8,
+                                      height: 8,
+                                      decoration: const BoxDecoration(
+                                        color: AppColors.orange,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  if (!isRead) const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          (n['title'] as String).isNotEmpty
+                                              ? n['title'] as String
+                                              : 'MobiGas',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                  color: AppColors.navy,
+                                                  fontWeight: isRead
+                                                      ? FontWeight.w500
+                                                      : FontWeight.w700),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(n['body'] as String,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                    color:
+                                                        AppColors.gray600,
+                                                    height: 1.4)),
+                                        if (createdAt != null) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                              '${createdAt.day}/${createdAt.month}/${createdAt.year} · ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                      color: AppColors
+                                                          .gray400,
+                                                      fontSize: 10)),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () => FirestoreService
+                                        .deleteNotification(
+                                            n['id'] as String),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(4),
+                                      child: Icon(
+                                          Icons.close_rounded,
+                                          size: 16,
+                                          color: AppColors.gray400),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

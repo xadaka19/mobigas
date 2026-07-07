@@ -147,11 +147,17 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
     );
   }
 
+  // TODO: replace with your actual Play Store package name once
+  // published — find it in Google Play Console under App integrity,
+  // or it's whatever you set as applicationId in android/app/build.gradle.
+  static const String _playStoreUrl =
+      'https://play.google.com/store/apps/details?id=com.mobigas.app';
+
   void _shareCode() {
     if (_code == null) return;
     Share.share(
       'Get gas delivered fast on MobiGas! Use my code $_code when you sign up '
-      'and we both benefit. Download the app to get started.',
+      'and we both benefit.\n\nDownload the app: $_playStoreUrl',
       subject: 'Join MobiGas with my referral code',
     );
   }
@@ -231,7 +237,7 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                           icon: Icons.store_rounded,
                           list: vendorRefs,
                           rewardEach: _vendorRate,
-                          qualifyHint: 'earns when they complete their first order',
+                          qualifyHint: 'earns when MobiGas verifies them',
                         ),
                         const SizedBox(height: 24),
                         _payoutPreferencesCard(),

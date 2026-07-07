@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,6 +11,7 @@ import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/api_service.dart';
+import 'package:mobigas/features/shared/order_chat_screen.dart';
 
 class VendorOrderScreen extends StatefulWidget {
   final OrderModel order;
@@ -92,8 +94,8 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     }
   }
 
-  /// Hands off to the Google Maps app for turn-by-turn navigation to
-  /// the customer. Falls back to the Maps website if the app intent
+  /// Hands off to Google Maps for turn-by-turn navigation to the
+  /// customer. Falls back to the Maps website if the app intent
   /// can't launch.
   Future<void> _openNavigation() async {
     if (_customerLat == null || _customerLng == null) {
@@ -121,6 +123,79 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
       }
     } catch (_) {
       await launchUrl(webUri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// Sends the rider the delivery details via the vendor's own SMS
+  /// app — riders aren't MobiGas app users, so there was previously
+  /// NO mechanism at all for them to know where to go; the vendor
+  /// had to relay it verbally. This uses the same URI-scheme handoff
+  /// already used for navigation and calls, so it needs no new
+  /// backend, SMS gateway, or account — it just opens the rider's
+  /// pre-filled text ready to send from the vendor's own number.
+  void _openChat() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OrderChatScreen(
+          orderId: widget.order.orderId,
+          customerId: widget.order.customerId,
+          vendorId: widget.order.vendorId,
+          customerName: widget.order.customerName,
+          vendorName: widget.order.vendorName,
+          currentUserId: uid,
+          currentUserType: 'vendor',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendRiderDetails() async {
+    final phone = _riderPhoneController.text.trim();
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Enter the rider\'s phone number first.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+    final mapsLink = (_customerLat != null && _customerLng != null)
+        ? 'https://www.google.com/maps/dir/?api=1&destination=$_customerLat,$_customerLng&travelmode=driving'
+        : null;
+    final body = StringBuffer()
+      ..writeln('MobiGas delivery for ${widget.order.customerName}')
+      ..writeln('Deliver to: ${widget.order.customerArea}')
+      ..writeln('Item: ${widget.order.listing.size} ${widget.order.listing.productType.label}')
+      ..write(_isCash ? 'Collect KES $_amount cash on delivery' : 'Prepaid — no cash to collect');
+    if (mapsLink != null) {
+      body.writeln();
+      body.write('Directions: $mapsLink');
+    }
+    final uri = Uri(
+      scheme: 'sms',
+      path: phone,
+      queryParameters: {'body': body.toString()},
+    );
+    try {
+      await launchUrl(uri);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not open the SMS app.'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
     }
   }
 
@@ -246,6 +321,20 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                         .bodySmall
                         ?.copyWith(color: AppColors.gray400)),
               ],
+            ),
+          ),
+          GestureDetector(
+            onTap: _openChat,
+            child: Container(
+              width: 40,
+              height: 40,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: AppColors.white.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.chat_bubble_outline_rounded,
+                  color: AppColors.white, size: 18),
             ),
           ),
           Container(
@@ -414,6 +503,17 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               _textField(_riderPhoneController, 'Rider phone',
                   Icons.phone_outlined,
                   type: TextInputType.phone),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _sendRiderDetails,
+                icon: const Icon(Icons.sms_outlined, size: 18),
+                label: const Text('Send delivery details to rider (SMS)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.orange,
+                  side: const BorderSide(color: AppColors.orange),
+                  minimumSize: const Size(double.infinity, 44),
+                ),
+              ),
             ],
           ],
         )),
@@ -560,6 +660,14 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
             _divider(),
             _row(Icons.payments_rounded, 'Collect',
                 'KES $_amount cash / M-Pesa'),
+          ],
+          // BUG FIX: rider info was captured on the Prepare step and
+          // then never shown again anywhere — the vendor had no way
+          // to confirm who they'd actually assigned.
+          if (_useRider && _riderNameController.text.trim().isNotEmpty) ...[
+            _divider(),
+            _row(Icons.two_wheeler_outlined, 'Rider',
+                '${_riderNameController.text.trim()} · ${_riderPhoneController.text.trim()}'),
           ],
         ])),
         const SizedBox(height: 16),

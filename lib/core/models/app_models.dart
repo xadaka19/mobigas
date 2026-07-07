@@ -427,6 +427,7 @@ class OrderModel {
   final String vendorPhone;
   final String customerName;
   final String customerArea;
+  final String customerPhone;
   final double customerLatitude;
   final double customerLongitude;
   final GasListing listing;
@@ -462,6 +463,7 @@ class OrderModel {
     required this.vendorPhone,
     required this.customerName,
     required this.customerArea,
+    this.customerPhone = '',
     this.customerLatitude = 0.0,
     this.customerLongitude = 0.0,
     required this.listing,

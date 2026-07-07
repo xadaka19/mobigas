@@ -229,6 +229,7 @@ class FirestoreService {
       'vendorPhone': order.vendorPhone,
       'customerName': order.customerName,
       'customerArea': order.customerArea,
+      'customerPhone': order.customerPhone,
       'customerLatitude': order.customerLatitude,
       'customerLongitude': order.customerLongitude,
       'gasSize': order.listing.size,
@@ -384,6 +385,7 @@ class FirestoreService {
       vendorPhone: data['vendorPhone'] ?? '',
       customerName: data['customerName'] ?? '',
       customerArea: data['customerArea'] ?? '',
+      customerPhone: data['customerPhone'] ?? '',
       customerLatitude: (data['customerLatitude'] ?? 0.0).toDouble(),
       customerLongitude: (data['customerLongitude'] ?? 0.0).toDouble(),
       listing: GasListing(
@@ -639,6 +641,160 @@ class FirestoreService {
                 paidAt: (data['paidAt'] as Timestamp?)?.toDate(),
               );
             }).toList());
+  }
+
+  // ── NOTIFICATIONS INBOX ───────────────────────────────────────────
+  // Persistent record of every push notification actually received,
+  // written by notification_service.dart at the moment it arrives.
+  // Independent of the OS-level push itself, which the user may have
+  // already dismissed.
+
+  static Stream<List<Map<String, dynamic>>> watchNotifications(
+      String userId) {
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              return {
+                'id': d.id,
+                'title': data['title'] ?? '',
+                'body': data['body'] ?? '',
+                'type': data['type'] ?? '',
+                'read': data['read'] ?? false,
+                'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
+              };
+            }).toList());
+  }
+
+  static Future<void> markNotificationRead(String notificationId) async {
+    await FirebaseFirestore.instance
+        .collection('notifications')
+        .doc(notificationId)
+        .update({'read': true});
+  }
+
+  static Future<void> markAllNotificationsRead(String userId) async {
+    final snap = await FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: userId)
+        .where('read', isEqualTo: false)
+        .get();
+    if (snap.docs.isEmpty) return;
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in snap.docs) {
+      batch.update(doc.reference, {'read': true});
+    }
+    await batch.commit();
+  }
+
+  static Future<void> deleteNotification(String notificationId) async {
+    await FirebaseFirestore.instance
+        .collection('notifications')
+        .doc(notificationId)
+        .delete();
+  }
+
+  // ── ORDER CHAT ────────────────────────────────────────────────────
+  // Scoped per-order (not a general DM) — vendor and customer chatting
+  // about THIS specific delivery. order_chats/{orderId} holds who's in
+  // the conversation (for security rules to check against, without a
+  // separate lookup to the orders collection); messages live in its
+  // messages subcollection.
+
+  /// Creates the chat doc if it doesn't exist yet (lazy — most orders
+  /// never need a chat at all). Safe to call every time the chat
+  /// screen opens.
+  static Future<void> ensureOrderChatExists({
+    required String orderId,
+    required String customerId,
+    required String vendorId,
+    required String customerName,
+    required String vendorName,
+  }) async {
+    final ref = FirebaseFirestore.instance.collection('order_chats').doc(orderId);
+    final doc = await ref.get();
+    if (doc.exists) return;
+    await ref.set({
+      'orderId': orderId,
+      'customerId': customerId,
+      'vendorId': vendorId,
+      'customerName': customerName,
+      'vendorName': vendorName,
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastMessage': '',
+      'lastMessageAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<void> sendOrderChatMessage({
+    required String orderId,
+    required String senderId,
+    required String senderType, // 'customer' | 'vendor'
+    required String senderName,
+    required String text,
+  }) async {
+    final chatRef = FirebaseFirestore.instance.collection('order_chats').doc(orderId);
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    await chatRef.collection('messages').add({
+      'senderId': senderId,
+      'senderType': senderType,
+      'senderName': senderName,
+      'text': trimmed,
+      'createdAt': FieldValue.serverTimestamp(),
+      'read': false,
+    });
+    await chatRef.update({
+      'lastMessage': trimmed,
+      'lastMessageAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Stream<List<Map<String, dynamic>>> watchOrderChatMessages(
+      String orderId) {
+    return FirebaseFirestore.instance
+        .collection('order_chats')
+        .doc(orderId)
+        .collection('messages')
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              return {
+                'id': d.id,
+                'senderId': data['senderId'] ?? '',
+                'senderType': data['senderType'] ?? '',
+                'senderName': data['senderName'] ?? '',
+                'text': data['text'] ?? '',
+                'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
+                'read': data['read'] ?? false,
+              };
+            }).toList());
+  }
+
+  /// Marks every message NOT sent by [readerId] as read — called when
+  /// the chat screen opens, so the other party's unread badge clears.
+  static Future<void> markOrderChatRead({
+    required String orderId,
+    required String readerId,
+  }) async {
+    final snap = await FirebaseFirestore.instance
+        .collection('order_chats')
+        .doc(orderId)
+        .collection('messages')
+        .where('senderId', isNotEqualTo: readerId)
+        .where('read', isEqualTo: false)
+        .get();
+    if (snap.docs.isEmpty) return;
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in snap.docs) {
+      batch.update(doc.reference, {'read': true});
+    }
+    await batch.commit();
   }
 
   // ── BANK APPLICATIONS ─────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -175,6 +176,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       vendorPhone: data['vendorPhone'] ?? '',
       customerName: data['customerName'] ?? '',
       customerArea: data['customerArea'] ?? '',
+      customerPhone: data['customerPhone'] ?? '',
       listing: GasListing(
         size: data['gasSize'] ?? '',
         kg: data['gasKg'] ?? 0,
@@ -228,6 +230,23 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     await FirestoreService.updateOrderStatus(
         order.orderId, OrderStatus.cancelled,
         cancelledBy: 'vendor');
+  }
+
+  Future<void> _callCustomer(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone);
+    try {
+      await launchUrl(uri);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not open the phone app.'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -918,6 +937,99 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       ],
                     ),
                   ],
+                ),
+                const SizedBox(height: 10),
+                // BUG FIX: previously a vendor saw only name, area,
+                // price, and size before deciding to accept — no
+                // product type, no brand, no way to check they
+                // actually stock what's being asked for, and no
+                // phone number to call the customer. All of this
+                // existed on the POST-accept prepare screen already;
+                // it just needed to also show here, before the
+                // accept/decline decision.
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.gray100,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            order.listing.productType.isAccessoryOnly
+                                ? Icons.build_outlined
+                                : Icons.local_fire_department_outlined,
+                            size: 15,
+                            color: AppColors.gray600,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              order.listing.brand.isNotEmpty
+                                  ? '${order.listing.brand} · ${order.listing.productType.label}'
+                                  : order.listing.productType.label,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                      color: AppColors.navy,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (order.customerPhone.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(Icons.phone_outlined,
+                                size: 15, color: AppColors.gray600),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(order.customerPhone,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                          color: AppColors.navy, fontSize: 12)),
+                            ),
+                            GestureDetector(
+                              onTap: () => _callCustomer(order.customerPhone),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.success,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.call_rounded,
+                                        size: 12, color: AppColors.white),
+                                    const SizedBox(width: 4),
+                                    Text('Call',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                                color: AppColors.white,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
                 if (isCash) ...[
                   const SizedBox(height: 10),

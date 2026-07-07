@@ -10,6 +10,13 @@ import 'package:mobigas/core/services/notification_router.dart';
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await DeliveryNotificationService.initialize();
 
+  // BUG FIX: notifications were only ever shown as ephemeral OS push
+  // notifications — nothing was ever recorded anywhere, so the
+  // in-app notification bell had no real history to show at all. Now
+  // every notification that actually reaches the device gets a
+  // persistent record, regardless of which server-side code sent it.
+  await _recordNotification(message);
+
   // If message has a notification block (credit/loan decisions),
   // Android auto-displays it — don't show a duplicate local notification.
   if (message.notification != null) return;
@@ -34,6 +41,38 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       body: body,
       type: type,
     );
+  }
+}
+
+/// Persists a received notification so the in-app bell/inbox has a
+/// real history, independent of whether the OS-level push is still
+/// visible or has already been dismissed. Shared by the background
+/// handler (top-level function, above) and the foreground listener
+/// (inside NotificationService, below).
+Future<void> _recordNotification(RemoteMessage message) async {
+  try {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final data = message.data;
+    final title = message.notification?.title ??
+        data['notificationTitle'] ??
+        data['title'] ??
+        '';
+    final body = message.notification?.body ??
+        data['notificationBody'] ??
+        data['body'] ??
+        '';
+    final type = data['type'] ?? '';
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'userId': uid,
+      'title': title,
+      'body': body,
+      'type': type,
+      'read': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    debugPrint('Failed to record notification: $e');
   }
 }
 
@@ -134,6 +173,7 @@ class NotificationService {
   static Future<void> _showForegroundNotification(
       RemoteMessage message) async {
     await DeliveryNotificationService.initialize();
+    await _recordNotification(message);
 
     // In the foreground Android does NOT auto-display FCM notification
     // payloads, so we show one ourselves — using the message's own

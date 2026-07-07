@@ -201,39 +201,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _paybillAccountController = TextEditingController(text: d['paybillAccount'] ?? '');
     _paymentMethod = d['paymentMethod'] ?? 'mpesa';
 
-    // Load existing listings
-    final listings = d['listings'] as List? ?? [];
-    for (final l in listings) {
-      final size = l['size'] as String?;
-      final productType = l['productType'] as String? ?? 'refill';
-      final price = (l['price'] ?? 0).toString();
-      final available = l['available'] as bool? ?? false;
-      final brand = (l['brand'] as String? ?? '').trim();
-
-      if (size == null) continue;
-
-      if (productType == 'refill') {
-        _refillController(brand, size).text = price;
-        _sizeAvailable['$brand|$size'] = available;
-      } else if (productType == 'fullKit') {
-        _fullKitController(brand, size).text = price;
-        _fullKitAvailable['$brand|$size'] = available;
-      } else if (productType == 'grillKit') {
-        _grillKitPriceController.text = price;
-        _grillKitAvailable = available;
-      } else if (productType == 'burner' &&
-          _burnerPriceControllers.containsKey(size)) {
-        _burnerPriceControllers[size]!.text = price;
-        _burnerAvailable[size] = available;
-      } else if (productType == 'regulator') {
-        _regulatorPriceController.text = price;
-        _regulatorAvailable = available;
-      } else if (productType == 'mekoCooker') {
-        _mekoCookerPriceController.text = price;
-        _mekoCookerAvailable = available;
-      }
-    }
-
+    // Brands must load BEFORE listings — legacy listings saved before
+    // brand-aware pricing existed have no 'brand' field at all, and
+    // need a fallback to attach to (see below). Loading brands first
+    // means that fallback is actually available when the listings
+    // loop runs.
     // Load custom brands first so they appear in the list
     final customBrands = d['customBrands'] as List? ?? [];
     for (final b in customBrands) {
@@ -258,6 +230,52 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     }
     if (_selectedBrands.isNotEmpty) {
       _activePricingBrand = _selectedBrands.first;
+    }
+
+    // Load existing listings
+    final listings = d['listings'] as List? ?? [];
+    for (final l in listings) {
+      final size = l['size'] as String?;
+      final productType = l['productType'] as String? ?? 'refill';
+      final price = (l['price'] ?? 0).toString();
+      final available = l['available'] as bool? ?? false;
+      // BUG FIX: listings saved before brand-aware pricing existed
+      // have no 'brand' field at all. Falling back to '' created a
+      // '|size' key that no brand chip ever points at — the price
+      // was technically saved but silently orphaned, and because
+      // GasListing.brand stayed empty, the customer app's brand-step
+      // logic (which only appears when it finds a non-empty brand)
+      // skipped straight to the vendor list, exactly as reported.
+      // Falling back to the vendor's first selected brand instead
+      // means reopening and resaving this screen actually repairs
+      // the vendor's existing data.
+      final rawBrand = (l['brand'] as String? ?? '').trim();
+      final brand = rawBrand.isNotEmpty
+          ? rawBrand
+          : (_selectedBrands.isNotEmpty ? _selectedBrands.first : rawBrand);
+
+      if (size == null) continue;
+
+      if (productType == 'refill') {
+        _refillController(brand, size).text = price;
+        _sizeAvailable['$brand|$size'] = available;
+      } else if (productType == 'fullKit') {
+        _fullKitController(brand, size).text = price;
+        _fullKitAvailable['$brand|$size'] = available;
+      } else if (productType == 'grillKit') {
+        _grillKitPriceController.text = price;
+        _grillKitAvailable = available;
+      } else if (productType == 'burner' &&
+          _burnerPriceControllers.containsKey(size)) {
+        _burnerPriceControllers[size]!.text = price;
+        _burnerAvailable[size] = available;
+      } else if (productType == 'regulator') {
+        _regulatorPriceController.text = price;
+        _regulatorAvailable = available;
+      } else if (productType == 'mekoCooker') {
+        _mekoCookerPriceController.text = price;
+        _mekoCookerAvailable = available;
+      }
     }
   }
 
@@ -2295,5 +2313,5 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ),
       ],
     );
-  } 
+  }
 }

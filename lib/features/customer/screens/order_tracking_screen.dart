@@ -10,6 +10,7 @@ import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/delivery_notification_service.dart';
 import 'package:mobigas/core/services/screen_security_service.dart';
+import 'package:mobigas/features/shared/order_chat_screen.dart';
 
 class OrderTrackingScreen extends StatefulWidget {
   const OrderTrackingScreen({super.key});
@@ -197,6 +198,24 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     super.dispose();
   }
 
+  void _openChat() {
+    if (_order == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OrderChatScreen(
+          orderId: _order!.orderId,
+          customerId: _order!.customerId,
+          vendorId: _order!.vendorId,
+          customerName: _order!.customerName,
+          vendorName: _order!.vendorName,
+          currentUserId: _order!.customerId,
+          currentUserType: 'customer',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -292,6 +311,21 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ],
               ),
             ),
+            if (_order != null)
+              GestureDetector(
+                onTap: _openChat,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.white.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.chat_bubble_outline_rounded,
+                      color: AppColors.white, size: 16),
+                ),
+              ),
             Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
