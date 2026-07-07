@@ -1656,8 +1656,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
                     return ListView.separated(
                       itemCount: notifications.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 8),
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (_, i) {
                         final n = notifications[i];
                         final isRead = n['read'] == true;

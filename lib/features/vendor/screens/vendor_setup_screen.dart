@@ -7,6 +7,7 @@ import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
@@ -545,13 +546,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           await FirestoreService.recordReferralSignup(
             code: referralCode,
             referredType: 'vendor',
-            // TODO: vendor signup doesn't capture a device
-            // fingerprint yet (customer app does, via
-            // DeviceFingerprintService, in auth_provider.dart's
-            // register()). Wiring the same check into the vendor's
-            // Google Sign-In flow closes this gap — ask for
-            // wherever that account gets created (likely
-            // google_auth_service.dart or vendor_login_screen.dart).
+            // GAP CLOSED: previously missing. Turns out the vendor's
+            // Google Sign-In flow (google_auth_service.dart) never
+            // creates the Firestore profile or touches referrals at
+            // all — it only handles Firebase Auth, then always routes
+            // to /vendor-home regardless of whether setup is done
+            // ("setup happens inside the dashboard"). This IS where
+            // the vendor's profile actually gets created, so this is
+            // the right place for it — same DeviceFingerprintService
+            // the customer app already uses.
+            deviceFingerprint: await DeviceFingerprintService.getFingerprint(),
           );
         } catch (_) {
           // Invalid/unknown code — don't block the vendor's setup
