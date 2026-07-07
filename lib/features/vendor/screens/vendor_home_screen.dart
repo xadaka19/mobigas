@@ -693,7 +693,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             const SizedBox(width: 12),
             _statCard('Deliveries',
                 '${orders.length}',
-                Icons.local_shipping_rounded, AppColors.navy),
+                Icons.two_wheeler_rounded, AppColors.navy),
           ],
         );
       },

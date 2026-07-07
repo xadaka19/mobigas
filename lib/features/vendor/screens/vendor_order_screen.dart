@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
@@ -28,6 +30,15 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   bool _useRider = false;
   final _riderNameController = TextEditingController();
   final _riderPhoneController = TextEditingController();
+  // One-time rider tracking link (Option B — web page, no rider
+  // app). Minted lazily the first time details are sent, cached for
+  // the rest of this screen's lifetime so SMS + WhatsApp share one.
+  String? _riderTrackingUrl;
+  // Live rider position (rider deliveries only) — read from the same
+  // riderLocation field on the order doc that the customer app
+  // watches, written by the rider's tracking page.
+  LatLng? _riderLivePosition;
+  StreamSubscription? _riderPositionSub;
   GoogleMapController? _mapController;
   double? _vendorLat;
   double? _vendorLng;
@@ -43,7 +54,39 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   void initState() {
     super.initState();
     _initLocation();
+    _watchRiderPosition();
     ScreenSecurityService.enableSecureMode();
+  }
+
+  /// Watches riderLocation on the order doc — the field the rider's
+  /// tracking page writes — so the vendor sees their rider moving on
+  /// the en-route map exactly like the customer does.
+  void _watchRiderPosition() {
+    FirebaseService.orders
+        .where('orderId', isEqualTo: widget.order.orderId)
+        .limit(1)
+        .get()
+        .then((snap) {
+      if (snap.docs.isEmpty || !mounted) return;
+      _riderPositionSub =
+          snap.docs.first.reference.snapshots().listen((doc) {
+        if (!mounted) return;
+        final data = doc.data() as Map<String, dynamic>?;
+        final loc = data?['riderLocation'] as Map<String, dynamic>?;
+        // Only treat it as RIDER movement when it came from the
+        // tracking link — when the vendor delivers themselves, this
+        // same field carries their own phone's GPS, already shown
+        // via myLocationEnabled.
+        if (loc != null && data?['riderLocationSource'] == 'rider_link') {
+          setState(() {
+            _riderLivePosition = LatLng(
+              (loc['lat'] as num).toDouble(),
+              (loc['lng'] as num).toDouble(),
+            );
+          });
+        }
+      });
+    });
   }
 
   Future<void> _initLocation() async {
@@ -151,36 +194,89 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     );
   }
 
-  Future<void> _sendRiderDetails() async {
-    final phone = _riderPhoneController.text.trim();
-    if (phone.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Enter the rider\'s phone number first.'),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
-        ),
-      );
-      return;
+  /// Mints (or reuses) the one-time rider tracking link for this
+  /// order via the createRiderTrackingToken Cloud Function. Never
+  /// throws — a minting failure just means the message goes out
+  /// without a tracking link rather than not at all.
+  Future<void> _ensureRiderTrackingUrl() async {
+    if (_riderTrackingUrl != null) return;
+    try {
+      final callable = FirebaseFunctions.instance
+          .httpsCallable('createRiderTrackingToken');
+      final result =
+          await callable.call({'orderId': widget.order.orderId});
+      final url = (result.data as Map)['url'] as String?;
+      if (url != null && mounted) {
+        setState(() => _riderTrackingUrl = url);
+      }
+    } catch (_) {
+      // Tracking link is an enhancement, not a requirement — the
+      // rider still gets address + Maps directions without it.
     }
+  }
+
+  /// Builds the rider handoff message — shared by SMS and WhatsApp.
+  String _riderMessageBody() {
     final mapsLink = (_customerLat != null && _customerLng != null)
         ? 'https://www.google.com/maps/dir/?api=1&destination=$_customerLat,$_customerLng&travelmode=driving'
         : null;
+    final l = widget.order.listing;
+    final item = l.brand.isNotEmpty
+        ? '${l.brand} · ${l.size} ${l.productType.label}'
+        : '${l.size} ${l.productType.label}';
     final body = StringBuffer()
-      ..writeln('MobiGas delivery for ${widget.order.customerName}')
+      ..writeln('MobiGas delivery for ${widget.order.customerName}');
+    if (widget.order.customerPhone.isNotEmpty) {
+      body.writeln('Customer phone: ${widget.order.customerPhone}');
+    }
+    body
       ..writeln('Deliver to: ${widget.order.customerArea}')
-      ..writeln('Item: ${widget.order.listing.size} ${widget.order.listing.productType.label}')
-      ..write(_isCash ? 'Collect KES $_amount cash on delivery' : 'Prepaid — no cash to collect');
+      ..writeln('Item: $item')
+      ..write(_isCash
+          ? 'Payment: customer pays KES $_amount (cash or M-Pesa to the vendor). Confirm payment is received before taking the PIN.'
+          : 'Payment: prepaid — nothing to collect. Just get the 4-digit PIN from the customer.');
     if (mapsLink != null) {
       body.writeln();
       body.write('Directions: $mapsLink');
     }
+    if (_riderTrackingUrl != null) {
+      body.writeln();
+      body.write(
+          'IMPORTANT — open this link and tap Start so the customer can see you coming: $_riderTrackingUrl');
+    }
+    return body.toString();
+  }
+
+  /// Normalizes a Kenyan number to international format for wa.me
+  /// links, which require it (unlike the sms: scheme).
+  String _waPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('254')) return digits;
+    if (digits.startsWith('0')) return '254${digits.substring(1)}';
+    return digits;
+  }
+
+  bool _requireRiderPhone() {
+    if (_riderPhoneController.text.trim().isNotEmpty) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Enter the rider\'s phone number first.'),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+    return false;
+  }
+
+  Future<void> _sendRiderDetailsSms() async {
+    if (!_requireRiderPhone()) return;
+    await _ensureRiderTrackingUrl();
     final uri = Uri(
       scheme: 'sms',
-      path: phone,
-      queryParameters: {'body': body.toString()},
+      path: _riderPhoneController.text.trim(),
+      queryParameters: {'body': _riderMessageBody()},
     );
     try {
       await launchUrl(uri);
@@ -199,10 +295,58 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     }
   }
 
+  Future<void> _sendRiderDetailsWhatsApp() async {
+    if (!_requireRiderPhone()) return;
+    await _ensureRiderTrackingUrl();
+    // wa.me is WhatsApp's own universal link — opens the chat with
+    // this number, message pre-filled. The sms: scheme can never
+    // reach WhatsApp, which is why SMS-only "refused" for it.
+    final uri = Uri.parse(
+        'https://wa.me/${_waPhone(_riderPhoneController.text.trim())}'
+        '?text=${Uri.encodeComponent(_riderMessageBody())}');
+    try {
+      final launched =
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Could not open WhatsApp. Is it installed?'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Could not open WhatsApp. Is it installed?'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _startTrip() async {
     setState(() => _isLoading = true);
     await _updateStatus(OrderStatus.outForDelivery);
-    await LocationService.startTracking(widget.order.orderId);
+    // When a rider is doing the delivery, the vendor's phone stays
+    // at the shop — streaming ITS GPS would overwrite the rider's
+    // live position (written via the tracking link) on every tick,
+    // making the customer's map show the stationary shop instead of
+    // the moving rider. Only track this phone when the vendor
+    // themselves is delivering.
+    if (!_useRider) {
+      await LocationService.startTracking(widget.order.orderId);
+    }
     setState(() {
       _step = _Step.enRoute;
       _isLoading = false;
@@ -268,6 +412,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   @override
   void dispose() {
     ScreenSecurityService.disableSecureMode();
+    _riderPositionSub?.cancel();
     _riderNameController.dispose();
     _riderPhoneController.dispose();
     _mapController?.dispose();
@@ -450,6 +595,52 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         _card(child: Column(children: [
           _row(Icons.person_outline_rounded, 'Customer',
               widget.order.customerName),
+          if (widget.order.customerPhone.isNotEmpty) ...[
+            _divider(),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(children: [
+                const Icon(Icons.phone_outlined,
+                    color: AppColors.orange, size: 18),
+                const SizedBox(width: 10),
+                Text('Phone',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: AppColors.gray400)),
+                const Spacer(),
+                Text(widget.order.customerPhone,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.white, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: () => launchUrl(
+                      Uri(scheme: 'tel', path: widget.order.customerPhone)),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.success,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.call_rounded,
+                          size: 13, color: AppColors.white),
+                      const SizedBox(width: 4),
+                      Text('Call',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                  color: AppColors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                ),
+              ]),
+            ),
+          ],
           _divider(),
           _row(Icons.location_on_outlined, 'Deliver to',
               widget.order.customerArea),
@@ -477,7 +668,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         if (_isCash) ...[
           const SizedBox(height: 16),
           _infoBox(Icons.payments_rounded,
-              'CASH ORDER: collect KES $_amount from the customer (cash or M-Pesa to you) when you deliver — before they give you the PIN.'),
+              'CASH ORDER: confirm payment of KES $_amount is received (cash or M-Pesa to you) before the customer shares the PIN — the PIN completes the delivery.'),
         ],
         const SizedBox(height: 20),
         // Rider assignment
@@ -504,16 +695,37 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   Icons.phone_outlined,
                   type: TextInputType.phone),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _sendRiderDetails,
-                icon: const Icon(Icons.sms_outlined, size: 18),
-                label: const Text('Send delivery details to rider (SMS)'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.orange,
-                  side: const BorderSide(color: AppColors.orange),
-                  minimumSize: const Size(double.infinity, 44),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _sendRiderDetailsSms,
+                    icon: const Icon(Icons.sms_outlined, size: 16),
+                    label: const Text('SMS'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.orange,
+                      side: const BorderSide(color: AppColors.orange),
+                      minimumSize: const Size(0, 44),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _sendRiderDetailsWhatsApp,
+                    icon: const Icon(Icons.chat_rounded, size: 16),
+                    label: const Text('WhatsApp'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.success,
+                      side: const BorderSide(color: AppColors.success),
+                      minimumSize: const Size(0, 44),
+                    ),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 4),
+              Text('Send the delivery details to your rider',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray400, fontSize: 11)),
             ],
           ],
         )),
@@ -655,11 +867,13 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               widget.order.customerArea),
           _divider(),
           _row(Icons.local_fire_department_outlined, 'Delivering',
-              widget.order.listing.size),
+              widget.order.listing.brand.isNotEmpty
+                  ? '${widget.order.listing.brand} · ${widget.order.listing.size}'
+                  : widget.order.listing.size),
           if (_isCash) ...[
             _divider(),
-            _row(Icons.payments_rounded, 'Collect',
-                'KES $_amount cash / M-Pesa'),
+            _row(Icons.payments_rounded, 'Payment',
+                'KES $_amount — confirm received before PIN'),
           ],
           // BUG FIX: rider info was captured on the Prepare step and
           // then never shown again anywhere — the vendor had no way
@@ -686,15 +900,42 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   zoom: 15,
                 ),
                 onMapCreated: (c) => _mapController = c,
-                myLocationEnabled: true,
+                myLocationEnabled: !_useRider,
+                markers: {
+                  if (_riderLivePosition != null)
+                    Marker(
+                      markerId: const MarkerId('rider'),
+                      position: _riderLivePosition!,
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                          BitmapDescriptor.hueOrange),
+                      infoWindow: InfoWindow(
+                          title: _riderNameController.text.trim().isNotEmpty
+                              ? _riderNameController.text.trim()
+                              : 'Rider'),
+                    ),
+                  if (_customerLat != null)
+                    Marker(
+                      markerId: const MarkerId('customer'),
+                      position: LatLng(_customerLat!, _customerLng!),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                          BitmapDescriptor.hueBlue),
+                      infoWindow: InfoWindow(
+                          title: widget.order.customerName),
+                    ),
+                },
                 zoomControlsEnabled: false,
                 mapToolbarEnabled: false,
               ),
             ),
           ),
         const SizedBox(height: 20),
-        _infoBox(Icons.location_on_rounded,
-            'Your location is being shared with the customer. Tap "I have arrived" when you reach the customer.'),
+        _infoBox(
+            Icons.location_on_rounded,
+            _useRider
+                ? (_riderLivePosition != null
+                    ? 'Your rider is sharing their location — you and the customer both see them moving. Tap "I have arrived" once your rider confirms they\'ve reached the customer.'
+                    : 'Waiting for your rider to open the tracking link and tap Start. Once they do, you\'ll see them moving here.')
+                : 'Your location is being shared with the customer. Tap "I have arrived" when you reach the customer.'),
         const SizedBox(height: 20),
         ElevatedButton.icon(
           onPressed: _openNavigation,
@@ -743,11 +984,16 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         const SizedBox(height: 16),
         if (_isCash)
           _infoBox(Icons.payments_rounded,
-              'Collect KES $_amount from the customer NOW (cash or M-Pesa to you) — then ask for the PIN.'),
+              'Confirm payment of KES $_amount is received (cash or M-Pesa to you) FIRST — the customer\'s PIN completes the delivery.'),
         if (_isCash && _isRefill) const SizedBox(height: 12),
         if (_isRefill)
           _infoBox(Icons.swap_horiz_rounded,
               'Collect the empty cylinder from customer before handing over the new gas.'),
+        if (_useRider && _riderNameController.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _infoBox(Icons.two_wheeler_outlined,
+              'Your rider ${_riderNameController.text.trim()} gets the 4-digit PIN from the customer at the door — call them for it and enter it below.'),
+        ],
         const SizedBox(height: 16),
         _card(child: Column(children: [
           const Icon(Icons.pin_outlined, color: AppColors.orange, size: 40),
@@ -826,7 +1072,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   color: AppColors.white, fontSize: 26)),
         const SizedBox(height: 8),
         Text(
-            '${widget.order.listing.size} delivered to ${widget.order.customerName}',
+            '${widget.order.listing.brand.isNotEmpty ? '${widget.order.listing.brand} ' : ''}${widget.order.listing.size} delivered to ${widget.order.customerName}',
             textAlign: TextAlign.center,
             style: Theme.of(context)
                 .textTheme
@@ -959,12 +1205,19 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     return TextFormField(
       controller: controller,
       keyboardType: type,
+      // BUG FIX: typed text was styled white but the field rendered
+      // with the theme's default LIGHT fill — white-on-white, so the
+      // hint (gray) showed but anything typed was invisible. Fill is
+      // now explicit and dark to match every other input on this
+      // navy screen.
       style: const TextStyle(color: AppColors.white),
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: const TextStyle(color: AppColors.gray600),
         prefixIcon:
             Icon(icon, color: AppColors.gray400, size: 20),
+        filled: true,
+        fillColor: AppColors.white.withValues(alpha: 0.05),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(

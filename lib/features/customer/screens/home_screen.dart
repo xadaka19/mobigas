@@ -474,7 +474,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final steps = [
       _HowStep(Icons.shopping_cart_outlined, 'Order', 'Pick size & vendor',
           AppColors.orange),
-      _HowStep(Icons.local_shipping_outlined, 'Delivery', 'To your door',
+      _HowStep(Icons.two_wheeler_outlined, 'Delivery', 'To your door',
           AppColors.navy),
       _HowStep(
           Icons.pin_outlined, 'PIN', 'Confirm delivery', AppColors.success),
@@ -811,7 +811,7 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       case OrderStatus.outForDelivery:
         statusColor = AppColors.orange;
-        statusIcon = Icons.local_shipping_rounded;
+        statusIcon = Icons.two_wheeler_rounded;
         statusLabel = 'On the way';
         break;
       case OrderStatus.cancelled:
@@ -1656,7 +1656,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
                     return ListView.separated(
                       itemCount: notifications.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 8),
                       itemBuilder: (_, i) {
                         final n = notifications[i];
                         final isRead = n['read'] == true;

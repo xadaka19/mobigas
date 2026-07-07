@@ -101,7 +101,9 @@ class OrderProvider extends ChangeNotifier {
         vendorName: vendor.businessName,
         vendorPhone: vendor.phone,
         customerName: customer.name,
-        customerArea: '${customer.estate}, ${customer.area}',
+        customerArea: customer.estate.trim() == customer.area.trim()
+            ? customer.estate.trim()
+            : '${customer.estate}, ${customer.area}',
         customerPhone: customer.phone,
         customerLatitude: customer.latitude,
         customerLongitude: customer.longitude,

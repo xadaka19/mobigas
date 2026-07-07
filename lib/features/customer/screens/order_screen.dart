@@ -178,7 +178,7 @@ class _OrderScreenState extends State<OrderScreen> {
       case GasProductType.regulator:
         return 'Standalone regulator — fits 13kg cylinders, no gas included';
       case GasProductType.mekoCooker:
-        return 'Meko stove + cooker set — no gas or cylinder included';
+        return 'Meko + two burner cooker set — gas, hosepipe,regulator and 6kg cylinder included';
     }
   }
 
@@ -450,7 +450,7 @@ class _OrderScreenState extends State<OrderScreen> {
           _infoCard(
             icon: Icons.payments_outlined,
             text:
-                'Your available credit (KES ${customer!.bankCreditAvailable.toStringAsFixed(0)}) is below current gas prices, so this order is cash on delivery. Repay via M-Pesa to free up your credit.',
+                'Your available credit (KES ${customer!.bankCreditAvailable.toStringAsFixed(0)}) is below current gas prices, so this order is cash on delivery. Repay via M-Pesa or cash on delivery.',
           ),
         ] else ...[
           // No credit limit — cash is simply how it works.
