@@ -20,6 +20,7 @@ class _OrderScreenState extends State<OrderScreen> {
   PaymentMethod? _method;
   GasProductType? _selectedType;
   String? _selectedSize;
+  String? _selectedBrand;
   VendorModel? _selectedVendor;
   GasListing? _selectedListing;
 
@@ -56,6 +57,7 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() {
       _selectedType = type;
       _selectedSize = null;
+      _selectedBrand = null;
       _selectedVendor = null;
       _selectedListing = null;
     });
@@ -64,6 +66,15 @@ class _OrderScreenState extends State<OrderScreen> {
   void _selectSize(String size) {
     setState(() {
       _selectedSize = size;
+      _selectedBrand = null;
+      _selectedVendor = null;
+      _selectedListing = null;
+    });
+  }
+
+  void _selectBrand(String brand) {
+    setState(() {
+      _selectedBrand = brand;
       _selectedVendor = null;
       _selectedListing = null;
     });
@@ -166,6 +177,8 @@ class _OrderScreenState extends State<OrderScreen> {
         return 'Standalone burner — fits 3kg or 6kg cylinders, no gas included';
       case GasProductType.regulator:
         return 'Standalone regulator — fits 13kg cylinders, no gas included';
+      case GasProductType.mekoCooker:
+        return 'Meko stove + cooker set — no gas or cylinder included';
     }
   }
 
@@ -181,6 +194,8 @@ class _OrderScreenState extends State<OrderScreen> {
         return Icons.whatshot_rounded;
       case GasProductType.regulator:
         return Icons.speed_rounded;
+      case GasProductType.mekoCooker:
+        return Icons.soup_kitchen_rounded;
     }
   }
 
@@ -196,6 +211,8 @@ class _OrderScreenState extends State<OrderScreen> {
         return 'Burner';
       case GasProductType.regulator:
         return 'Regulator';
+      case GasProductType.mekoCooker:
+        return 'Meko + Cooker';
     }
   }
 
@@ -357,14 +374,40 @@ class _OrderScreenState extends State<OrderScreen> {
     final sizes = sizeKg.keys.toList()
       ..sort((a, b) => sizeKg[a]!.compareTo(sizeKg[b]!));
 
-    // Vendor offers for type + size, cheapest first
-    final offers = <(VendorModel, GasListing)>[];
-    if (_selectedType != null && _selectedSize != null) {
+    // Distinct brands available at this exact type+size — only
+    // refill and fullKit are priced per-brand (see GasListing.brand);
+    // accessory-type products (grillKit/burner/regulator/mekoCooker)
+    // never need this step at all.
+    final isBrandAwareType = _selectedType == GasProductType.refill ||
+        _selectedType == GasProductType.fullKit;
+    final brandsAvailable = <String>{};
+    if (isBrandAwareType && _selectedSize != null) {
       for (final v in vendors) {
         for (final l in v.listings) {
           if (l.available &&
               l.productType == _selectedType &&
-              l.size == _selectedSize) {
+              l.size == _selectedSize &&
+              l.brand.isNotEmpty) {
+            brandsAvailable.add(l.brand);
+          }
+        }
+      }
+    }
+    final brands = brandsAvailable.toList()..sort();
+    final needsBrandStep = brands.isNotEmpty;
+
+    // Vendor offers for type + size (+ brand, when applicable),
+    // cheapest first.
+    final offers = <(VendorModel, GasListing)>[];
+    if (_selectedType != null &&
+        _selectedSize != null &&
+        (!needsBrandStep || _selectedBrand != null)) {
+      for (final v in vendors) {
+        for (final l in v.listings) {
+          if (l.available &&
+              l.productType == _selectedType &&
+              l.size == _selectedSize &&
+              (!needsBrandStep || l.brand == _selectedBrand)) {
             offers.add((v, l));
           }
         }
@@ -383,10 +426,12 @@ class _OrderScreenState extends State<OrderScreen> {
     if (!creditUsable && _method == PaymentMethod.credit) {
       _method = PaymentMethod.cash;
     }
-    // Section numbers shift when the payment chooser is hidden.
+    // Section numbers shift when the payment chooser is hidden, and
+    // shift again when the brand step is shown (refill/fullKit only).
     final n2 = creditUsable ? 2 : 1;
     final n3 = creditUsable ? 3 : 2;
     final n4 = creditUsable ? 4 : 3;
+    final vendorSectionNumber = needsBrandStep ? n4 + 1 : n4;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -504,12 +549,26 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ],
 
+          // BRAND — only for refill/fullKit, only once size is chosen
+          if (needsBrandStep && _selectedSize != null) ...[
+            const SizedBox(height: 20),
+            _sectionTitle('$n4. Choose brand'),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: brands.map((b) => _brandChip(b)).toList(),
+            ),
+          ],
+
           // VENDOR
-          if (_selectedType != null && _selectedSize != null) ...[
+          if (_selectedType != null &&
+              _selectedSize != null &&
+              (!needsBrandStep || _selectedBrand != null)) ...[
             const SizedBox(height: 20),
             Row(
               children: [
-                _sectionTitle('$n4. Choose vendor'),
+                _sectionTitle('$vendorSectionNumber. Choose vendor'),
                 const Spacer(),
                 Text('Cheapest first',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -716,6 +775,33 @@ class _OrderScreenState extends State<OrderScreen> {
               size: 22,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _brandChip(String brand) {
+    final isSelected = _selectedBrand == brand;
+    return GestureDetector(
+      onTap: () => _selectBrand(brand),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.orange : AppColors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? AppColors.orange : AppColors.gray200,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          brand,
+          style: TextStyle(
+            color: isSelected ? AppColors.white : AppColors.navy,
+            fontWeight: FontWeight.w700,
+            fontSize: 14,
+          ),
         ),
       ),
     );
@@ -1237,6 +1323,8 @@ class _OrderScreenState extends State<OrderScreen> {
                         _shortTypeLabel(_selectedListing?.productType ??
                             GasProductType.refill)),
                     _summaryRow('Gas size', _selectedListing?.size ?? ''),
+                    if ((_selectedListing?.brand ?? '').isNotEmpty)
+                      _summaryRow('Brand', _selectedListing!.brand),
                     _summaryRow('Vendor', _selectedVendor?.businessName ?? ''),
                     _summaryRow('Price',
                         'KES ${_gasPrice.toStringAsFixed(0)}'),

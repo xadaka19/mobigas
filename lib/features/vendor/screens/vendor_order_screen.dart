@@ -372,7 +372,9 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               widget.order.listing.productType.isAccessoryOnly
                   ? 'Product'
                   : 'Gas',
-              '${widget.order.listing.size} · ${widget.order.listing.productType.label}'),
+              widget.order.listing.brand.isNotEmpty
+                  ? '${widget.order.listing.brand} · ${widget.order.listing.size} · ${widget.order.listing.productType.label}'
+                  : '${widget.order.listing.size} · ${widget.order.listing.productType.label}'),
           _divider(),
           _row(
               _isCash

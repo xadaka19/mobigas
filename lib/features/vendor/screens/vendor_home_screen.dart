@@ -184,6 +184,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           (t) => t.name == (data['gasProductType'] ?? 'refill'),
           orElse: () => GasProductType.refill,
         ),
+        brand: data['gasBrand'] ?? '',
       ),
       paymentMethod: PaymentMethod.values.firstWhere(
         (m) => m.name == (data['paymentMethod'] ?? 'credit'),

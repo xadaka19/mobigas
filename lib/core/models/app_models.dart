@@ -5,6 +5,7 @@ enum GasProductType {
   grillKit,         // 6kg Gas + Cylinder + Burner/Grill + Regulator + Pipe
   burner,           // Standalone burner — fits 3kg or 6kg cylinders
   regulator,        // Standalone regulator — fits 13kg cylinders
+  mekoCooker,       // Standalone meko + cooker set — no gas or cylinder
 }
 
 extension GasProductTypeExt on GasProductType {
@@ -20,6 +21,8 @@ extension GasProductTypeExt on GasProductType {
         return 'Burner';
       case GasProductType.regulator:
         return 'Regulator';
+      case GasProductType.mekoCooker:
+        return 'Meko + Cooker';
     }
   }
 
@@ -35,6 +38,8 @@ extension GasProductTypeExt on GasProductType {
         return 'Standalone gas burner — no gas or cylinder included';
       case GasProductType.regulator:
         return 'Standalone gas regulator — no gas or cylinder included';
+      case GasProductType.mekoCooker:
+        return 'Meko stove + cooker set — no gas or cylinder included';
     }
   }
 
@@ -57,7 +62,9 @@ extension GasProductTypeExt on GasProductType {
   /// skip "have your empty cylinder ready" / cylinder-exchange copy
   /// that only makes sense for gas-containing orders.
   bool get isAccessoryOnly =>
-      this == GasProductType.burner || this == GasProductType.regulator;
+      this == GasProductType.burner ||
+      this == GasProductType.regulator ||
+      this == GasProductType.mekoCooker;
 }
 
 // How the customer pays for an order
@@ -177,6 +184,13 @@ class GasListing {
   final double price;
   final bool available;
   final GasProductType productType;
+  /// Brand this listing is priced for — only meaningful for refill
+  /// and fullKit, since different brands genuinely cost different
+  /// amounts at the same size (e.g. Total 6kg costs more than a
+  /// budget brand's 6kg). Empty for accessory-type products
+  /// (grillKit/burner/regulator/mekoCooker) which aren't sold "by
+  /// brand" the same way.
+  final String brand;
 
   const GasListing({
     required this.size,
@@ -184,6 +198,7 @@ class GasListing {
     required this.price,
     required this.available,
     this.productType = GasProductType.refill,
+    this.brand = '',
   });
 
   // Bank interest (8%) — bank charges customer (credit orders only)

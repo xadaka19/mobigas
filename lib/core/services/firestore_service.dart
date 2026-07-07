@@ -190,6 +190,7 @@ class FirestoreService {
                   (t) => t.name == (l['productType'] ?? 'refill'),
                   orElse: () => GasProductType.refill,
                 ),
+                brand: l['brand'] ?? '',
               ))
           .toList(),
       rating: (data['rating'] ?? 0.0).toDouble(),
@@ -234,6 +235,7 @@ class FirestoreService {
       'gasKg': order.listing.kg,
       'gasPrice': order.listing.price,
       'gasProductType': order.listing.productType.name,
+      'gasBrand': order.listing.brand,
       'paymentMethod': order.paymentMethod.name,
       'finderFee': order.finderFee,
       'finderFeeAccrued': false,
@@ -393,6 +395,7 @@ class FirestoreService {
           (t) => t.name == (data['gasProductType'] ?? 'refill'),
           orElse: () => GasProductType.refill,
         ),
+        brand: data['gasBrand'] ?? '',
       ),
       paymentMethod: PaymentMethod.values.firstWhere(
         (m) => m.name == (data['paymentMethod'] ?? 'credit'),

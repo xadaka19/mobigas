@@ -17,20 +17,41 @@ class OrderProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
+  int _watchRetryAttempt = 0;
+
   void watchOrders(String customerId) {
     _customerId = customerId;
+    _watchRetryAttempt = 0;
+    _subscribeOrders(customerId);
+  }
+
+  void _subscribeOrders(String customerId) {
     // Cancel any previous subscription so we never stack listeners,
     // and always attach onError — an unhandled stream error kills the
     // stream silently and the list stops updating forever.
     _ordersSub?.cancel();
     _ordersSub =
         FirestoreService.watchCustomerOrders(customerId).listen((orders) {
+      _watchRetryAttempt = 0; // a successful snapshot resets backoff
       _orders
         ..clear()
         ..addAll(orders);
       notifyListeners();
     }, onError: (e) {
       debugPrint('Orders stream error: $e');
+      // BUG FIX: previously this just logged and gave up — on a
+      // fresh install (no local Firestore cache yet), the very first
+      // listen attempt is more failure-prone than normal, and a
+      // single transient error meant orders simply never appeared
+      // again until the customer manually pulled to refresh. Retry
+      // with backoff instead, up to 5 times, so it recovers on its
+      // own.
+      if (_watchRetryAttempt < 5) {
+        _watchRetryAttempt++;
+        Future.delayed(Duration(milliseconds: 800 * _watchRetryAttempt), () {
+          if (_customerId == customerId) _subscribeOrders(customerId);
+        });
+      }
     });
   }
 
@@ -181,6 +202,8 @@ class OrderProvider extends ChangeNotifier {
         return 'burner';
       case GasProductType.regulator:
         return 'regulator';
+      case GasProductType.mekoCooker:
+        return 'meko + cooker';
     }
   }
 

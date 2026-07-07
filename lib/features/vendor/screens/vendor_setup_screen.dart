@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geocoding/geocoding.dart';
@@ -84,31 +85,43 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late TextEditingController _paybillController;
   late TextEditingController _paybillAccountController;
 
-  // Step 2 - Location
-
-  // Step 3 - Gas products & prices
-  // Refill prices
-  final Map<String, TextEditingController> _priceControllers = {
-    '3kg': TextEditingController(),
-    '6kg': TextEditingController(),
-    '13kg': TextEditingController(),
-  };
-  final Map<String, bool> _sizeAvailable = {
-    '3kg': true,
-    '6kg': true,
-    '13kg': false,
-  };
+  // Step 3 - Gas products & prices.
+  // Refill and Full Kit prices are BRAND-scoped — different brands
+  // genuinely cost different amounts at the same size (Total 6kg vs
+  // a budget brand's 6kg). Keyed by composite '$brand|$size', created
+  // lazily as the vendor selects brands and switches between them —
+  // see _refillController/_fullKitController helpers below.
+  final Map<String, TextEditingController> _priceControllers = {};
+  final Map<String, bool> _sizeAvailable = {};
   // Full kit prices (gas + new cylinder)
-  final Map<String, TextEditingController> _fullKitPriceControllers = {
-    '3kg': TextEditingController(),
-    '6kg': TextEditingController(),
-    '13kg': TextEditingController(),
-  };
-  final Map<String, bool> _fullKitAvailable = {
-    '3kg': false,
-    '6kg': false,
-    '13kg': false,
-  };
+  final Map<String, TextEditingController> _fullKitPriceControllers = {};
+  final Map<String, bool> _fullKitAvailable = {};
+  /// Which brand's prices are currently shown/edited in the Refill
+  /// and Full Kit sections. Defaults to the first selected brand;
+  /// the chip selector to change this only appears once 2+ brands
+  /// are selected — a single-brand vendor never sees it at all.
+  String _activePricingBrand = '';
+
+  static const List<String> _refillFullKitSizes = [
+    '3kg', '6kg', '13kg', '22.5kg', '50kg',
+  ];
+
+  TextEditingController _refillController(String brand, String size) {
+    return _priceControllers.putIfAbsent(
+        '$brand|$size', () => TextEditingController());
+  }
+
+  bool _refillIsAvailable(String brand, String size) =>
+      _sizeAvailable['$brand|$size'] ?? false;
+
+  TextEditingController _fullKitController(String brand, String size) {
+    return _fullKitPriceControllers.putIfAbsent(
+        '$brand|$size', () => TextEditingController());
+  }
+
+  bool _fullKitIsAvailable(String brand, String size) =>
+      _fullKitAvailable['$brand|$size'] ?? false;
+
   // Grill kit (6kg only: gas + cylinder + burner + grill)
   final TextEditingController _grillKitPriceController = TextEditingController();
   bool _grillKitAvailable = false;
@@ -124,6 +137,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // Regulator — fits 13kg cylinders only, no gas included
   final TextEditingController _regulatorPriceController = TextEditingController();
   bool _regulatorAvailable = false;
+  // Meko + cooker set — flat product, not tied to a cylinder size
+  final TextEditingController _mekoCookerPriceController = TextEditingController();
+  bool _mekoCookerAvailable = false;
 
   // Step 2 - Location (Google Places, or GPS auto-detect)
   String _selectedAddress = '';
@@ -192,16 +208,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       final productType = l['productType'] as String? ?? 'refill';
       final price = (l['price'] ?? 0).toString();
       final available = l['available'] as bool? ?? false;
+      final brand = (l['brand'] as String? ?? '').trim();
 
       if (size == null) continue;
 
-      if (productType == 'refill' && _priceControllers.containsKey(size)) {
-        _priceControllers[size]!.text = price;
-        _sizeAvailable[size] = available;
-      } else if (productType == 'fullKit' &&
-          _fullKitPriceControllers.containsKey(size)) {
-        _fullKitPriceControllers[size]!.text = price;
-        _fullKitAvailable[size] = available;
+      if (productType == 'refill') {
+        _refillController(brand, size).text = price;
+        _sizeAvailable['$brand|$size'] = available;
+      } else if (productType == 'fullKit') {
+        _fullKitController(brand, size).text = price;
+        _fullKitAvailable['$brand|$size'] = available;
       } else if (productType == 'grillKit') {
         _grillKitPriceController.text = price;
         _grillKitAvailable = available;
@@ -212,6 +228,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       } else if (productType == 'regulator') {
         _regulatorPriceController.text = price;
         _regulatorAvailable = available;
+      } else if (productType == 'mekoCooker') {
+        _mekoCookerPriceController.text = price;
+        _mekoCookerAvailable = available;
       }
     }
 
@@ -237,6 +256,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         _selectedBrands.add(brand);
       }
     }
+    if (_selectedBrands.isNotEmpty) {
+      _activePricingBrand = _selectedBrands.first;
+    }
   }
 
   @override
@@ -254,6 +276,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _grillKitPriceController.dispose();
     for (final c in _burnerPriceControllers.values) { c.dispose(); }
     _regulatorPriceController.dispose();
+    _mekoCookerPriceController.dispose();
     _customBrandController.dispose();
     _parentVendorNameController.dispose();
     _parentEpraNumberController.dispose();
@@ -285,8 +308,26 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       _priceControllers.entries
           .any((e) => _sizeAvailable[e.key] == true && e.value.text.isNotEmpty);
 
+  /// Parses the numeric kg value out of a size string like "3kg",
+  /// "13kg", or "22.5kg" — replaces a hardcoded 3-way ternary that
+  /// silently mislabeled anything beyond 3/6/13kg as 13kg. Used only
+  /// for sort ordering / display, so rounding a fractional size
+  /// (22.5 -> 23) is fine — the actual size STRING shown to
+  /// customers and matched everywhere else stays exact.
+  int _kgFromSize(String size) {
+    final match = RegExp(r'[\d.]+').firstMatch(size);
+    if (match == null) return 0;
+    return (double.tryParse(match.group(0)!) ?? 0).round();
+  }
+
   Future<void> _save() async {
     setState(() => _isSaving = true);
+
+    if (_selectedLat == 0.0 && _selectedLng == 0.0) {
+      setState(() => _isSaving = false);
+      _showFocusedError('Please set your business location first');
+      return;
+    }
 
     try {
       final isNewVendor = widget.existingData == null;
@@ -330,25 +371,40 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       }
 
       final listings = <Map<String, dynamic>>[];
-      // Refills
+      // Refills — key is composite 'brand|size'. Skip entries that
+      // were only lazily created (e.g. a brand tab the vendor
+      // glanced at but never priced) — empty text AND never toggled
+      // available means nothing was actually entered.
       for (final e in _priceControllers.entries) {
+        final parts = e.key.split('|');
+        if (parts.length != 2) continue;
+        final brand = parts[0];
+        final size = parts[1];
+        final available = _sizeAvailable[e.key] ?? false;
+        if (!available && e.value.text.trim().isEmpty) continue;
         listings.add({
-          'size': e.key,
-          'kg': e.key == '3kg' ? 3 : e.key == '6kg' ? 6 : 13,
+          'size': size,
+          'kg': _kgFromSize(size),
           'price': double.tryParse(e.value.text) ?? 0.0,
-          'available': _sizeAvailable[e.key] ?? false,
+          'available': available,
           'productType': 'refill',
+          'brand': brand,
         });
       }
-      // Full kits
+      // Full kits — same composite-key pattern.
       for (final e in _fullKitPriceControllers.entries) {
+        final parts = e.key.split('|');
+        if (parts.length != 2) continue;
+        final brand = parts[0];
+        final size = parts[1];
         if (_fullKitAvailable[e.key] == true) {
           listings.add({
-            'size': e.key,
-            'kg': e.key == '3kg' ? 3 : e.key == '6kg' ? 6 : 13,
+            'size': size,
+            'kg': _kgFromSize(size),
             'price': double.tryParse(e.value.text) ?? 0.0,
             'available': true,
             'productType': 'fullKit',
+            'brand': brand,
           });
         }
       }
@@ -384,6 +440,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           'productType': 'regulator',
         });
       }
+      // Meko + Cooker — flat product, not tied to a cylinder size
+      if (_mekoCookerAvailable) {
+        listings.add({
+          'size': 'Standard',
+          'kg': 0,
+          'price': double.tryParse(_mekoCookerPriceController.text) ?? 0.0,
+          'available': true,
+          'productType': 'mekoCooker',
+        });
+      }
 
       await FirebaseService.vendors.doc(_vendorId).set({
         'businessName': _businessNameController.text.trim(),
@@ -402,6 +468,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'address': _selectedAddress,
         'latitude': _selectedLat,
         'longitude': _selectedLng,
+        // Geohash + geopoint for radius queries (geoflutterfire_plus).
+        // Written on every save so an edited location stays queryable.
+        'geo': GeoFirePoint(GeoPoint(_selectedLat, _selectedLng)).data,
         'brands': _selectedBrands,
         'customBrands': _selectedBrands
             .where((b) => !KenyanGasBrands.all.contains(b))
@@ -987,7 +1056,6 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     if (mounted) setState(() => _isDetectingLocation = false);
   }
 
-
   Widget _buildStep2() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1007,8 +1075,15 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               onTap: () => setState(() {
                 if (selected) {
                   _selectedBrands.remove(brand);
+                  if (_activePricingBrand == brand) {
+                    _activePricingBrand =
+                        _selectedBrands.isNotEmpty ? _selectedBrands.first : '';
+                  }
                 } else {
                   _selectedBrands.add(brand);
+                  if (_activePricingBrand.isEmpty) {
+                    _activePricingBrand = brand;
+                  }
                 }
               }),
               child: AnimatedContainer(
@@ -1082,6 +1157,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                     if (!_selectedBrands.contains(brand)) {
                       _selectedBrands.add(brand);
                     }
+                    if (_activePricingBrand.isEmpty) {
+                      _activePricingBrand = brand;
+                    }
                     _customBrandController.clear();
                   });
                 }
@@ -1096,172 +1174,103 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ],
         ),
         const SizedBox(height: 24),
-        _sectionHeader('Gas Refill (Exchange empty cylinder)'),
-        const SizedBox(height: 4),
-        Text('Customer exchanges their empty cylinder for a filled one',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400, fontSize: 11)),
-        const SizedBox(height: 10),
-        ..._priceControllers.entries.map((e) {
-          final size = e.key;
-          final controller = e.value;
-          final available = _sizeAvailable[size] ?? false;
-
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
+        if (_selectedBrands.isEmpty)
+          Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppColors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: available
-                    ? AppColors.orange.withValues(alpha: 0.3)
-                    : AppColors.white.withValues(alpha: 0.1),
-              ),
+              border: Border.all(color: AppColors.white.withValues(alpha: 0.15)),
             ),
             child: Row(
               children: [
-                // Available toggle
-                GestureDetector(
-                  onTap: () => setState(
-                      () => _sizeAvailable[size] = !available),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: available
-                          ? AppColors.orange
-                          : AppColors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: available
-                            ? AppColors.orange
-                            : AppColors.white.withValues(alpha: 0.2),
-                      ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        size,
-                        style: TextStyle(
-                          color: available
-                              ? AppColors.white
-                              : AppColors.gray600,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 14),
+                const Icon(Icons.info_outline_rounded,
+                    color: AppColors.orange, size: 18),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        size == '3kg'
-                            ? '3kg cylinder'
-                            : size == '6kg'
-                                ? '6kg cylinder'
-                                : '13kg cylinder',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              color: available
-                                  ? AppColors.white
-                                  : AppColors.gray600,
-                              fontSize: 14,
-                            ),
-                      ),
-                      Text(
-                        available ? 'Available' : 'Not in stock',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color: available
-                                  ? AppColors.success
-                                  : AppColors.gray600,
-                              fontSize: 11,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Price input
-                SizedBox(
-                  width: 110,
-                  child: TextFormField(
-                    controller: controller,
-                    enabled: available,
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d+\.?\d{0,2}')),
-                    ],
-                    style: TextStyle(
-                      color: available
-                          ? AppColors.white
-                          : AppColors.gray600,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    decoration: InputDecoration(
-                      prefixText: 'KES ',
-                      prefixStyle: TextStyle(
-                        color: available
-                            ? AppColors.orange
-                            : AppColors.gray600,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      hintText: '0',
-                      hintStyle:
-                          const TextStyle(color: AppColors.gray600),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 10),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(
-                            color:
-                                AppColors.white.withValues(alpha: 0.2)),
-                      ),
-                      disabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(
-                            color:
-                                AppColors.white.withValues(alpha: 0.05)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide:
-                            const BorderSide(color: AppColors.orange),
-                      ),
-                      filled: true,
-                      fillColor: AppColors.white.withValues(alpha: 0.05),
-                    ),
+                  child: Text(
+                    'Select at least one brand above to set refill and full kit prices.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.gray400, fontSize: 12, height: 1.4),
                   ),
                 ),
               ],
             ),
-          );
-        }),
-        const SizedBox(height: 24),
-        // Full Kit Section
-        _sectionHeader('Full Cylinder Kit (Gas + New Cylinder)'),
-        const SizedBox(height: 4),
-        Text('Customer gets a brand new cylinder — no empty needed',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400, fontSize: 11)),
-        const SizedBox(height: 10),
-        ..._fullKitPriceControllers.entries.map((e) =>
-            _productRow(e.key, e.value,
-                available: _fullKitAvailable[e.key] ?? false,
-                onToggle: (v) =>
-                    setState(() => _fullKitAvailable[e.key] = v))),
+          )
+        else ...[
+          // Different brands genuinely cost different amounts at the
+          // same size (e.g. Total 6kg vs a budget brand's 6kg) — this
+          // only appears once 2+ brands are selected. A single-brand
+          // vendor never sees it; their one brand is used silently.
+          if (_selectedBrands.length > 1) ...[
+            Text('Setting refill & full kit prices for:',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400, fontSize: 12)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _selectedBrands.map((brand) {
+                final active = _activePricingBrand == brand;
+                return GestureDetector(
+                  onTap: () => setState(() => _activePricingBrand = brand),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? AppColors.orange
+                          : AppColors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: active
+                            ? AppColors.orange
+                            : AppColors.white.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Text(brand,
+                        style: TextStyle(
+                          color: active ? AppColors.white : AppColors.gray400,
+                          fontWeight:
+                              active ? FontWeight.w700 : FontWeight.w400,
+                          fontSize: 13,
+                        )),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+          ],
+          _sectionHeader('Gas Refill (Exchange empty cylinder) — $_activePricingBrand'),
+          const SizedBox(height: 4),
+          Text('Customer exchanges their empty cylinder for a filled one',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400, fontSize: 11)),
+          const SizedBox(height: 10),
+          ..._refillFullKitSizes.map((size) => _productRow(
+                size,
+                _refillController(_activePricingBrand, size),
+                available: _refillIsAvailable(_activePricingBrand, size),
+                onToggle: (v) => setState(() =>
+                    _sizeAvailable['$_activePricingBrand|$size'] = v),
+                label: '$size cylinder',
+              )),
+          const SizedBox(height: 24),
+          _sectionHeader('Full Cylinder Kit (Gas + New Cylinder) — $_activePricingBrand'),
+          const SizedBox(height: 4),
+          Text('Customer gets a brand new cylinder — no empty needed',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400, fontSize: 11)),
+          const SizedBox(height: 10),
+          ..._refillFullKitSizes.map((size) => _productRow(
+                size,
+                _fullKitController(_activePricingBrand, size),
+                available: _fullKitIsAvailable(_activePricingBrand, size),
+                onToggle: (v) => setState(() =>
+                    _fullKitAvailable['$_activePricingBrand|$size'] = v),
+              )),
+        ],
         const SizedBox(height: 24),
         // Grill Kit Section
         _sectionHeader('Grill Kit — 6kg only'),
@@ -1299,6 +1308,17 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             available: _regulatorAvailable,
             onToggle: (v) => setState(() => _regulatorAvailable = v),
             label: 'Regulator (13kg)'),
+        const SizedBox(height: 24),
+        _sectionHeader('Meko + Cooker'),
+        const SizedBox(height: 4),
+        Text('Meko stove + cooker set sold on its own — no gas or cylinder included',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.gray400, fontSize: 11)),
+        const SizedBox(height: 10),
+        _productRow('Standard', _mekoCookerPriceController,
+            available: _mekoCookerAvailable,
+            onToggle: (v) => setState(() => _mekoCookerAvailable = v),
+            label: 'Meko + Cooker'),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
@@ -2275,5 +2295,5 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ),
       ],
     );
-  }
+  } 
 }

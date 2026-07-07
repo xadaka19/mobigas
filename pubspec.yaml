@@ -49,6 +49,7 @@ dependencies:
   flutter_contacts: ^2.2.2
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4
+  geoflutterfire_plus: ^0.0.32
   cloud_firestore: ^6.6.0
   google_sign_in: ^7.2.0
   firebase_messaging: ^16.4.1
