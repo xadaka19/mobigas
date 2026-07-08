@@ -286,10 +286,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
 
   // ── HOME TAB ──────────────────────────────────────────────────────
   Widget _buildHomeTab() {
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          _buildVendorHeader(),
+    return RefreshIndicator(
+      color: AppColors.orange,
+      backgroundColor: AppColors.white,
+      onRefresh: _loadVendorData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            _buildVendorHeader(),
           // Platform fees (cash-order finder fees) banner
           const VendorFeesBanner(),
           // Setup incomplete banner
@@ -490,6 +495,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -1075,15 +1081,20 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 if (isPending) ...[
                   Row(
                     children: [
-                      Expanded(
+                     Expanded(
                         child: OutlinedButton(
                           onPressed: () => _declineOrder(order),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.error,
                             side: const BorderSide(
                                 color: AppColors.error),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 12),
                           ),
-                          child: const Text('Decline'),
+                          child: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('Decline', maxLines: 1),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
