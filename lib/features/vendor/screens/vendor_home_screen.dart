@@ -10,7 +10,6 @@ import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
-import 'package:mobigas/features/vendor/screens/stock_loan_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_statistics_screen.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
@@ -189,8 +188,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         brand: data['gasBrand'] ?? '',
       ),
       paymentMethod: PaymentMethod.values.firstWhere(
-        (m) => m.name == (data['paymentMethod'] ?? 'credit'),
-        orElse: () => PaymentMethod.credit,
+        (m) => m.name == (data['paymentMethod'] ?? 'cash'),
+        orElse: () => PaymentMethod.cash,
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
       cancelledBy: data['cancelledBy'],
@@ -225,8 +224,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   }
 
   Future<void> _declineOrder(OrderModel order) async {
-    // Goes through the service so a declined CREDIT order releases
-    // the customer's reserved credit automatically.
+    // Goes through the service so declines are handled consistently
+    // (status update + customer notification).
     await FirestoreService.updateOrderStatus(
         order.orderId, OrderStatus.cancelled,
         cancelledBy: 'vendor');
@@ -695,9 +694,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
               o.createdAt.month == now.month &&
               o.createdAt.year == now.year;
         }).toList();
-        // Vendor revenue = gas price on every order:
-        // credit orders are paid by the bank, cash orders by the
-        // customer directly — both count as vendor earnings.
+        // Vendor revenue = gas price on every completed order, paid
+        // directly by the customer on delivery.
         final todayEarnings =
             todayOrders.fold(0.0, (acc, o) => acc + o.listing.price);
         final totalEarnings =
@@ -828,7 +826,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     final isAccepted = order.status == OrderStatus.accepted;
     final isOutForDelivery =
         order.status == OrderStatus.outForDelivery;
-    final isCash = order.paymentMethod == PaymentMethod.cash;
 
     Color statusColor = isPending
         ? AppColors.warning
@@ -886,17 +883,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isCash
-                        ? AppColors.navy
-                        : AppColors.success.withValues(alpha: 0.15),
+                    color: AppColors.navy,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    isCash ? '💵 CASH on delivery' : 'Bank credit',
+                    '💵 CASH on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: isCash
-                              ? AppColors.white
-                              : AppColors.success,
+                          color: AppColors.white,
                           fontSize: 9,
                           fontWeight: FontWeight.w700,
                         ),
@@ -1053,29 +1046,27 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                     ],
                   ),
                 ),
-                if (isCash) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.navy.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      'Collect KES ${order.listing.price.toStringAsFixed(0)} from the customer on delivery (cash or M-Pesa to you).',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                            color: AppColors.navy,
-                            fontSize: 11,
-                            height: 1.4,
-                          ),
-                    ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.navy.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                ],
+                  child: Text(
+                    'Collect KES ${order.listing.price.toStringAsFixed(0)} from the customer on delivery (cash or M-Pesa to you).',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(
+                          color: AppColors.navy,
+                          fontSize: 11,
+                          height: 1.4,
+                        ),
+                  ),
+                ),
                 const SizedBox(height: 16),
                 // Action buttons
                 if (isPending) ...[
@@ -1180,7 +1171,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   Widget _completedOrderTile(OrderModel order) {
     final dateStr =
         '${order.createdAt.day}/${order.createdAt.month}/${order.createdAt.year}';
-    final isCash = order.paymentMethod == PaymentMethod.cash;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -1212,7 +1202,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         .titleMedium
                         ?.copyWith(fontSize: 14, color: AppColors.navy)),
                 Text(
-                    '${order.listing.size} · ${isCash ? 'Cash' : 'Credit'} · $dateStr',
+                    '${order.listing.size} · Cash · $dateStr',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -1289,11 +1279,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Stock Boost Loan
-                    if (FeatureFlags.stockBoostLoan)
-                      _buildStockBoostCard(orders.length, orders),
-                    if (FeatureFlags.stockBoostLoan)
-                      const SizedBox(height: 20),
                     Text('${orders.length} deliveries completed',
                         style: Theme.of(context)
                             .textTheme
@@ -1309,11 +1294,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       ),
                       child: Column(
                         children: [
-                          _earningsRow('Credit orders',
-                              'Bank pays your M-Pesa on PIN confirmation'),
-                          _earningsRow('Cash orders',
-                              'Customer pays you directly on delivery'),
-                                              _earningsRow('Your M-Pesa',
+                          _earningsRow('How you get paid',
+                              'Customer pays you directly on delivery — cash or M-Pesa'),
+                          _earningsRow('Your M-Pesa',
                               _vendorData?['phone'] ?? ''),
                         ],
                       ),
@@ -1384,160 +1367,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _buildStockBoostCard(int totalDeliveries, List<OrderModel> orders) {
-    final createdAt = _vendorData?['createdAt'];
-    int monthsOnPlatform = 0;
-    if (createdAt != null) {
-      try {
-        final joined = (createdAt as dynamic).toDate() as DateTime;
-        monthsOnPlatform = DateTime.now().difference(joined).inDays ~/ 30;
-      } catch (_) {}
-    }
-    final isEligible = monthsOnPlatform >= StockLoanRequirements.minMonthsOnPlatform &&
-        totalDeliveries >= StockLoanRequirements.minDeliveries;
-    final monthlyRevenue = orders.isEmpty || monthsOnPlatform == 0
-        ? 0.0
-        : orders.fold(0.0, (acc, o) => acc + o.listing.price) /
-            monthsOnPlatform;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isEligible ? null : AppColors.navy,
-        gradient: isEligible ? LinearGradient(
-          colors: [AppColors.orange, AppColors.orangeDeep],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ) : null,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isEligible ? AppColors.orange : AppColors.orange.withValues(alpha: 0.4),
-          width: 1.5,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            const Icon(Icons.rocket_launch_rounded,
-                color: AppColors.white, size: 22),
-            const SizedBox(width: 10),
-            Text('Stock Boost Loan',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16)),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppColors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(isEligible ? 'Eligible!' : 'Not yet eligible',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600)),
-            ),
-          ]),
-          const SizedBox(height: 8),
-          Text(
-            isEligible
-                ? 'You qualify! Get funding to buy more gas stock and grow your business.'
-                : 'Deliver consistently for 3 months to unlock a stock loan. '
-                  'Use the app actively — every delivery brings you closer!',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.white,
-                  height: 1.5,
-                  fontSize: 13)),
-          if (!isEligible) ...[
-            const SizedBox(height: 12),
-            if (monthsOnPlatform < StockLoanRequirements.minMonthsOnPlatform)
-              _eligibilityBar(
-                  'Months on platform',
-                  monthsOnPlatform,
-                  StockLoanRequirements.minMonthsOnPlatform,
-                  '$monthsOnPlatform/${StockLoanRequirements.minMonthsOnPlatform} months'),
-            const SizedBox(height: 6),
-            if (totalDeliveries < StockLoanRequirements.minDeliveries)
-              _eligibilityBar(
-                  'Total deliveries',
-                  totalDeliveries,
-                  StockLoanRequirements.minDeliveries,
-                  '$totalDeliveries/${StockLoanRequirements.minDeliveries} deliveries'),
-          ],
-          const SizedBox(height: 12),
-          ElevatedButton(
-            onPressed: isEligible
-                ? () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => StockLoanScreen(
-                          monthsOnPlatform: monthsOnPlatform,
-                          totalDeliveries: totalDeliveries,
-                          averageMonthlyRevenue: monthlyRevenue,
-                          vendorData: _vendorData ?? {},
-                        ),
-                      ),
-                    )
-                : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isEligible
-                  ? AppColors.white
-                  : AppColors.white.withValues(alpha: 0.15),
-              foregroundColor:
-                  isEligible ? AppColors.orange : AppColors.gray400,
-              minimumSize: const Size(double.infinity, 44),
-              elevation: 0,
-            ),
-            child: Text(
-              isEligible
-                  ? 'Apply for stock loan'
-                  : monthsOnPlatform == 0
-                      ? 'Start delivering to unlock'
-                      : 'Keep delivering — ${StockLoanRequirements.minMonthsOnPlatform - monthsOnPlatform} month${(StockLoanRequirements.minMonthsOnPlatform - monthsOnPlatform) == 1 ? '' : 's'} to go',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _eligibilityBar(String label, int current, int max, String text) {
-    final progress = (current / max).clamp(0.0, 1.0);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(children: [
-          Text(label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.white.withValues(alpha: 0.7),
-                    fontSize: 11)),
-          const Spacer(),
-          Text(text,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600)),
-        ]),
-        const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: progress,
-            backgroundColor: AppColors.white.withValues(alpha: 0.15),
-            valueColor:
-                const AlwaysStoppedAnimation<Color>(AppColors.orange),
-            minHeight: 6,
-          ),
-        ),
-      ],
     );
   }
 

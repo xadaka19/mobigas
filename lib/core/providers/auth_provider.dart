@@ -310,7 +310,7 @@ class AuthProvider extends ChangeNotifier {
     // Backend updates bank_applications collection
     // We listen for changes here
 
-    // TODO: real bank webhook integration
+    
     // For pilot: manual approval via admin dashboard
     await Future.delayed(const Duration(seconds: 2));
 

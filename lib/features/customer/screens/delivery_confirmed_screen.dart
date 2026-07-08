@@ -102,10 +102,6 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
   @override
   Widget build(BuildContext context) {
     final order = context.read<OrderProvider>().activeOrder;
-    final dueDate = DateTime.now().add(const Duration(days: 30));
-    final dueDateStr =
-        '${dueDate.day}/${dueDate.month}/${dueDate.year}';
-    final totalRepayment = order?.listing.customerRepayment ?? 0;
 
     return Scaffold(
       backgroundColor: AppColors.navy,
@@ -291,75 +287,10 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
                           ],
                         ),
                 ),
-                const SizedBox(height: 20),
-
-                // ── REPAYMENT REMINDER ────────────────────────────
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: AppColors.orange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: AppColors.orange.withValues(alpha: 0.3)),
-                  ),
-                  child: Column(
-                    children: [
-                      const Icon(
-                          Icons.account_balance_wallet_outlined,
-                          color: AppColors.orange,
-                          size: 28),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Repayment reminder',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              color: AppColors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        totalRepayment > 0
-                            ? 'KES ${totalRepayment.toStringAsFixed(0)} due by $dueDateStr'
-                            : 'Check repayments tab for due date',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyLarge
-                            ?.copyWith(
-                              color: AppColors.orange,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Pay anytime via M-Pesa within 30 days. No early payment penalty.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color: AppColors.gray400,
-                              height: 1.4,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
                 const SizedBox(height: 32),
                 ElevatedButton(
                   onPressed: () => context.go('/home'),
                   child: const Text('Back to home'),
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: () => context.go('/home'),
-                  child: Text(
-                    'View repayments',
-                    style: TextStyle(color: AppColors.gray400),
-                  ),
                 ),
                 const SizedBox(height: 20),
               ],

@@ -16,21 +16,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<_OnboardPage> _pages = [
     _OnboardPage(
       icon: Icons.local_fire_department_rounded,
-      title: 'Cook now, pay later',
+      title: 'Gas delivered in minutes',
       subtitle:
-          'Order 3kg, 6kg or 13kg cooking gas and get it delivered to your door — even when cash is tight.',
+          'Order 3kg, 6kg or 13kg cooking gas and get it delivered straight to your door by trusted vendors near you.',
     ),
     _OnboardPage(
-      icon: Icons.credit_score_rounded,
-      title: 'Cook now, pay later',
+      icon: Icons.storefront_rounded,
+      title: 'Compare prices, save money',
       subtitle:
-          'Our partner bank finances your gas. Order now and repay the bank within 30 days via M-Pesa.',
+          'See live prices from verified vendors in your area and always pick the best deal — pay cash or M-Pesa on delivery.',
     ),
     _OnboardPage(
       icon: Icons.verified_user_rounded,
       title: 'Safe & trusted delivery',
       subtitle:
-          'Every delivery is confirmed with a PIN you share with the vendor. Your vendor only gets paid after you confirm.',
+          'Every delivery is confirmed with a PIN. Only share it with the vendor after you receive your gas.',
     ),
   ];
 

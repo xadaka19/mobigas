@@ -172,7 +172,7 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Cook now, pay later',
+                  'Gas delivered in minutes',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: AppColors.gray400,
                       ),

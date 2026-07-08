@@ -7,7 +7,6 @@ import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
-import 'package:mobigas/features/customer/screens/repayments_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
@@ -84,7 +83,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     _buildHomeTab(customer, orders),
                     _buildOrdersTab(orders),
-                    const RepaymentsScreen(),
                     _buildProfileTab(customer, auth),
                   ],
                 ),
@@ -117,12 +115,8 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  _buildCreditCard(customer),
+                  _buildOrderNowCard(),
                   const SizedBox(height: 20),
-                  if (!customer.isBankApproved) ...[
-                    _buildApplyCreditCard(),
-                    const SizedBox(height: 20),
-                  ],
                   _buildVendorPreview(),
                   const SizedBox(height: 20),
                   _buildHowItWorks(),
@@ -228,242 +222,71 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          if (customer.isBankApproved)
-            Row(
-              children: [
-                _headerStat('Credit limit',
-                    'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'),
-                Container(
-                    width: 1,
-                    height: 36,
-                    color: AppColors.gray600,
-                    margin: const EdgeInsets.symmetric(horizontal: 20)),
-                _headerStat('Available',
-                    'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}',
-                    valueColor: AppColors.success),
-                Container(
-                    width: 1,
-                    height: 36,
-                    color: AppColors.gray600,
-                    margin: const EdgeInsets.symmetric(horizontal: 20)),
-                _headerStat('Used',
-                    'KES ${customer.bankCreditUsed.toStringAsFixed(0)}'),
-              ],
-            )
-          else
-            Text(
-              'No gas credit yet — order and pay cash on delivery, or apply for a credit limit below.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _headerStat(String label, String value, {Color? valueColor}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
+          const SizedBox(height: 16),
+          Text(
+            'Gas delivered to your door — compare prices from trusted vendors near you.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppColors.gray400,
-                  fontSize: 11,
-                )),
-        const SizedBox(height: 4),
-        Text(value,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: valueColor ?? AppColors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                )),
-      ],
-    );
-  }
-
-  Widget _buildCreditCard(CustomerModel customer) {
-    final usedPercent =
-        customer.bankApprovedLimit != null && customer.bankApprovedLimit! > 0
-            ? customer.bankCreditUsed / customer.bankApprovedLimit!
-            : 0.0;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AppColors.navy, Color(0xFF1E3A6E)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: customer.isBankApproved
-                      ? AppColors.success.withValues(alpha: 0.2)
-                      : AppColors.warning.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: customer.isBankApproved
-                            ? AppColors.success
-                            : AppColors.warning,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      customer.isBankApproved
-                          ? 'Credit active'
-                          : 'Pending approval',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: customer.isBankApproved
-                                ? AppColors.success
-                                : AppColors.warning,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              const Icon(Icons.local_fire_department_rounded,
-                  color: AppColors.orange, size: 28),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text('Available credit',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400,
-                    fontSize: 12,
-                  )),
-          const SizedBox(height: 4),
-          Text(
-            customer.isBankApproved
-                ? 'KES ${customer.bankCreditAvailable.toStringAsFixed(0)}'
-                : 'Awaiting bank approval',
-            style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                  color: AppColors.white,
-                  fontSize: customer.isBankApproved ? 36 : 20,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                  height: 1.4,
                 ),
           ),
-          if (!customer.isBankApproved) ...[
-            const SizedBox(height: 6),
-            Text(
-              'You can still order gas and pay cash on delivery.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400,
-                    fontSize: 11,
-                  ),
-            ),
-          ],
-          if (customer.isBankApproved) ...[
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: usedPercent,
-                backgroundColor: AppColors.white.withValues(alpha: 0.1),
-                valueColor:
-                    const AlwaysStoppedAnimation<Color>(AppColors.orange),
-                minHeight: 6,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Text(
-                  'KES ${customer.bankCreditUsed.toStringAsFixed(0)} used',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray400,
-                        fontSize: 11,
-                      ),
-                ),
-                const Spacer(),
-                if (customer.partnerBankName.isNotEmpty)
-                  Text(
-                    'via ${customer.partnerBankName}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.orange,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-              ],
-            ),
-          ],
         ],
       ),
     );
   }
 
-  Widget _buildApplyCreditCard() {
+  Widget _buildOrderNowCard() {
     return GestureDetector(
-      onTap: () => context.push('/credit-application'),
+      onTap: () => context.push('/order'),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: AppColors.navy,
-          borderRadius: BorderRadius.circular(16),
+          gradient: const LinearGradient(
+            colors: [AppColors.navy, Color(0xFF1E3A6E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
           children: [
             Container(
-              width: 44,
-              height: 44,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 color: AppColors.orange.withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.credit_score_rounded,
-                  color: AppColors.orange, size: 22),
+              child: const Icon(Icons.local_fire_department_rounded,
+                  color: AppColors.orange, size: 28),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Want gas on credit?',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
+                  Text('Order gas now',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: AppColors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          )),
                   const SizedBox(height: 2),
                   Text(
-                    'Apply for a credit limit — order now, repay in 30 days',
+                    'Refills, full kits & accessories — pay cash or M-Pesa on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.gray400,
                           fontSize: 11,
+                          height: 1.4,
                         ),
                   ),
                 ],
               ),
             ),
             const Icon(Icons.arrow_forward_ios_rounded,
-                color: AppColors.orange, size: 14),
+                color: AppColors.orange, size: 16),
           ],
         ),
       ),
@@ -479,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _HowStep(
           Icons.pin_outlined, 'PIN', 'Confirm delivery', AppColors.success),
       _HowStep(
-          Icons.payment_outlined, 'Pay', 'Cash or credit', AppColors.warning),
+          Icons.payment_outlined, 'Pay', 'Cash or M-Pesa', AppColors.warning),
     ];
 
     return Column(
@@ -824,7 +647,6 @@ class _HomeScreenState extends State<HomeScreen> {
         statusIcon = Icons.hourglass_top_rounded;
         statusLabel = 'Pending';
     }
-    final isCash = order.paymentMethod == PaymentMethod.cash;
     final canCancel = order.status == OrderStatus.pending;
     final canTrack = order.status == OrderStatus.pending ||
         order.status == OrderStatus.accepted ||
@@ -856,7 +678,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text('${order.listing.size} — ${order.vendorName}',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontSize: 14, color: AppColors.navy)),
-                Text('${order.orderId} · ${isCash ? 'Cash' : 'Credit'}',
+                Text('${order.orderId} · Pay on delivery',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -927,8 +749,7 @@ class _HomeScreenState extends State<HomeScreen> {
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Cancel this order?'),
         content: Text(
-          '${order.listing.size} from ${order.vendorName} — the vendor hasn\'t accepted it yet.'
-          '${order.paymentMethod == PaymentMethod.credit ? ' Your credit will be released back to you.' : ''}',
+          '${order.listing.size} from ${order.vendorName} — the vendor hasn\'t accepted it yet.',
         ),
         actions: [
           TextButton(
@@ -1130,28 +951,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         .textTheme
                         .bodyMedium
                         ?.copyWith(color: AppColors.gray400)),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: customer.isBankApproved
-                        ? AppColors.success.withValues(alpha: 0.2)
-                        : AppColors.warning.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    customer.isBankApproved
-                        ? 'Bank Approved ✓'
-                        : 'Pending bank approval',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: customer.isBankApproved
-                              ? AppColors.success
-                              : AppColors.warning,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -1166,16 +965,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     customer.nationalId),
                 _profileTile(Icons.location_on_outlined, 'Location',
                     _dedupeJoin(customer.estate, customer.county)),
-                _profileTile(Icons.people_outline_rounded, 'Guarantors',
-                    '${customer.guarantors.length} added'),
-                if (customer.partnerBankName.isNotEmpty)
-                  _profileTile(Icons.account_balance_outlined,
-                      'Partner bank', customer.partnerBankName),
-                if (customer.bankApprovedLimit != null)
-                  _profileTile(
-                      Icons.credit_score_rounded,
-                      'Credit limit',
-                      'KES ${customer.bankApprovedLimit!.toStringAsFixed(0)}'),
                 const SizedBox(height: 8),
                 _profileAction(Icons.lock_outline_rounded, 'Change password',
                     onTap: () => _showChangePassword(context)),
@@ -1191,8 +980,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         )),
-                _profileAction(Icons.people_outline_rounded, 'My guarantors',
-                    onTap: () => _showGuarantors(context, customer)),
                 _profileAction(Icons.help_outline_rounded, 'Help & support',
                     onTap: () => context.push('/support')),
                 _profileAction(Icons.info_outline_rounded, 'About MobiGas',
@@ -1303,8 +1090,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _NavItem(Icons.home_outlined, Icons.home_rounded, 'Home'),
       _NavItem(Icons.receipt_long_outlined, Icons.receipt_long_rounded,
           'Orders'),
-      _NavItem(Icons.account_balance_wallet_outlined,
-          Icons.account_balance_wallet_rounded, 'Repayments'),
       _NavItem(
           Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
     ];
@@ -1427,170 +1212,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showGuarantors(BuildContext context, CustomerModel customer) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text('My guarantors',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(color: AppColors.navy)),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.gray100,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text('Read only',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                              color: AppColors.gray600, fontSize: 11)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Guarantors cannot be changed after submission.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: AppColors.gray400),
-            ),
-            const SizedBox(height: 20),
-            customer.guarantors.isEmpty
-                ? Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppColors.gray100,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      children: [
-                        const Icon(Icons.people_outline_rounded,
-                            color: AppColors.gray400, size: 36),
-                        const SizedBox(height: 8),
-                        Text('No guarantors added yet',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(color: AppColors.gray600)),
-                        const SizedBox(height: 4),
-                        Text(
-                            'Apply for gas credit to add guarantors',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: AppColors.gray400)),
-                      ],
-                    ),
-                  )
-                : Column(
-                    children: customer.guarantors
-                        .asMap()
-                        .entries
-                        .map((e) => Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: AppColors.gray100,
-                                borderRadius: BorderRadius.circular(12),
-                                border:
-                                    Border.all(color: AppColors.gray200),
-                              ),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 22,
-                                    backgroundColor: AppColors.orange,
-                                    child: Text(
-                                      e.value.name.isNotEmpty
-                                          ? e.value.name[0].toUpperCase()
-                                          : '?',
-                                      style: const TextStyle(
-                                        color: AppColors.white,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          e.value.name,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium
-                                              ?.copyWith(
-                                                color: AppColors.navy,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          e.value.phone,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.copyWith(
-                                                  color: AppColors.gray600),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.successLight,
-                                      borderRadius:
-                                          BorderRadius.circular(10),
-                                    ),
-                                    child: Text(
-                                      'Guarantor ${e.key + 1}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: AppColors.success,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ))
-                        .toList(),
-                  ),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showNotifications(BuildContext context, String customerId) {
     showModalBottomSheet(
       context: context,
@@ -1656,7 +1277,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ?.copyWith(color: AppColors.gray600)),
                             const SizedBox(height: 8),
                             Text(
-                              'Order updates and payment reminders\nwill appear here',
+                              'Order and delivery updates\nwill appear here',
                               textAlign: TextAlign.center,
                               style: Theme.of(context)
                                   .textTheme
@@ -1873,7 +1494,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: AppColors.navy, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
-            Text('Cook now, pay later',
+            Text('Gas delivered in minutes',
                 style: Theme.of(context)
                     .textTheme
                     .bodyMedium
@@ -1893,7 +1514,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'MobiGas connects you with local gas vendors for fast delivery — pay cash on delivery, or partner with our banks to get cooking gas on credit and repay within 30 days via M-Pesa.',
+              'MobiGas connects you with trusted local gas vendors for fast delivery — compare prices, order in seconds, and pay cash or M-Pesa when your gas arrives.',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme

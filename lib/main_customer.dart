@@ -19,7 +19,7 @@ void main() async {
   FlavorConfig.initialize(
     flavor: FlavorType.customer,
     appName: 'MobiGas',
-    appTitle: 'MobiGas — Cook now, pay later',
+    appTitle: 'MobiGas — Gas delivered in minutes',
   );
   runApp(const MobiGasApp());
 }

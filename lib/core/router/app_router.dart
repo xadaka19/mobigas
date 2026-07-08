@@ -2,15 +2,12 @@ import 'package:go_router/go_router.dart';
 import 'package:mobigas/features/customer/screens/splash_screen.dart';
 import 'package:mobigas/features/customer/screens/onboarding_screen.dart';
 import 'package:mobigas/features/customer/screens/register_screen.dart';
-import 'package:mobigas/features/customer/screens/guarantors_screen.dart';
-import 'package:mobigas/features/customer/screens/crb_check_screen.dart';
 import 'package:mobigas/features/customer/screens/home_screen.dart';
 import 'package:mobigas/features/customer/screens/order_screen.dart';
 import 'package:mobigas/features/customer/screens/order_tracking_screen.dart';
 import 'package:mobigas/features/customer/screens/delivery_confirmed_screen.dart';
 import 'package:mobigas/features/customer/screens/login_screen.dart';
-import 'package:mobigas/features/customer/screens/credit_application_screen.dart';
-import 'package:mobigas/features/customer/screens/terms_screen.dart';
+import 'package:mobigas/core/screens/terms_screen.dart';
 import 'package:mobigas/features/customer/screens/edit_profile_screen.dart';
 import 'package:mobigas/features/customer/screens/support_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_support_screen.dart';
@@ -41,10 +38,6 @@ class AppRouter {
         builder: (context, state) => const OnboardingScreen(),
       ),
       GoRoute(
-        path: '/credit-application',
-        builder: (context, state) => const CreditApplicationScreen(),
-      ),
-      GoRoute(
         path: '/edit-profile',
         builder: (context, state) => const EditProfileScreen(),
       ),
@@ -54,11 +47,25 @@ class AppRouter {
       ),
       GoRoute(
         path: '/terms',
-        builder: (context, state) => const TermsScreen(),
+        builder: (context, state) => const TermsScreen(audience: TermsAudience.customer),
       ),
       GoRoute(
         path: '/privacy',
-        builder: (context, state) => const TermsScreen(isPrivacyPolicy: true),
+        builder: (context, state) => const TermsScreen(
+          audience: TermsAudience.customer,
+          isPrivacyPolicy: true,
+        ),
+      ),
+      GoRoute(
+        path: '/vendor-terms',
+        builder: (context, state) => const TermsScreen(audience: TermsAudience.vendor),
+      ),
+      GoRoute(
+        path: '/vendor-privacy',
+        builder: (context, state) => const TermsScreen(
+          audience: TermsAudience.vendor,
+          isPrivacyPolicy: true,
+        ),
       ),
       GoRoute(
         path: '/login',
@@ -71,14 +78,6 @@ class AppRouter {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
-      ),
-      GoRoute(
-        path: '/guarantors',
-        builder: (context, state) => const GuarantorsScreen(),
-      ),
-      GoRoute(
-        path: '/bank-approval',
-        builder: (context, state) => const CrbCheckScreen(),
       ),
       GoRoute(
         path: '/home',

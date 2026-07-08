@@ -55,12 +55,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _showError('Please enter a valid email address');
         return;
       }
-      if (_idController.text.trim().length < 7) {
-        _showError('Please enter a valid National ID number');
-        return;
-      }
-      if (_selfie == null) {
-        _showError('Please take a selfie for identity verification');
+      // National ID and selfie are optional in v1 — a customer can
+      // skip both and still create an account. If an ID is entered,
+      // it must be a plausible length.
+      final idText = _idController.text.trim();
+      if (idText.isNotEmpty && idText.length < 7) {
+        _showError('Please enter a valid National ID number, or leave it blank');
         return;
       }
     }
@@ -270,7 +270,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String _stepSubtitle() {
     switch (_currentStep) {
       case 0:
-        return 'Your ID is used for bank credit approval';
+        return 'Just a few details to set up your account';
       case 1:
         return 'Your location helps us find the nearest gas vendor';
       case 2:
@@ -331,7 +331,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 20),
-        _label('National ID number'),
+        _label('National ID number (optional)'),
         _input(
           controller: _idController,
           hint: 'e.g. 12345678',
@@ -343,13 +343,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ],
         ),
         const SizedBox(height: 20),
-        _label('Selfie photo'),
+        _label('Profile photo (optional)'),
         _buildSelfieCapture(),
         const SizedBox(height: 16),
         _infoCard(
           icon: Icons.info_outline_rounded,
           text:
-              'Your selfie is used for identity verification only. It is stored securely and never shared.',
+              'A profile photo and National ID are optional — you can skip them and add them later. If added, they are stored securely and never shared.',
         ),
       ],
     );
@@ -417,7 +417,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           const Icon(Icons.check_circle_rounded,
                               color: AppColors.white, size: 14),
                           const SizedBox(width: 4),
-                          Text('Selfie captured',
+                          Text('Photo added',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -455,7 +455,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Take a selfie',
+                        'Add a profile photo',
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -466,7 +466,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Front camera only · Used for identity verification',
+                        'Optional · Front camera · Tap to add or skip',
                         textAlign: TextAlign.center,
                         style: Theme.of(context)
                             .textTheme
@@ -547,7 +547,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _infoCard(
           icon: Icons.shield_outlined,
           text:
-              'After creating your account you can immediately explore the app. Apply for gas credit when you are ready to place your first order.',
+              'You\'re all set — create your account and start ordering gas right away.',
         ),
       ],
     );

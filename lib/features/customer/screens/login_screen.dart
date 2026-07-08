@@ -23,31 +23,13 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Determine if input is email or phone
-  bool get _isEmail => _identifierController.text.contains('@');
-
-  String get _loginIdentifier {
-    final input = _identifierController.text.trim();
-    if (_isEmail) return input;
-    // Phone — convert to email format used during registration
-    String phone = input.replaceAll(' ', '');
-    if (phone.startsWith('0')) {
-      phone = '254${phone.substring(1)}';
-    }
-    return '$phone@mobigas.app';
-  }
-
   Future<void> _login() async {
-    final input = _identifierController.text.trim();
-    if (input.isEmpty) {
-      _showError('Enter your email or phone number');
+    final email = _identifierController.text.trim();
+    if (email.isEmpty) {
+      _showError('Enter your email address');
       return;
     }
-    if (!_isEmail && input.length < 9) {
-      _showError('Enter a valid phone number');
-      return;
-    }
-    if (_isEmail && !input.contains('.')) {
+    if (!email.contains('@') || !email.contains('.')) {
       _showError('Enter a valid email address');
       return;
     }
@@ -57,7 +39,11 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final auth = context.read<AuthProvider>();
-    await auth.login(_loginIdentifier, _passwordController.text);
+    // Accounts are created with the customer's real email during
+    // registration, so login authenticates against that email
+    // directly. (The old phone→"$phone@mobigas.app" synthesis never
+    // matched a real account and always failed.)
+    await auth.login(email.toLowerCase(), _passwordController.text);
 
     if (auth.error != null) {
       _showError(auth.error!);
@@ -96,7 +82,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 8),
-                    _label('Email or phone number'),
+                    _label('Email address'),
                     TextFormField(
                       controller: _identifierController,
                       keyboardType: TextInputType.emailAddress,
@@ -105,12 +91,10 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: AppColors.navy,
                             fontWeight: FontWeight.w500,
                           ),
-                      decoration: InputDecoration(
-                        hintText: 'jane@gmail.com or 0712 345 678',
+                      decoration: const InputDecoration(
+                        hintText: 'jane@gmail.com',
                         prefixIcon: Icon(
-                          _isEmail
-                              ? Icons.email_outlined
-                              : Icons.phone_outlined,
+                          Icons.email_outlined,
                           color: AppColors.gray400,
                           size: 20,
                         ),
@@ -147,12 +131,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: () async {
-                          if (!_isEmail) {
+                          final email = _identifierController.text.trim();
+                          if (!email.contains('@') || !email.contains('.')) {
                             _showError(
                                 'Enter your email address to reset password');
                             return;
                           }
-                          final email = _identifierController.text.trim();
                           final authProvider = context.read<AuthProvider>();
                           final messenger = ScaffoldMessenger.of(context);
                           await authProvider.resetPassword(email);
@@ -281,7 +265,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Sign in to order gas on credit',
+            'Sign in to order gas delivered to your door',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppColors.gray400,
                 ),
@@ -318,11 +302,11 @@ class _LoginScreenState extends State<LoginScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.account_balance_outlined,
+              const Icon(Icons.local_fire_department_outlined,
                   color: AppColors.orange, size: 18),
               const SizedBox(width: 8),
               Text(
-                'How MobiGas credit works',
+                'How MobiGas works',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 13,
                       color: AppColors.navy,
@@ -332,10 +316,10 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          _infoRow('Order gas on credit — delivered to your door'),
-          _infoRow('Our partner bank finances your gas purchase'),
-          _infoRow('Repay the bank within 30 days via M-Pesa'),
-          _infoRow('Your limit grows as you repay on time'),
+          _infoRow('Order cooking gas — delivered to your door'),
+          _infoRow('Compare prices from verified vendors near you'),
+          _infoRow('Pay cash or M-Pesa on delivery'),
+          _infoRow('Confirm with your delivery PIN when it arrives'),
         ],
       ),
     );
