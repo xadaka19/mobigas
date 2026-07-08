@@ -97,6 +97,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // Full kit prices (gas + new cylinder)
   final Map<String, TextEditingController> _fullKitPriceControllers = {};
   final Map<String, bool> _fullKitAvailable = {};
+
   /// Which brand's prices are currently shown/edited in the Refill
   /// and Full Kit sections. Defaults to the first selected brand;
   /// the chip selector to change this only appears once 2+ brands
@@ -104,12 +105,18 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   String _activePricingBrand = '';
 
   static const List<String> _refillFullKitSizes = [
-    '3kg', '6kg', '13kg', '22.5kg', '50kg',
+    '3kg',
+    '6kg',
+    '13kg',
+    '22.5kg',
+    '50kg',
   ];
 
   TextEditingController _refillController(String brand, String size) {
     return _priceControllers.putIfAbsent(
-        '$brand|$size', () => TextEditingController());
+      '$brand|$size',
+      () => TextEditingController(),
+    );
   }
 
   bool _refillIsAvailable(String brand, String size) =>
@@ -117,7 +124,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   TextEditingController _fullKitController(String brand, String size) {
     return _fullKitPriceControllers.putIfAbsent(
-        '$brand|$size', () => TextEditingController());
+      '$brand|$size',
+      () => TextEditingController(),
+    );
   }
 
   bool _fullKitIsAvailable(String brand, String size) =>
@@ -131,25 +140,25 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   TextEditingController _grillKitController(String brand) {
     return _grillKitPriceControllers.putIfAbsent(
-        brand, () => TextEditingController());
+      brand,
+      () => TextEditingController(),
+    );
   }
 
-  bool _grillKitIsAvailable(String brand) =>
-      _grillKitAvailable[brand] ?? false;
+  bool _grillKitIsAvailable(String brand) => _grillKitAvailable[brand] ?? false;
   // Burner — fits 3kg or 6kg cylinders only, no gas included
   final Map<String, TextEditingController> _burnerPriceControllers = {
     '3kg': TextEditingController(),
     '6kg': TextEditingController(),
   };
-  final Map<String, bool> _burnerAvailable = {
-    '3kg': false,
-    '6kg': false,
-  };
+  final Map<String, bool> _burnerAvailable = {'3kg': false, '6kg': false};
   // Regulator — fits 13kg cylinders only, no gas included
-  final TextEditingController _regulatorPriceController = TextEditingController();
+  final TextEditingController _regulatorPriceController =
+      TextEditingController();
   bool _regulatorAvailable = false;
   // Meko + cooker set — flat product, not tied to a cylinder size
-  final TextEditingController _mekoCookerPriceController = TextEditingController();
+  final TextEditingController _mekoCookerPriceController =
+      TextEditingController();
   bool _mekoCookerAvailable = false;
 
   // Step 2 - Location (Google Places, or GPS auto-detect)
@@ -179,8 +188,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     // gone down the fallback path — then keep them there so their
     // existing upload stays visible instead of appearing to vanish.
     _hasScaleCert = (d['weighingScalePhotoUrl'] ?? '').toString().isEmpty;
-    _hasBrandAuth =
-        (d['dealerAssociationLetterUrl'] ?? '').toString().isEmpty;
+    _hasBrandAuth = (d['dealerAssociationLetterUrl'] ?? '').toString().isEmpty;
     _hasOwnEpra = (d['subDealerAuthorizationUrl'] ?? '').toString().isEmpty;
     // BUG FIX: these three were never restored from existing data,
     // so re-opening setup to edit ANYTHING silently started the
@@ -193,23 +201,31 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     // nothing saved yet. An existing address shows as a summary with
     // an explicit Edit action instead of re-prompting every time.
     _isEditingLocation = _selectedAddress.isEmpty;
-    _parentVendorNameController =
-        TextEditingController(text: d['parentVendorName'] ?? '');
-    _parentEpraNumberController =
-        TextEditingController(text: d['parentEpraNumber'] ?? '');
-    _businessNameController =
-        TextEditingController(text: d['businessName'] ?? '');
-    _ownerNameController =
-        TextEditingController(text: d['ownerName'] ?? '');
+    _parentVendorNameController = TextEditingController(
+      text: d['parentVendorName'] ?? '',
+    );
+    _parentEpraNumberController = TextEditingController(
+      text: d['parentEpraNumber'] ?? '',
+    );
+    _businessNameController = TextEditingController(
+      text: d['businessName'] ?? '',
+    );
+    _ownerNameController = TextEditingController(text: d['ownerName'] ?? '');
     _idOrBrnController = TextEditingController(
-        text: d['nationalId'] ?? d['businessRegNumber'] ?? '');
+      text: d['nationalId'] ?? d['businessRegNumber'] ?? '',
+    );
     _phoneController = TextEditingController(text: d['phone'] ?? '');
-    _deliveryTimeController = TextEditingController(text: d['deliveryTime'] ?? '20–40 min');
-    _referralCodeController =
-        TextEditingController(text: d['referredByCode'] ?? '');
+    _deliveryTimeController = TextEditingController(
+      text: d['deliveryTime'] ?? '20–40 min',
+    );
+    _referralCodeController = TextEditingController(
+      text: d['referredByCode'] ?? '',
+    );
     _tillController = TextEditingController(text: d['tillNumber'] ?? '');
     _paybillController = TextEditingController(text: d['paybillNumber'] ?? '');
-    _paybillAccountController = TextEditingController(text: d['paybillAccount'] ?? '');
+    _paybillAccountController = TextEditingController(
+      text: d['paybillAccount'] ?? '',
+    );
     _paymentMethod = d['paymentMethod'] ?? 'mpesa';
 
     // Brands must load BEFORE listings — legacy listings saved before
@@ -300,10 +316,18 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _tillController.dispose();
     _paybillController.dispose();
     _paybillAccountController.dispose();
-    for (final c in _priceControllers.values) { c.dispose(); }
-    for (final c in _fullKitPriceControllers.values) { c.dispose(); }
-    for (final c in _grillKitPriceControllers.values) { c.dispose(); }
-    for (final c in _burnerPriceControllers.values) { c.dispose(); }
+    for (final c in _priceControllers.values) {
+      c.dispose();
+    }
+    for (final c in _fullKitPriceControllers.values) {
+      c.dispose();
+    }
+    for (final c in _grillKitPriceControllers.values) {
+      c.dispose();
+    }
+    for (final c in _burnerPriceControllers.values) {
+      c.dispose();
+    }
     _regulatorPriceController.dispose();
     _mekoCookerPriceController.dispose();
     _customBrandController.dispose();
@@ -313,20 +337,29 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     super.dispose();
   }
 
-  String get _vendorId =>
-      FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _vendorId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   bool get _step0Valid {
-    if (_businessNameController.text.trim().isEmpty) { return false; }
-    if (_ownerNameController.text.trim().isEmpty) { return false; }
-    if (_idOrBrnController.text.trim().isEmpty) { return false; }
-    if (_paymentMethod == 'mpesa' &&
-        _phoneController.text.trim().length < 9) { return false; }
-    if (_paymentMethod == 'till' &&
-        _tillController.text.trim().isEmpty) { return false; }
+    if (_businessNameController.text.trim().isEmpty) {
+      return false;
+    }
+    if (_ownerNameController.text.trim().isEmpty) {
+      return false;
+    }
+    if (_idOrBrnController.text.trim().isEmpty) {
+      return false;
+    }
+    if (_paymentMethod == 'mpesa' && _phoneController.text.trim().length < 9) {
+      return false;
+    }
+    if (_paymentMethod == 'till' && _tillController.text.trim().isEmpty) {
+      return false;
+    }
     if (_paymentMethod == 'paybill' &&
         (_paybillController.text.trim().isEmpty ||
-            _paybillAccountController.text.trim().isEmpty)) { return false; }
+            _paybillAccountController.text.trim().isEmpty)) {
+      return false;
+    }
     return true;
   }
 
@@ -334,8 +367,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   bool get _step2Valid =>
       _selectedBrands.isNotEmpty &&
-      _priceControllers.entries
-          .any((e) => _sizeAvailable[e.key] == true && e.value.text.isNotEmpty);
+      _priceControllers.entries.any(
+        (e) => _sizeAvailable[e.key] == true && e.value.text.isNotEmpty,
+      );
 
   /// Parses the numeric kg value out of a size string like "3kg",
   /// "13kg", or "22.5kg" — replaces a hardcoded 3-way ternary that
@@ -508,7 +542,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             .where((b) => !KenyanGasBrands.all.contains(b))
             .toList(),
         'listings': listings,
-        'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty ? _deliveryTimeController.text.trim() : '20–40 min',
+        'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty
+            ? _deliveryTimeController.text.trim()
+            : '20–40 min',
         'updatedAt': FieldValue.serverTimestamp(),
         'certificateUrl': certificateUrl,
         'epraCertificateUrl': docUrls['epraCertificateUrl'],
@@ -577,7 +613,22 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       }
 
       if (mounted) {
-        Navigator.pop(context, true);
+        if (widget.mode == VendorEditMode.fullOnboarding) {
+          // Onboarding wizard — finishing step 3 means "I'm done", so exit.
+          Navigator.pop(context, true);
+        } else {
+          // Focused single-purpose screens (e.g. pricesOnly) — saving
+          // shouldn't kick the vendor out. Let them keep switching
+          // brands and adjusting more prices; they leave via the X
+          // button whenever they're actually done.
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Saved'),
+              backgroundColor: AppColors.success,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -611,10 +662,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 child: _step == 0
                     ? _buildStep0()
                     : _step == 1
-                        ? _buildStep1()
-                        : _step == 2
-                            ? _buildStep2()
-                            : _buildStep3(),
+                    ? _buildStep1()
+                    : _step == 2
+                    ? _buildStep2()
+                    : _buildStep3(),
               ),
             ),
             _buildFooter(),
@@ -655,16 +706,21 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               child: Row(
                 children: [
                   GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: const Icon(Icons.close_rounded,
-                        color: AppColors.white, size: 24),
+                    onTap: () => Navigator.pop(context, true),
+
+                    child: const Icon(
+                      Icons.close_rounded,
+                      color: AppColors.white,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 16),
-                  Text(title,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(color: AppColors.white)),
+                  Text(
+                    title,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleLarge?.copyWith(color: AppColors.white),
+                  ),
                 ],
               ),
             ),
@@ -684,11 +740,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   Widget _buildFocusedFooter() {
     return Container(
       padding: EdgeInsets.fromLTRB(
-          24, 12, 24, MediaQuery.of(context).padding.bottom + 16),
+        24,
+        12,
+        24,
+        MediaQuery.of(context).padding.bottom + 16,
+      ),
       decoration: BoxDecoration(
         color: AppColors.navy,
         border: Border(
-            top: BorderSide(color: AppColors.white.withValues(alpha: 0.1))),
+          top: BorderSide(color: AppColors.white.withValues(alpha: 0.1)),
+        ),
       ),
       child: ElevatedButton(
         onPressed: _isSaving
@@ -699,8 +760,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 // already loaded from existingData, untouched.
                 if (widget.mode == VendorEditMode.businessOnly &&
                     !_step0Valid) {
-                  _showFocusedError(
-                      'Please fill in all business details');
+                  _showFocusedError('Please fill in all business details');
                   return;
                 }
                 if (widget.mode == VendorEditMode.locationOnly &&
@@ -708,10 +768,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   _showFocusedError('Please set your business location');
                   return;
                 }
-                if (widget.mode == VendorEditMode.pricesOnly &&
-                    !_step2Valid) {
+                if (widget.mode == VendorEditMode.pricesOnly && !_step2Valid) {
                   _showFocusedError(
-                      'Select at least one brand and set a price');
+                    'Select at least one brand and set a price',
+                  );
                   return;
                 }
                 // documentsOnly has no hard gate — same as onboarding.
@@ -722,7 +782,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 height: 22,
                 width: 22,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2.5, color: AppColors.white),
+                  strokeWidth: 2.5,
+                  color: AppColors.white,
+                ),
               )
             : const Text('Save changes'),
       ),
@@ -752,8 +814,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         children: [
           GestureDetector(
             onTap: () => Navigator.pop(context),
-            child: const Icon(Icons.close_rounded,
-                color: AppColors.white, size: 24),
+            child: const Icon(
+              Icons.close_rounded,
+              color: AppColors.white,
+              size: 24,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -762,15 +827,15 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               children: [
                 Text(
                   titles[_step],
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.white,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(color: AppColors.white),
                 ),
                 Text(
                   'Step ${_step + 1} of 4',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray400,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: AppColors.gray400),
                 ),
               ],
             ),
@@ -815,33 +880,47 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Business type selector
-        Text('Business type',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'Business type',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 10),
         Row(
           children: [
-            _bizTypeTab('sole', Icons.person_outline_rounded,
-                'Sole Proprietor'),
+            _bizTypeTab(
+              'sole',
+              Icons.person_outline_rounded,
+              'Sole Proprietor',
+            ),
             const SizedBox(width: 8),
-            _bizTypeTab('registered', Icons.business_outlined,
-                'Registered Biz'),
+            _bizTypeTab(
+              'registered',
+              Icons.business_outlined,
+              'Registered Biz',
+            ),
             const SizedBox(width: 8),
-            _bizTypeTab('petrol_station', Icons.local_gas_station_outlined,
-                'Petrol Station'),
+            _bizTypeTab(
+              'petrol_station',
+              Icons.local_gas_station_outlined,
+              'Petrol Station',
+            ),
           ],
         ),
         const SizedBox(height: 20),
-        _field('Business name', _businessNameController,
-            Icons.store_outlined,
-            hint: _businessType == 'sole'
-                ? 'e.g. Kamau Gas Supplies'
-                : _businessType == 'registered'
-                    ? 'e.g. Kamau Gas Ltd'
-                    : 'e.g. Total Mirema Station'),
+        _field(
+          'Business name',
+          _businessNameController,
+          Icons.store_outlined,
+          hint: _businessType == 'sole'
+              ? 'e.g. Kamau Gas Supplies'
+              : _businessType == 'registered'
+              ? 'e.g. Kamau Gas Ltd'
+              : 'e.g. Total Mirema Station',
+        ),
         const SizedBox(height: 16),
         _field(
           _businessType == 'sole' ? 'Owner full name' : 'Contact person',
@@ -870,9 +949,12 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         const SizedBox(height: 16),
         _buildPaymentMethodSelector(),
         const SizedBox(height: 16),
-        _field('Delivery time', _deliveryTimeController,
-            Icons.access_time_rounded,
-            hint: 'e.g. 20–40 min'),
+        _field(
+          'Delivery time',
+          _deliveryTimeController,
+          Icons.access_time_rounded,
+          hint: 'e.g. 20–40 min',
+        ),
         const SizedBox(height: 16),
         _buildReferralCodeField(),
       ],
@@ -890,31 +972,42 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Business location',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontSize: 13,
-                    color: AppColors.white,
-                    fontWeight: FontWeight.w600,
-                  )),
+          Text(
+            'Business location',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontSize: 13,
+              color: AppColors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppColors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(14),
-              border:
-                  Border.all(color: AppColors.white.withValues(alpha: 0.15)),
+              border: Border.all(
+                color: AppColors.white.withValues(alpha: 0.15),
+              ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.location_on_rounded,
-                    color: AppColors.orange, size: 22),
+                const Icon(
+                  Icons.location_on_rounded,
+                  color: AppColors.orange,
+                  size: 22,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(_selectedAddress,
-                      style: const TextStyle(
-                          color: AppColors.white, fontSize: 14, height: 1.4)),
+                  child: Text(
+                    _selectedAddress,
+                    style: const TextStyle(
+                      color: AppColors.white,
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -939,16 +1032,22 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Business location',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'Business location',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text('Use your current location, or search for your address',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400, fontSize: 12)),
+        Text(
+          'Use your current location, or search for your address',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 12,
+          ),
+        ),
         const SizedBox(height: 12),
         ElevatedButton.icon(
           onPressed: _isDetectingLocation ? null : _useCurrentLocation,
@@ -957,11 +1056,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.white),
+                    strokeWidth: 2,
+                    color: AppColors.white,
+                  ),
                 )
               : const Icon(Icons.my_location_rounded, size: 18),
           label: Text(
-              _isDetectingLocation ? 'Detecting...' : 'Use my current location'),
+            _isDetectingLocation ? 'Detecting...' : 'Use my current location',
+          ),
           style: ElevatedButton.styleFrom(
             minimumSize: const Size(double.infinity, 48),
             backgroundColor: AppColors.success,
@@ -971,19 +1073,22 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         Row(
           children: [
             Expanded(
-                child:
-                    Divider(color: AppColors.white.withValues(alpha: 0.2))),
+              child: Divider(color: AppColors.white.withValues(alpha: 0.2)),
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text('OR TYPE MANUALLY',
-                  style: TextStyle(
-                      color: AppColors.gray400,
-                      fontSize: 10,
-                      letterSpacing: 0.5)),
+              child: Text(
+                'OR TYPE MANUALLY',
+                style: TextStyle(
+                  color: AppColors.gray400,
+                  fontSize: 10,
+                  letterSpacing: 0.5,
+                ),
+              ),
             ),
             Expanded(
-                child:
-                    Divider(color: AppColors.white.withValues(alpha: 0.2))),
+              child: Divider(color: AppColors.white.withValues(alpha: 0.2)),
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -1010,14 +1115,20 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.location_on_rounded,
-                  color: AppColors.orange, size: 16),
+              const Icon(
+                Icons.location_on_rounded,
+                color: AppColors.orange,
+                size: 16,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Your exact location is shared with customers for accurate delivery matching.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.orange, height: 1.4, fontSize: 11),
+                    color: AppColors.orange,
+                    height: 1.4,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ],
@@ -1030,13 +1141,12 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               onPressed: () => setState(() {
                 _isEditingLocation = false;
                 _selectedAddress = widget.existingData!['address'] ?? '';
-                _selectedLat =
-                    (widget.existingData!['latitude'] ?? 0.0).toDouble();
-                _selectedLng =
-                    (widget.existingData!['longitude'] ?? 0.0).toDouble();
+                _selectedLat = (widget.existingData!['latitude'] ?? 0.0)
+                    .toDouble();
+                _selectedLng = (widget.existingData!['longitude'] ?? 0.0)
+                    .toDouble();
               }),
-              child: Text('Cancel',
-                  style: TextStyle(color: AppColors.gray400)),
+              child: Text('Cancel', style: TextStyle(color: AppColors.gray400)),
             ),
           ),
         ],
@@ -1055,13 +1165,18 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         // is no longer a top-level function — it's a method on a
         // Geocoding instance.
         final geocoding = Geocoding();
-        final placemarks =
-            await geocoding.placemarkFromCoordinates(pos.latitude, pos.longitude);
+        final placemarks = await geocoding.placemarkFromCoordinates(
+          pos.latitude,
+          pos.longitude,
+        );
         if (placemarks.isNotEmpty) {
           final p = placemarks.first;
-          final parts = [p.street, p.subLocality, p.locality, p.administrativeArea]
-              .where((s) => s != null && s.trim().isNotEmpty)
-              .toList();
+          final parts = [
+            p.street,
+            p.subLocality,
+            p.locality,
+            p.administrativeArea,
+          ].where((s) => s != null && s.trim().isNotEmpty).toList();
           if (parts.isNotEmpty) address = parts.join(', ');
         }
       } catch (_) {
@@ -1081,7 +1196,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
-                'Could not get your location. Check location permissions, or type your address instead.'),
+              'Could not get your location. Check location permissions, or type your address instead.',
+            ),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
@@ -1095,11 +1211,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Gas brands you stock',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'Gas brands you stock',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 10),
         Wrap(
           spacing: 8,
@@ -1111,8 +1229,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 if (selected) {
                   _selectedBrands.remove(brand);
                   if (_activePricingBrand == brand) {
-                    _activePricingBrand =
-                        _selectedBrands.isNotEmpty ? _selectedBrands.first : '';
+                    _activePricingBrand = _selectedBrands.isNotEmpty
+                        ? _selectedBrands.first
+                        : '';
                   }
                 } else {
                   _selectedBrands.add(brand);
@@ -1124,7 +1243,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 8),
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: selected
                       ? AppColors.orange
@@ -1139,12 +1260,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 child: Text(
                   brand,
                   style: TextStyle(
-                    color: selected
-                        ? AppColors.white
-                        : AppColors.gray400,
-                    fontWeight: selected
-                        ? FontWeight.w600
-                        : FontWeight.w400,
+                    color: selected ? AppColors.white : AppColors.gray400,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                     fontSize: 13,
                   ),
                 ),
@@ -1163,8 +1280,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 decoration: InputDecoration(
                   hintText: 'Add other brand...',
                   hintStyle: const TextStyle(color: AppColors.gray400),
-                  prefixIcon: const Icon(Icons.add_rounded,
-                      color: AppColors.gray400, size: 20),
+                  prefixIcon: const Icon(
+                    Icons.add_rounded,
+                    color: AppColors.gray400,
+                    size: 20,
+                  ),
                   filled: true,
                   fillColor: AppColors.white,
                   enabledBorder: OutlineInputBorder(
@@ -1176,7 +1296,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                     borderSide: const BorderSide(color: AppColors.orange),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 12),
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                 ),
               ),
             ),
@@ -1201,8 +1323,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               },
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(60, 48),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
               child: const Text('Add'),
             ),
@@ -1215,18 +1336,26 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             decoration: BoxDecoration(
               color: AppColors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.white.withValues(alpha: 0.15)),
+              border: Border.all(
+                color: AppColors.white.withValues(alpha: 0.15),
+              ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline_rounded,
-                    color: AppColors.orange, size: 18),
+                const Icon(
+                  Icons.info_outline_rounded,
+                  color: AppColors.orange,
+                  size: 18,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Select at least one brand above to set refill and full kit prices.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray400, fontSize: 12, height: 1.4),
+                      color: AppColors.gray400,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
                   ),
                 ),
               ],
@@ -1238,9 +1367,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           // only appears once 2+ brands are selected. A single-brand
           // vendor never sees it; their one brand is used silently.
           if (_selectedBrands.length > 1) ...[
-            Text('Setting refill & full kit prices for:',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400, fontSize: 12)),
+            Text(
+              'Setting refill & full kit prices for:',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.gray400,
+                fontSize: 12,
+              ),
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -1252,7 +1385,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: active
                           ? AppColors.orange
@@ -1264,119 +1399,167 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                             : AppColors.white.withValues(alpha: 0.2),
                       ),
                     ),
-                    child: Text(brand,
-                        style: TextStyle(
-                          color: active ? AppColors.white : AppColors.gray400,
-                          fontWeight:
-                              active ? FontWeight.w700 : FontWeight.w400,
-                          fontSize: 13,
-                        )),
+                    child: Text(
+                      brand,
+                      style: TextStyle(
+                        color: active ? AppColors.white : AppColors.gray400,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
                 );
               }).toList(),
             ),
             const SizedBox(height: 16),
           ],
-          _sectionHeader('Gas Refill (Exchange empty cylinder) — $_activePricingBrand'),
+          _sectionHeader(
+            'Gas Refill (Exchange empty cylinder) — $_activePricingBrand',
+          ),
           const SizedBox(height: 4),
-          Text('Customer exchanges their empty cylinder for a filled one',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400, fontSize: 11)),
+          Text(
+            'Customer exchanges their empty cylinder for a filled one',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray400,
+              fontSize: 11,
+            ),
+          ),
           const SizedBox(height: 10),
-          ..._refillFullKitSizes.map((size) => _productRow(
-                size,
-                _refillController(_activePricingBrand, size),
-                available: _refillIsAvailable(_activePricingBrand, size),
-                onToggle: (v) => setState(() =>
-                    _sizeAvailable['$_activePricingBrand|$size'] = v),
-                label: '$size cylinder',
-              )),
+          ..._refillFullKitSizes.map(
+            (size) => _productRow(
+              size,
+              _refillController(_activePricingBrand, size),
+              available: _refillIsAvailable(_activePricingBrand, size),
+              onToggle: (v) => setState(
+                () => _sizeAvailable['$_activePricingBrand|$size'] = v,
+              ),
+              label: '$size cylinder',
+            ),
+          ),
           const SizedBox(height: 24),
-          _sectionHeader('Full Cylinder Kit (Gas + New Cylinder) — $_activePricingBrand'),
+          _sectionHeader(
+            'Full Cylinder Kit (Gas + New Cylinder) — $_activePricingBrand',
+          ),
           const SizedBox(height: 4),
-          Text('Customer gets a brand new cylinder — no empty needed',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400, fontSize: 11)),
+          Text(
+            'Customer gets a brand new cylinder — no empty needed',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray400,
+              fontSize: 11,
+            ),
+          ),
           const SizedBox(height: 10),
-          ..._refillFullKitSizes.map((size) => _productRow(
-                size,
-                _fullKitController(_activePricingBrand, size),
-                available: _fullKitIsAvailable(_activePricingBrand, size),
-                onToggle: (v) => setState(() =>
-                    _fullKitAvailable['$_activePricingBrand|$size'] = v),
-              )),
+          ..._refillFullKitSizes.map(
+            (size) => _productRow(
+              size,
+              _fullKitController(_activePricingBrand, size),
+              available: _fullKitIsAvailable(_activePricingBrand, size),
+              onToggle: (v) => setState(
+                () => _fullKitAvailable['$_activePricingBrand|$size'] = v,
+              ),
+            ),
+          ),
           const SizedBox(height: 24),
           _sectionHeader('Grill Kit — 6kg only — $_activePricingBrand'),
           const SizedBox(height: 4),
-          Text('Gas + Cylinder + LPG Burner + Grill — complete package',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400, fontSize: 11)),
+          Text(
+            'Gas + Cylinder + LPG Burner + Grill — complete package',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray400,
+              fontSize: 11,
+            ),
+          ),
           const SizedBox(height: 10),
-          _productRow('6kg', _grillKitController(_activePricingBrand),
-              available: _grillKitIsAvailable(_activePricingBrand),
-              onToggle: (v) => setState(
-                  () => _grillKitAvailable[_activePricingBrand] = v),
-              label: 'Grill Kit (6kg)'),
+          _productRow(
+            '6kg',
+            _grillKitController(_activePricingBrand),
+            available: _grillKitIsAvailable(_activePricingBrand),
+            onToggle: (v) =>
+                setState(() => _grillKitAvailable[_activePricingBrand] = v),
+            label: 'Grill Kit (6kg)',
+          ),
         ],
         const SizedBox(height: 24),
         _sectionHeader('Burner — fits 3kg or 6kg cylinders'),
         const SizedBox(height: 4),
-        Text('Standalone burner sold on its own — no gas or cylinder included',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400, fontSize: 11)),
+        Text(
+          'Standalone burner sold on its own — no gas or cylinder included',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 11,
+          ),
+        ),
         const SizedBox(height: 10),
-        ..._burnerPriceControllers.entries.map((e) => _productRow(
-              e.key,
-              e.value,
-              available: _burnerAvailable[e.key] ?? false,
-              onToggle: (v) => setState(() => _burnerAvailable[e.key] = v),
-              label: 'Burner (${e.key})',
-            )),
+        ..._burnerPriceControllers.entries.map(
+          (e) => _productRow(
+            e.key,
+            e.value,
+            available: _burnerAvailable[e.key] ?? false,
+            onToggle: (v) => setState(() => _burnerAvailable[e.key] = v),
+            label: 'Burner (${e.key})',
+          ),
+        ),
         const SizedBox(height: 24),
         _sectionHeader('Regulator — fits 13kg cylinders'),
         const SizedBox(height: 4),
-        Text('Standalone regulator sold on its own — no gas or cylinder included',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400, fontSize: 11)),
+        Text(
+          'Standalone regulator sold on its own — no gas or cylinder included',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 11,
+          ),
+        ),
         const SizedBox(height: 10),
-        _productRow('13kg', _regulatorPriceController,
-            available: _regulatorAvailable,
-            onToggle: (v) => setState(() => _regulatorAvailable = v),
-            label: 'Regulator (13kg)'),
+        _productRow(
+          '13kg',
+          _regulatorPriceController,
+          available: _regulatorAvailable,
+          onToggle: (v) => setState(() => _regulatorAvailable = v),
+          label: 'Regulator (13kg)',
+        ),
         const SizedBox(height: 24),
         _sectionHeader('Meko + Cooker'),
         const SizedBox(height: 4),
-        Text('Meko stove + cooker set sold on its own — no gas or cylinder included',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400, fontSize: 11)),
+        Text(
+          'Meko + two burner cooker set sold on its own — gas, hosepipe + 6kg cylinder included',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 11,
+          ),
+        ),
         const SizedBox(height: 10),
-        _productRow('Standard', _mekoCookerPriceController,
-            available: _mekoCookerAvailable,
-            onToggle: (v) => setState(() => _mekoCookerAvailable = v),
-            label: 'Meko + Cooker'),
+        _productRow(
+          'Standard',
+          _mekoCookerPriceController,
+          available: _mekoCookerAvailable,
+          onToggle: (v) => setState(() => _mekoCookerAvailable = v),
+          label: 'Meko + Cooker',
+        ),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: AppColors.orange.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: AppColors.orange.withValues(alpha: 0.2)),
+            border: Border.all(color: AppColors.orange.withValues(alpha: 0.2)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.tips_and_updates_outlined,
-                  color: AppColors.orange, size: 16),
+              const Icon(
+                Icons.tips_and_updates_outlined,
+                color: AppColors.orange,
+                size: 16,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Tap size to toggle. Bank pays you the price you set directly on delivery confirmation.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.orange,
-                        height: 1.4,
-                        fontSize: 11,
-                      ),
+                    color: AppColors.orange,
+                    height: 1.4,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ],
@@ -1391,40 +1574,49 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Get your verified badge',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'Get your verified badge',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 4),
         Text(
           'Customers only see verified vendors. You can finish setup now and '
           'add these later, but you won\'t be able to go online until '
           'everything below is uploaded and approved by MobiGas.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: AppColors.gray400, fontSize: 12, height: 1.4),
+            color: AppColors.gray400,
+            fontSize: 12,
+            height: 1.4,
+          ),
         ),
         const SizedBox(height: 20),
-        Text('EPRA certificate',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'EPRA certificate',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 10),
-        Row(children: [
-          _altToggleTab(
-            label: 'I have my own EPRA certificate',
-            selected: _hasOwnEpra,
-            onTap: () => setState(() => _hasOwnEpra = true),
-          ),
-          const SizedBox(width: 8),
-          _altToggleTab(
-            label: "I'm a sub-dealer / agent",
-            selected: !_hasOwnEpra,
-            onTap: () => setState(() => _hasOwnEpra = false),
-          ),
-        ]),
+        Row(
+          children: [
+            _altToggleTab(
+              label: 'I have my own EPRA certificate',
+              selected: _hasOwnEpra,
+              onTap: () => setState(() => _hasOwnEpra = true),
+            ),
+            const SizedBox(width: 8),
+            _altToggleTab(
+              label: "I'm a sub-dealer / agent",
+              selected: !_hasOwnEpra,
+              onTap: () => setState(() => _hasOwnEpra = false),
+            ),
+          ],
+        ),
         const SizedBox(height: 12),
         if (_hasOwnEpra)
           _buildVerificationDocUpload(
@@ -1443,13 +1635,19 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 'own EPRA certificate',
           ),
           const SizedBox(height: 12),
-          _field('Parent vendor / licensed business name',
-              _parentVendorNameController, Icons.store_outlined,
-              hint: 'e.g. Total Kenya Ltd, K-Gas main distributor'),
+          _field(
+            'Parent vendor / licensed business name',
+            _parentVendorNameController,
+            Icons.store_outlined,
+            hint: 'e.g. Total Kenya Ltd, K-Gas main distributor',
+          ),
           const SizedBox(height: 12),
-          _field('Parent vendor EPRA certificate number',
-              _parentEpraNumberController, Icons.badge_outlined,
-              hint: 'If known — helps MobiGas verify faster'),
+          _field(
+            'Parent vendor EPRA certificate number',
+            _parentEpraNumberController,
+            Icons.badge_outlined,
+            hint: 'If known — helps MobiGas verify faster',
+          ),
         ],
         if (_businessType == 'sole') ...[
           const SizedBox(height: 16),
@@ -1465,8 +1663,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         _buildVerificationDocUpload(
           docKey: 'businessPermitUrl',
           title: 'County business permit',
-          description:
-              'Your Single Business Permit from the county government',
+          description: 'Your Single Business Permit from the county government',
         ),
         const SizedBox(height: 16),
         _buildVerificationDocUpload(
@@ -1484,26 +1681,30 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ),
         const SizedBox(height: 20),
         // ── Weighing scale: certificate OR a photo of the scale ────
-        Text('Weighing scale',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'Weighing scale',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 10),
-        Row(children: [
-          _altToggleTab(
-            label: 'I have a calibration certificate',
-            selected: _hasScaleCert,
-            onTap: () => setState(() => _hasScaleCert = true),
-          ),
-          const SizedBox(width: 8),
-          _altToggleTab(
-            label: "I don't have one",
-            selected: !_hasScaleCert,
-            onTap: () => setState(() => _hasScaleCert = false),
-          ),
-        ]),
+        Row(
+          children: [
+            _altToggleTab(
+              label: 'I have a calibration certificate',
+              selected: _hasScaleCert,
+              onTap: () => setState(() => _hasScaleCert = true),
+            ),
+            const SizedBox(width: 8),
+            _altToggleTab(
+              label: "I don't have one",
+              selected: !_hasScaleCert,
+              onTap: () => setState(() => _hasScaleCert = false),
+            ),
+          ],
+        ),
         const SizedBox(height: 12),
         if (_hasScaleCert)
           _buildVerificationDocUpload(
@@ -1521,26 +1722,30 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
         const SizedBox(height: 20),
         // ── Brand authorization: brand letter OR association letter ─
-        Text('Brand authorization',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'Brand authorization',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 10),
-        Row(children: [
-          _altToggleTab(
-            label: 'I have a brand authorization letter',
-            selected: _hasBrandAuth,
-            onTap: () => setState(() => _hasBrandAuth = true),
-          ),
-          const SizedBox(width: 8),
-          _altToggleTab(
-            label: "I don't have one",
-            selected: !_hasBrandAuth,
-            onTap: () => setState(() => _hasBrandAuth = false),
-          ),
-        ]),
+        Row(
+          children: [
+            _altToggleTab(
+              label: 'I have a brand authorization letter',
+              selected: _hasBrandAuth,
+              onTap: () => setState(() => _hasBrandAuth = true),
+            ),
+            const SizedBox(width: 8),
+            _altToggleTab(
+              label: "I don't have one",
+              selected: !_hasBrandAuth,
+              onTap: () => setState(() => _hasBrandAuth = false),
+            ),
+          ],
+        ),
         const SizedBox(height: 12),
         if (_hasBrandAuth)
           _buildVerificationDocUpload(
@@ -1565,23 +1770,25 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           decoration: BoxDecoration(
             color: AppColors.orange.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: AppColors.orange.withValues(alpha: 0.2)),
+            border: Border.all(color: AppColors.orange.withValues(alpha: 0.2)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.info_outline_rounded,
-                  color: AppColors.orange, size: 16),
+              const Icon(
+                Icons.info_outline_rounded,
+                color: AppColors.orange,
+                size: 16,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'MobiGas reviews documents manually — you\'ll be notified once approved. Uploading a replacement document sends it back for re-review.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.orange,
-                        height: 1.4,
-                        fontSize: 11,
-                      ),
+                    color: AppColors.orange,
+                    height: 1.4,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ],
@@ -1648,24 +1855,28 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   }) {
     final newFile = _docFiles[docKey];
     final existingUrl = widget.existingData?[docKey] as String?;
-    final hasDoc = newFile != null ||
-        (existingUrl != null && existingUrl.isNotEmpty);
+    final hasDoc =
+        newFile != null || (existingUrl != null && existingUrl.isNotEmpty);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(description,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: AppColors.gray400, fontSize: 11)),
+        Text(
+          description,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 11,
+          ),
+        ),
         const SizedBox(height: 8),
         GestureDetector(
           onTap: () => _pickVerificationDoc(docKey),
@@ -1701,23 +1912,21 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                       Text(
                         hasDoc
                             ? newFile != null
-                                ? 'Document selected ✓'
-                                : 'Document already uploaded ✓'
+                                  ? 'Document selected ✓'
+                                  : 'Document already uploaded ✓'
                             : 'Tap to upload document',
                         style: TextStyle(
-                          color: hasDoc
-                              ? AppColors.success
-                              : AppColors.gray400,
+                          color: hasDoc ? AppColors.success : AppColors.gray400,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
                       ),
                       Text(
-                        hasDoc
-                            ? 'Tap to replace'
-                            : 'JPG, PNG accepted',
+                        hasDoc ? 'Tap to replace' : 'JPG, PNG accepted',
                         style: const TextStyle(
-                            color: AppColors.gray600, fontSize: 11),
+                          color: AppColors.gray600,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
@@ -1745,12 +1954,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   Widget _buildFooter() {
     return Container(
       padding: EdgeInsets.fromLTRB(
-          24, 12, 24, MediaQuery.of(context).padding.bottom + 16),
+        24,
+        12,
+        24,
+        MediaQuery.of(context).padding.bottom + 16,
+      ),
       decoration: BoxDecoration(
         color: AppColors.navy,
         border: Border(
-            top: BorderSide(
-                color: AppColors.white.withValues(alpha: 0.1))),
+          top: BorderSide(color: AppColors.white.withValues(alpha: 0.1)),
+        ),
       ),
       child: Row(
         children: [
@@ -1761,7 +1974,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.white,
                   side: BorderSide(
-                      color: AppColors.white.withValues(alpha: 0.3)),
+                    color: AppColors.white.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: const Text('Back'),
               ),
@@ -1774,8 +1988,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 if (_step == 0 && !_step0Valid) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text(
-                          'Please fill in all business details'),
+                      content: Text('Please fill in all business details'),
                       backgroundColor: AppColors.error,
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -1785,8 +1998,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 if (_step == 1 && !_step1Valid) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content:
-                          Text('Please fill in your location details'),
+                      content: Text('Please fill in your location details'),
                       backgroundColor: AppColors.error,
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -1797,7 +2009,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text(
-                          'Select at least one brand and set a price'),
+                        'Select at least one brand and set a price',
+                      ),
                       backgroundColor: AppColors.error,
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -1819,8 +2032,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                       height: 22,
                       width: 22,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: AppColors.white),
+                        strokeWidth: 2.5,
+                        color: AppColors.white,
+                      ),
                     )
                   : Text(_step < 3 ? 'Continue' : 'Save profile'),
             ),
@@ -1851,22 +2065,21 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
           child: Column(
             children: [
-              Icon(icon,
-                  color:
-                      selected ? AppColors.white : AppColors.gray400,
-                  size: 18),
+              Icon(
+                icon,
+                color: selected ? AppColors.white : AppColors.gray400,
+                size: 18,
+              ),
               const SizedBox(height: 4),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: selected
-                        ? AppColors.white
-                        : AppColors.gray400,
-                    fontSize: 10,
-                    fontWeight: selected
-                        ? FontWeight.w600
-                        : FontWeight.w400,
-                  )),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: selected ? AppColors.white : AppColors.gray400,
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
             ],
           ),
         ),
@@ -1886,8 +2099,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   }
 
   Widget _buildReferralCodeField() {
-    final alreadySet =
-        (widget.existingData?['referredByCode'] ?? '').toString().isNotEmpty;
+    final alreadySet = (widget.existingData?['referredByCode'] ?? '')
+        .toString()
+        .isNotEmpty;
     if (alreadySet) {
       // Permanent once set — never editable again, matching the
       // model's referredByCode contract.
@@ -1900,48 +2114,61 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.card_giftcard_rounded,
-                color: AppColors.orange, size: 20),
+            const Icon(
+              Icons.card_giftcard_rounded,
+              color: AppColors.orange,
+              size: 20,
+            ),
             const SizedBox(width: 10),
-            Text('Referred by: ',
-                style: const TextStyle(color: AppColors.gray400, fontSize: 13)),
-            Text(_referralCodeController.text,
-                style: const TextStyle(
-                    color: AppColors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700)),
+            Text(
+              'Referred by: ',
+              style: const TextStyle(color: AppColors.gray400, fontSize: 13),
+            ),
+            Text(
+              _referralCodeController.text,
+              style: const TextStyle(
+                color: AppColors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       );
     }
     return _field(
-        'Referral code (optional)', _referralCodeController,
-        Icons.card_giftcard_rounded,
-        hint: 'e.g. PAT-7F3K — enter once, can\'t be changed later');
+      'Referral code (optional)',
+      _referralCodeController,
+      Icons.card_giftcard_rounded,
+      hint: 'e.g. PAT-7F3K — enter once, can\'t be changed later',
+    );
   }
 
   Widget _buildCertificateUpload() {
-    final hasCert = _certificateFile != null ||
+    final hasCert =
+        _certificateFile != null ||
         (widget.existingData?['certificateUrl'] != null);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Business certificate / ID document',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'Business certificate / ID document',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 4),
         Text(
           _businessType == 'sole'
               ? 'Upload a photo of your National ID (front)'
               : 'Upload your Certificate of Incorporation or Business Registration',
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
-              ?.copyWith(color: AppColors.gray400, fontSize: 11),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 11,
+          ),
         ),
         const SizedBox(height: 8),
         GestureDetector(
@@ -1978,8 +2205,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                       Text(
                         hasCert
                             ? _certificateFile != null
-                                ? 'Document selected ✓'
-                                : 'Document already uploaded ✓'
+                                  ? 'Document selected ✓'
+                                  : 'Document already uploaded ✓'
                             : 'Tap to upload document',
                         style: TextStyle(
                           color: hasCert
@@ -1994,7 +2221,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                             ? 'Tap to change'
                             : 'JPG, PNG accepted · Used for verification only',
                         style: TextStyle(
-                            color: AppColors.gray600, fontSize: 11),
+                          color: AppColors.gray600,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
@@ -2004,7 +2233,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppColors.orange),
+                      strokeWidth: 2,
+                      color: AppColors.orange,
+                    ),
                   ),
               ],
             ),
@@ -2030,12 +2261,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('How do you want to receive payment?',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          'How do you want to receive payment?',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 10),
         // Payment method tabs
         Row(
@@ -2050,33 +2283,48 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         const SizedBox(height: 14),
         // Fields based on selection
         if (_paymentMethod == 'mpesa') ...[
-          _field('M-Pesa phone number', _phoneController,
-              Icons.phone_outlined,
-              hint: '0712 345 678',
-              keyboardType: TextInputType.phone),
+          _field(
+            'M-Pesa phone number',
+            _phoneController,
+            Icons.phone_outlined,
+            hint: '0712 345 678',
+            keyboardType: TextInputType.phone,
+          ),
           const SizedBox(height: 8),
           _paymentNote(
-              'Bank sends payment directly to this M-Pesa number on delivery confirmation.'),
+            'Bank sends payment directly to this M-Pesa number on delivery confirmation.',
+          ),
         ] else if (_paymentMethod == 'till') ...[
-          _field('Till number', _tillController,
-              Icons.store_rounded,
-              hint: 'e.g. 123456',
-              keyboardType: TextInputType.number),
+          _field(
+            'Till number',
+            _tillController,
+            Icons.store_rounded,
+            hint: 'e.g. 123456',
+            keyboardType: TextInputType.number,
+          ),
           const SizedBox(height: 8),
           _paymentNote(
-              'Bank pays to your M-Pesa till (Buy Goods) number. Works with Equity, KCB, Co-op and most major banks.'),
+            'Bank pays to your M-Pesa till (Buy Goods) number. Works with Equity, KCB, Co-op and most major banks.',
+          ),
         ] else ...[
-          _field('Paybill number', _paybillController,
-              Icons.account_balance_outlined,
-              hint: 'e.g. 400200',
-              keyboardType: TextInputType.number),
+          _field(
+            'Paybill number',
+            _paybillController,
+            Icons.account_balance_outlined,
+            hint: 'e.g. 400200',
+            keyboardType: TextInputType.number,
+          ),
           const SizedBox(height: 12),
-          _field('Account number', _paybillAccountController,
-              Icons.tag_rounded,
-              hint: 'Your account/business number'),
+          _field(
+            'Account number',
+            _paybillAccountController,
+            Icons.tag_rounded,
+            hint: 'Your account/business number',
+          ),
           const SizedBox(height: 8),
           _paymentNote(
-              'Bank pays to your paybill. Use this if your business has a dedicated M-Pesa paybill.'),
+            'Bank pays to your paybill. Use this if your business has a dedicated M-Pesa paybill.',
+          ),
         ],
       ],
     );
@@ -2103,19 +2351,20 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
           child: Column(
             children: [
-              Icon(icon,
-                  color: selected ? AppColors.white : AppColors.gray400,
-                  size: 18),
+              Icon(
+                icon,
+                color: selected ? AppColors.white : AppColors.gray400,
+                size: 18,
+              ),
               const SizedBox(height: 4),
-              Text(label,
-                  style: TextStyle(
-                    color:
-                        selected ? AppColors.white : AppColors.gray400,
-                    fontSize: 11,
-                    fontWeight: selected
-                        ? FontWeight.w600
-                        : FontWeight.w400,
-                  )),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? AppColors.white : AppColors.gray400,
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
             ],
           ),
         ),
@@ -2129,22 +2378,26 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       decoration: BoxDecoration(
         color: AppColors.orange.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border:
-            Border.all(color: AppColors.orange.withValues(alpha: 0.2)),
+        border: Border.all(color: AppColors.orange.withValues(alpha: 0.2)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.info_outline_rounded,
-              color: AppColors.orange, size: 15),
+          const Icon(
+            Icons.info_outline_rounded,
+            color: AppColors.orange,
+            size: 15,
+          ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(text,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.orange,
-                      height: 1.4,
-                      fontSize: 11,
-                    )),
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.orange,
+                height: 1.4,
+                fontSize: 11,
+              ),
+            ),
           ),
         ],
       ),
@@ -2152,11 +2405,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   }
 
   Widget _sectionHeader(String title) {
-    return Text(title,
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: AppColors.white,
-              fontWeight: FontWeight.w600,
-            ));
+    return Text(
+      title,
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+        color: AppColors.white,
+        fontWeight: FontWeight.w600,
+      ),
+    );
   }
 
   Widget _productRow(
@@ -2201,9 +2456,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 child: Text(
                   size,
                   style: TextStyle(
-                    color: available
-                        ? AppColors.white
-                        : AppColors.gray600,
+                    color: available ? AppColors.white : AppColors.gray600,
                     fontWeight: FontWeight.w700,
                     fontSize: 12,
                   ),
@@ -2219,20 +2472,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 Text(
                   label ?? '$size cylinder',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: available
-                            ? AppColors.white
-                            : AppColors.gray600,
-                        fontSize: 13,
-                      ),
+                    color: available ? AppColors.white : AppColors.gray600,
+                    fontSize: 13,
+                  ),
                 ),
                 Text(
                   available ? 'Available' : 'Not offered',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: available
-                            ? AppColors.success
-                            : AppColors.gray600,
-                        fontSize: 11,
-                      ),
+                    color: available ? AppColors.success : AppColors.gray600,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
@@ -2244,10 +2493,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               controller: controller,
               enabled: available,
               keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
+                decimal: true,
+              ),
               inputFormatters: [
-                FilteringTextInputFormatter.allow(
-                    RegExp(r'^\d+\.?\d{0,2}')),
+                FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
               ],
               style: TextStyle(
                 color: available ? AppColors.white : AppColors.gray600,
@@ -2256,24 +2505,27 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               decoration: InputDecoration(
                 prefixText: 'KES ',
                 prefixStyle: TextStyle(
-                  color:
-                      available ? AppColors.orange : AppColors.gray600,
+                  color: available ? AppColors.orange : AppColors.gray600,
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),
                 hintText: '0',
                 hintStyle: const TextStyle(color: AppColors.gray600),
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 10),
+                  horizontal: 8,
+                  vertical: 10,
+                ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(
-                      color: AppColors.white.withValues(alpha: 0.2)),
+                    color: AppColors.white.withValues(alpha: 0.2),
+                  ),
                 ),
                 disabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(
-                      color: AppColors.white.withValues(alpha: 0.05)),
+                    color: AppColors.white.withValues(alpha: 0.05),
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -2299,12 +2551,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 13,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w600,
-                )),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 6),
         TextFormField(
           controller: controller,
@@ -2313,12 +2567,12 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: const TextStyle(color: AppColors.gray600),
-            prefixIcon:
-                Icon(icon, color: AppColors.gray400, size: 20),
+            prefixIcon: Icon(icon, color: AppColors.gray400, size: 20),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                  color: AppColors.white.withValues(alpha: 0.2)),
+                color: AppColors.white.withValues(alpha: 0.2),
+              ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),

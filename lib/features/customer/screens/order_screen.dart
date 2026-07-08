@@ -178,7 +178,7 @@ class _OrderScreenState extends State<OrderScreen> {
       case GasProductType.regulator:
         return 'Standalone regulator — fits 13kg cylinders, no gas included';
       case GasProductType.mekoCooker:
-        return 'Meko stove + cooker set — no gas or cylinder included';
+        return 'Meko + two burner cooker set — gas, hosepipe + 6kg cylinder included';
     }
   }
 
