@@ -209,9 +209,25 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
       if (url != null && mounted) {
         setState(() => _riderTrackingUrl = url);
       }
-    } catch (_) {
+    } catch (e) {
       // Tracking link is an enhancement, not a requirement — the
-      // rider still gets address + Maps directions without it.
+      // rider still gets address + Maps directions without it. But
+      // surface the failure so it's diagnosable: NOT_FOUND here
+      // almost always means createRiderTrackingToken isn't deployed
+      // yet (firebase deploy --only functions).
+      debugPrint('Rider tracking link failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Live tracking link unavailable — message sent without it.'),
+            backgroundColor: AppColors.warning,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
     }
   }
 

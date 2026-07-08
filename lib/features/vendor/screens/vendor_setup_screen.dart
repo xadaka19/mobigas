@@ -123,9 +123,19 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   bool _fullKitIsAvailable(String brand, String size) =>
       _fullKitAvailable['$brand|$size'] ?? false;
 
-  // Grill kit (6kg only: gas + cylinder + burner + grill)
-  final TextEditingController _grillKitPriceController = TextEditingController();
-  bool _grillKitAvailable = false;
+  // Grill kit (6kg only: gas + cylinder + burner + grill) — brand-
+  // scoped like refill/fullKit since the gas brand affects the price.
+  // Keyed by brand alone (size is always 6kg).
+  final Map<String, TextEditingController> _grillKitPriceControllers = {};
+  final Map<String, bool> _grillKitAvailable = {};
+
+  TextEditingController _grillKitController(String brand) {
+    return _grillKitPriceControllers.putIfAbsent(
+        brand, () => TextEditingController());
+  }
+
+  bool _grillKitIsAvailable(String brand) =>
+      _grillKitAvailable[brand] ?? false;
   // Burner — fits 3kg or 6kg cylinders only, no gas included
   final Map<String, TextEditingController> _burnerPriceControllers = {
     '3kg': TextEditingController(),
@@ -264,8 +274,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         _fullKitController(brand, size).text = price;
         _fullKitAvailable['$brand|$size'] = available;
       } else if (productType == 'grillKit') {
-        _grillKitPriceController.text = price;
-        _grillKitAvailable = available;
+        _grillKitController(brand).text = price;
+        _grillKitAvailable[brand] = available;
       } else if (productType == 'burner' &&
           _burnerPriceControllers.containsKey(size)) {
         _burnerPriceControllers[size]!.text = price;
@@ -292,7 +302,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _paybillAccountController.dispose();
     for (final c in _priceControllers.values) { c.dispose(); }
     for (final c in _fullKitPriceControllers.values) { c.dispose(); }
-    _grillKitPriceController.dispose();
+    for (final c in _grillKitPriceControllers.values) { c.dispose(); }
     for (final c in _burnerPriceControllers.values) { c.dispose(); }
     _regulatorPriceController.dispose();
     _mekoCookerPriceController.dispose();
@@ -427,15 +437,18 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           });
         }
       }
-      // Grill kit
-      if (_grillKitAvailable) {
-        listings.add({
-          'size': '6kg',
-          'kg': 6,
-          'price': double.tryParse(_grillKitPriceController.text) ?? 0.0,
-          'available': true,
-          'productType': 'grillKit',
-        });
+      // Grill kit — 6kg only, brand-scoped
+      for (final e in _grillKitPriceControllers.entries) {
+        if (_grillKitAvailable[e.key] == true) {
+          listings.add({
+            'size': '6kg',
+            'kg': 6,
+            'price': double.tryParse(e.value.text) ?? 0.0,
+            'available': true,
+            'productType': 'grillKit',
+            'brand': e.key,
+          });
+        }
       }
       // Burner — 3kg or 6kg only, no gas
       for (final e in _burnerPriceControllers.entries) {
@@ -1292,19 +1305,19 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 onToggle: (v) => setState(() =>
                     _fullKitAvailable['$_activePricingBrand|$size'] = v),
               )),
+          const SizedBox(height: 24),
+          _sectionHeader('Grill Kit — 6kg only — $_activePricingBrand'),
+          const SizedBox(height: 4),
+          Text('Gas + Cylinder + LPG Burner + Grill — complete package',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400, fontSize: 11)),
+          const SizedBox(height: 10),
+          _productRow('6kg', _grillKitController(_activePricingBrand),
+              available: _grillKitIsAvailable(_activePricingBrand),
+              onToggle: (v) => setState(
+                  () => _grillKitAvailable[_activePricingBrand] = v),
+              label: 'Grill Kit (6kg)'),
         ],
-        const SizedBox(height: 24),
-        // Grill Kit Section
-        _sectionHeader('Grill Kit — 6kg only'),
-        const SizedBox(height: 4),
-        Text('Gas + Cylinder + LPG Burner + Grill — complete package',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400, fontSize: 11)),
-        const SizedBox(height: 10),
-        _productRow('6kg', _grillKitPriceController,
-            available: _grillKitAvailable,
-            onToggle: (v) => setState(() => _grillKitAvailable = v),
-            label: 'Grill Kit (6kg)'),
         const SizedBox(height: 24),
         _sectionHeader('Burner — fits 3kg or 6kg cylinders'),
         const SizedBox(height: 4),

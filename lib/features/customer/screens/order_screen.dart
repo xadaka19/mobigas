@@ -178,7 +178,7 @@ class _OrderScreenState extends State<OrderScreen> {
       case GasProductType.regulator:
         return 'Standalone regulator — fits 13kg cylinders, no gas included';
       case GasProductType.mekoCooker:
-        return 'Meko + two burner cooker set — gas, hosepipe,regulator and 6kg cylinder included';
+        return 'Meko stove + cooker set — no gas or cylinder included';
     }
   }
 
@@ -374,12 +374,13 @@ class _OrderScreenState extends State<OrderScreen> {
     final sizes = sizeKg.keys.toList()
       ..sort((a, b) => sizeKg[a]!.compareTo(sizeKg[b]!));
 
-    // Distinct brands available at this exact type+size — only
-    // refill and fullKit are priced per-brand (see GasListing.brand);
-    // accessory-type products (grillKit/burner/regulator/mekoCooker)
-    // never need this step at all.
+    // Distinct brands available at this exact type+size — refill,
+    // fullKit, and grillKit are priced per-brand (see
+    // GasListing.brand); pure accessories (burner/regulator/
+    // mekoCooker) never need this step at all.
     final isBrandAwareType = _selectedType == GasProductType.refill ||
-        _selectedType == GasProductType.fullKit;
+        _selectedType == GasProductType.fullKit ||
+        _selectedType == GasProductType.grillKit;
     final brandsAvailable = <String>{};
     if (isBrandAwareType && _selectedSize != null) {
       for (final v in vendors) {
@@ -450,7 +451,7 @@ class _OrderScreenState extends State<OrderScreen> {
           _infoCard(
             icon: Icons.payments_outlined,
             text:
-                'Your available credit (KES ${customer!.bankCreditAvailable.toStringAsFixed(0)}) is below current gas prices, so this order is cash on delivery. Repay via M-Pesa or cash on delivery.',
+                'Your available credit (KES ${customer!.bankCreditAvailable.toStringAsFixed(0)}) is below current gas prices, so this order is cash on delivery. Repay via M-Pesa to free up your credit.',
           ),
         ] else ...[
           // No credit limit — cash is simply how it works.

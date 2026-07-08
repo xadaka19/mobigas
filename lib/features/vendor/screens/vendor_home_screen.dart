@@ -493,6 +493,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     );
   }
 
+  /// Joins two location parts without duplication — if either
+  /// contains the other (e.g. address already ends with the county),
+  /// just use the longer one.
+  static String _dedupeJoin(String a, String b) {
+    final x = a.trim();
+    final y = b.trim();
+    if (x.isEmpty) return y;
+    if (y.isEmpty) return x;
+    if (x.toLowerCase().contains(y.toLowerCase())) return x;
+    if (y.toLowerCase().contains(x.toLowerCase())) return y;
+    return '$x, $y';
+  }
+
   Widget _buildVendorHeader() {
     return Container(
       width: double.infinity,
@@ -569,7 +582,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            '${_vendorData?['address'] ?? _vendorData?['estate'] ?? ''}, ${_vendorData?['county'] ?? ''}',
+            _dedupeJoin(
+                (_vendorData?['address'] ?? _vendorData?['estate'] ?? '')
+                    .toString(),
+                (_vendorData?['county'] ?? '').toString()),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppColors.gray400,
                 ),

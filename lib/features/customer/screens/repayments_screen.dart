@@ -14,14 +14,21 @@ class RepaymentsScreen extends StatelessWidget {
     final orders = context.watch<OrderProvider>();
     final customer = context.watch<AuthProvider>().customer;
 
+    // BUG FIX: these lists used to filter by STATUS ONLY, so cash
+    // orders (paid in full at the door) showed up here as bank loans
+    // — with 8% interest added and a fabricated due date. Only
+    // credit-financed orders belong on this screen at all.
     final pendingOrders = orders.orders
         .where((o) =>
-            o.status == OrderStatus.delivered ||
-            o.status == OrderStatus.repaying)
+            o.paymentMethod == PaymentMethod.credit &&
+            (o.status == OrderStatus.delivered ||
+                o.status == OrderStatus.repaying))
         .toList();
 
     final completedOrders = orders.orders
-        .where((o) => o.status == OrderStatus.completed)
+        .where((o) =>
+            o.paymentMethod == PaymentMethod.credit &&
+            o.status == OrderStatus.completed)
         .toList();
 
     return Column(
@@ -216,14 +223,17 @@ class RepaymentsScreen extends StatelessWidget {
                                 fontWeight: FontWeight.w800,
                               ),
                         ),
-                        Text(
-                          'to ${order.partnerBankName}',
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: AppColors.gray400,
-                                    fontSize: 11,
-                                  ),
-                        ),
+                        if (order.partnerBankName.isNotEmpty)
+                          Text(
+                            'to ${order.partnerBankName}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: AppColors.gray400,
+                                  fontSize: 11,
+                                ),
+                          ),
                       ],
                     ),
                   ],
@@ -264,7 +274,8 @@ class RepaymentsScreen extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         _mpesaStep(context, '1', 'Go to M-Pesa → Lipa na M-Pesa → Pay Bill'),
-        _mpesaStep(context, '2', 'Business no: $paybill (${order.partnerBankName})',
+        _mpesaStep(context, '2',
+            'Business no: $paybill (${order.partnerBankName})',
             copyValue: paybill),
         _mpesaStep(context, '3', 'Account no: $accountNumber',
             copyValue: accountNumber),
@@ -290,7 +301,7 @@ class RepaymentsScreen extends StatelessWidget {
                 child: Text(
                   'Use your Order ID ($accountNumber) as the account number so your payment is matched correctly.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Color(0xFF166534),
+                        color: const Color(0xFF166534),
                         height: 1.4,
                         fontSize: 11,
                       ),
@@ -384,7 +395,7 @@ class RepaymentsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Repayments appear here after you order gas',
+            'Repayments appear here after you buy gas on credit',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppColors.gray400,

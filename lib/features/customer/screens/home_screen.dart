@@ -1165,7 +1165,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _profileTile(Icons.badge_outlined, 'National ID',
                     customer.nationalId),
                 _profileTile(Icons.location_on_outlined, 'Location',
-                    '${customer.estate}, ${customer.county}'),
+                    _dedupeJoin(customer.estate, customer.county)),
                 _profileTile(Icons.people_outline_rounded, 'Guarantors',
                     '${customer.guarantors.length} added'),
                 if (customer.partnerBankName.isNotEmpty)
@@ -1216,6 +1216,19 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+  /// Joins two location parts without duplication — if either
+  /// contains the other (e.g. estate already ends with the county),
+  /// just use the longer one.
+  static String _dedupeJoin(String a, String b) {
+    final x = a.trim();
+    final y = b.trim();
+    if (x.isEmpty) return y;
+    if (y.isEmpty) return x;
+    if (x.toLowerCase().contains(y.toLowerCase())) return x;
+    if (y.toLowerCase().contains(x.toLowerCase())) return y;
+    return '$x, $y';
   }
 
   Widget _profileTile(IconData icon, String label, String value) {

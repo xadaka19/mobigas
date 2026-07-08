@@ -101,9 +101,12 @@ class OrderProvider extends ChangeNotifier {
         vendorName: vendor.businessName,
         vendorPhone: vendor.phone,
         customerName: customer.name,
-        customerArea: customer.estate.trim() == customer.area.trim()
-            ? customer.estate.trim()
-            : '${customer.estate}, ${customer.area}',
+        // Dedupe: the location picker often writes the SAME full
+        // address into both estate and area, which used to render as
+        // "X, X" everywhere the address shows. Containment (not just
+        // equality) also catches the case where one field is the
+        // other plus a suffix.
+        customerArea: _dedupedArea(customer.estate, customer.area),
         customerPhone: customer.phone,
         customerLatitude: customer.latitude,
         customerLongitude: customer.longitude,
@@ -203,6 +206,18 @@ class OrderProvider extends ChangeNotifier {
   void clearActiveOrder() {
     _activeOrder = null;
     notifyListeners();
+  }
+
+  /// Joins estate + area without duplication — if either contains
+  /// the other, just use the longer one.
+  static String _dedupedArea(String estate, String area) {
+    final e = estate.trim();
+    final a = area.trim();
+    if (e.isEmpty) return a;
+    if (a.isEmpty) return e;
+    if (e.toLowerCase().contains(a.toLowerCase())) return e;
+    if (a.toLowerCase().contains(e.toLowerCase())) return a;
+    return '$e, $a';
   }
 
   String _typeLabel(GasProductType t) {
