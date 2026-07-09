@@ -486,6 +486,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _label('Phone number'),
+        _input(
+          controller: _phoneController,
+          hint: 'e.g. 0712 345 678',
+          icon: Icons.phone_outlined,
+          keyboardType: TextInputType.phone,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(10),
+          ],
+        ),
+        const SizedBox(height: 20),
         _label('Your home location'),
         LocationPickerWidget(
           hint: 'Search your home address in Kenya...',
