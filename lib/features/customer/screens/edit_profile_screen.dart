@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:mobigas/core/services/storage_metadata.dart';
 import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
@@ -56,13 +58,38 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  /// Turns a Firebase failure into something a human can act on.
+  ///
+  /// The old code showed 'Error: \$e' — an ESCAPED dollar sign, so it
+  /// printed those four literal characters instead of interpolating
+  /// the exception. Every upload failure looked identical and told us
+  /// nothing. Storage errors carry a `code` ('unauthorized',
+  /// 'object-not-found', 'bucket-not-found') that says exactly what
+  /// went wrong, so surface it.
+  String _describeError(Object e) {
+    if (e is FirebaseException) {
+      return '${e.plugin}/${e.code}: ${e.message ?? 'no message'}';
+    }
+    return e.toString();
+  }
 
   Future<void> _saveProfile() async {
-    setState(() => _isSaving = true);
     final auth = context.read<AuthProvider>();
-    if (!mounted) return;
     final uid = auth.customer?.id;
-    if (uid == null) return;
+    // Bail BEFORE flipping _isSaving — the old order left the spinner
+    // running forever when uid was null, and the button never came back.
+    if (uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You are signed out. Please sign in again.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
 
     try {
       String? selfieUrl;
@@ -74,9 +101,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             .ref()
             .child('selfies')
             .child(uid);
-        await ref.putFile(_newSelfie!);
+        await ref.putFile(_newSelfie!, imageMetadata(_newSelfie!));
         selfieUrl = await ref.getDownloadURL();
-        setState(() => _isUploading = false);
+        if (mounted) setState(() => _isUploading = false);
       }
 
       // Update Firestore
@@ -93,30 +120,41 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       await FirebaseService.users.doc(uid).update(updates);
       if (mounted) await auth.refreshCustomer();
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Profile updated successfully'),
-            backgroundColor: AppColors.success,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-        Navigator.pop(context);
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Profile updated successfully'),
+          backgroundColor: AppColors.success,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      // Pop LAST. Anything after this runs on a disposed widget.
+      Navigator.pop(context);
+      return;
     } catch (e) {
+      // If this is a Storage failure, the bucket is the first thing
+      // worth eyeballing: a mismatch between firebase_options.dart and
+      // the real bucket name breaks uploads AND breaks every existing
+      // photo URL at the same time.
+      debugPrint('Profile save failed: ${_describeError(e)}');
+      debugPrint('Storage bucket in use: ${FirebaseStorage.instance.bucket}');
       if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _isSaving = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: \$e'),
+            content: Text(_describeError(e)),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 8),
           ),
         );
       }
     }
-    setState(() => _isSaving = false);
   }
 
   @override
@@ -172,42 +210,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                     color: AppColors.orange, width: 3),
                               ),
                               child: ClipOval(
-                                child: _newSelfie != null
-                                    ? Image.file(_newSelfie!,
-                                        fit: BoxFit.cover)
-                                    : customer?.selfieUrl != null
-                                        ? Image.network(
-                                            customer!.selfieUrl!,
-                                            fit: BoxFit.cover,
-                                            loadingBuilder:
-                                                (_, child, progress) =>
-                                                    progress == null
-                                                        ? child
-                                                        : const Center(
-                                                            child:
-                                                                CircularProgressIndicator(
-                                                                    color: AppColors
-                                                                        .orange)),
-                                          )
-                                        : Container(
-                                            color: AppColors.orange,
-                                            child: Center(
-                                              child: Text(
-                                                customer?.name
-                                                        .isNotEmpty ==
-                                                    true
-                                                    ? customer!.name[0]
-                                                        .toUpperCase()
-                                                    : '?',
-                                                style: const TextStyle(
-                                                  color: AppColors.white,
-                                                  fontSize: 48,
-                                                  fontWeight:
-                                                      FontWeight.w700,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
+                                child: _avatar(customer?.selfieUrl,
+                                    customer?.name ?? ''),
                               ),
                             ),
                           ),
@@ -300,11 +304,89 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             )
                           : const Text('Save changes'),
                     ),
+                    // ── Account deletion (Google Play requirement) ──
+                    // Play needs this path to be REACHABLE in-app, not
+                    // just to exist on the website.
+                    const SizedBox(height: 32),
+                    const Divider(color: AppColors.gray200),
+                    const SizedBox(height: 4),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.delete_forever_outlined,
+                          color: AppColors.error),
+                      title: Text(
+                        'Delete account',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(
+                              fontSize: 15,
+                              color: AppColors.error,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      subtitle: Text(
+                        'Permanently remove your account and data',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.gray600),
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded,
+                          color: AppColors.gray400),
+                      onTap: () => context.push('/delete-account'),
+                    ),
                   ],
                 ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Avatar with a real fallback path.
+  ///
+  /// Image.network with no errorBuilder renders nothing when the URL
+  /// 404s or the bucket rejects the read — which is exactly what a
+  /// wrong storageBucket or a `read: false` rule produces. Now a
+  /// broken URL degrades to the initial instead of a blank circle, and
+  /// the reason is printed to the console.
+  Widget _avatar(String? url, String name) {
+    if (_newSelfie != null) {
+      return Image.file(_newSelfie!, fit: BoxFit.cover);
+    }
+    if (url != null && url.isNotEmpty) {
+      return Image.network(
+        url,
+        fit: BoxFit.cover,
+        loadingBuilder: (_, child, progress) => progress == null
+            ? child
+            : const Center(
+                child: CircularProgressIndicator(color: AppColors.orange),
+              ),
+        errorBuilder: (_, error, stack) {
+          debugPrint('Selfie failed to load: $url');
+          debugPrint('Reason: $error');
+          return _initialAvatar(name);
+        },
+      );
+    }
+    return _initialAvatar(name);
+  }
+
+  Widget _initialAvatar(String name) {
+    return Container(
+      color: AppColors.orange,
+      child: Center(
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : '?',
+          style: const TextStyle(
+            color: AppColors.white,
+            fontSize: 48,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );

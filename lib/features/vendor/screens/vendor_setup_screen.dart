@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:mobigas/core/services/storage_metadata.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
@@ -407,7 +408,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             .ref()
             .child('business_certificates')
             .child(_vendorId);
-        await ref.putFile(_certificateFile!);
+        await ref.putFile(_certificateFile!, imageMetadata(_certificateFile!));
         certificateUrl = await ref.getDownloadURL();
         setState(() => _isUploadingCert = false);
       }
@@ -426,7 +427,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               .child('vendor_documents')
               .child(_vendorId)
               .child(key);
-          await ref.putFile(file);
+          await ref.putFile(file, imageMetadata(file));
           docUrls[key] = await ref.getDownloadURL();
         } else {
           docUrls[key] = (widget.existingData?[key] as String?) ?? '';
@@ -1554,7 +1555,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Tap size to toggle. Bank pays you the price you set directly on delivery confirmation.',
+                  'Tap size to toggle. Customers pay you the price you set, directly on delivery.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppColors.orange,
                     height: 1.4,
@@ -2292,7 +2293,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
           const SizedBox(height: 8),
           _paymentNote(
-            'Bank sends payment directly to this M-Pesa number on delivery confirmation.',
+            'Customers pay directly to this M-Pesa number on delivery.',
           ),
         ] else if (_paymentMethod == 'till') ...[
           _field(
@@ -2304,7 +2305,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
           const SizedBox(height: 8),
           _paymentNote(
-            'Bank pays to your M-Pesa till (Buy Goods) number. Works with Equity, KCB, Co-op and most major banks.',
+            'Customers pay to your M-Pesa till (Buy Goods) number.',
           ),
         ] else ...[
           _field(
@@ -2323,7 +2324,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
           const SizedBox(height: 8),
           _paymentNote(
-            'Bank pays to your paybill. Use this if your business has a dedicated M-Pesa paybill.',
+            'Customers pay to your paybill. Use this if your business has a dedicated M-Pesa paybill.',
           ),
         ],
       ],

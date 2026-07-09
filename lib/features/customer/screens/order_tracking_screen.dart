@@ -31,8 +31,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
 
-  bool get _isCash => _order?.paymentMethod == PaymentMethod.cash;
-
   @override
   void initState() {
     super.initState();
@@ -99,7 +97,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           DeliveryNotificationService.showDeliveryConfirmed(
             gasSize: _order?.listing.size ?? '',
             amount: _order?.customerTotal.toStringAsFixed(0) ?? '',
-            isCash: _isCash,
+            isCash: true,
           );
           context.go('/delivery-confirmed');
         }
@@ -427,7 +425,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    // Cash: gas price only. Credit: price + interest.
                     'KES ${order.customerTotal.toStringAsFixed(0)}',
                     style:
                         Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -436,7 +433,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                             ),
                   ),
                   Text(
-                    _isCash ? 'Pay on delivery' : 'Repay in 30 days',
+                    'Pay on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.gray400,
                           fontSize: 10,
@@ -512,9 +509,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _isCash
-                      ? 'Pay the vendor KES ${order.customerTotal.toStringAsFixed(0)} first (cash or M-Pesa), then show this PIN'
-                      : 'Show this PIN to the rider when gas is delivered',
+                  'Pay the vendor KES ${order.customerTotal.toStringAsFixed(0)} first (cash or M-Pesa), then show this PIN',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                         fontSize: 11,

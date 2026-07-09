@@ -2,7 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:mobigas/core/services/storage_metadata.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:mobigas/core/screens/delete_account_screen.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 
@@ -48,6 +50,20 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
 
   String get _vendorId =>
       FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  /// Turns a Firebase failure into something a human can act on.
+  ///
+  /// The old code showed 'Error: \$e' — an ESCAPED dollar sign, so it
+  /// printed those four literal characters instead of interpolating
+  /// the exception. Storage errors carry a `code` ('unauthorized',
+  /// 'object-not-found', 'bucket-not-found') that says exactly what
+  /// went wrong.
+  String _describeError(Object e) {
+    if (e is FirebaseException) {
+      return '${e.plugin}/${e.code}: ${e.message ?? 'no message'}';
+    }
+    return e.toString();
+  }
 
   Future<void> _showPhotoOptions() async {
     showModalBottomSheet(
@@ -107,6 +123,19 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
   }
 
   Future<void> _saveProfile() async {
+    // Bail BEFORE flipping _isSaving — otherwise the spinner runs
+    // forever and Storage is handed an empty path.
+    if (_vendorId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You are signed out. Please sign in again.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     try {
@@ -118,9 +147,9 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
             .ref()
             .child('vendor_photos')
             .child(_vendorId);
-        await ref.putFile(_newPhoto!);
+        await ref.putFile(_newPhoto!, imageMetadata(_newPhoto!));
         photoUrl = await ref.getDownloadURL();
-        setState(() => _isUploading = false);
+        if (mounted) setState(() => _isUploading = false);
       }
 
       final updates = <String, dynamic>{
@@ -133,37 +162,48 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
 
       await FirebaseService.vendors.doc(_vendorId).update(updates);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Profile updated successfully'),
-            backgroundColor: AppColors.success,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-        Navigator.pop(context, true); // return true to trigger reload
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Profile updated successfully'),
+          backgroundColor: AppColors.success,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      // Pop LAST. Anything after this runs on a disposed widget.
+      Navigator.pop(context, true); // true triggers a reload upstream
+      return;
     } catch (e) {
-      debugPrint('Profile update error: \$e');
+      // A Storage failure here and a photo that won't render share one
+      // suspect: the bucket. A mismatch between firebase_options.dart
+      // and the real bucket name breaks uploads AND every existing URL.
+      debugPrint('Profile update failed: ${_describeError(e)}');
+      debugPrint('Storage bucket in use: ${FirebaseStorage.instance.bucket}');
       if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _isSaving = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: \$e'),
+            content: Text(_describeError(e)),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 8),
           ),
         );
       }
     }
-    setState(() => _isSaving = false);
   }
 
   @override
   Widget build(BuildContext context) {
     final currentPhoto = widget.vendorData['photoUrl'] as String?;
     final user = FirebaseAuth.instance.currentUser;
+    final businessName =
+        widget.vendorData['businessName'] as String? ?? 'V';
 
     return Scaffold(
       backgroundColor: AppColors.navy,
@@ -209,35 +249,11 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
                                     color: AppColors.orange, width: 3),
                               ),
                               child: ClipOval(
-                                child: _newPhoto != null
-                                    ? Image.file(_newPhoto!,
-                                        fit: BoxFit.cover)
-                                    : currentPhoto != null
-                                        ? Image.network(currentPhoto,
-                                            fit: BoxFit.cover)
-                                        : user?.photoURL != null
-                                            ? Image.network(
-                                                user!.photoURL!,
-                                                fit: BoxFit.cover)
-                                            : Container(
-                                                color: AppColors.orange,
-                                                child: Center(
-                                                  child: Text(
-                                                    (widget.vendorData[
-                                                                    'businessName']
-                                                                as String?
-                                                            ??
-                                                            'V')[0]
-                                                        .toUpperCase(),
-                                                    style: const TextStyle(
-                                                      color: AppColors.white,
-                                                      fontSize: 48,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
+                                child: _avatar(
+                                  currentPhoto,
+                                  user?.photoURL,
+                                  businessName,
+                                ),
                               ),
                             ),
                           ),
@@ -304,11 +320,97 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
                             )
                           : const Text('Save changes'),
                     ),
+                    // ── Account deletion (Google Play requirement) ──
+                    // Navigator, not context.push — this screen is
+                    // pushed with a MaterialPageRoute and carries
+                    // vendorData, so it never went through GoRouter.
+                    const SizedBox(height: 32),
+                    Divider(color: AppColors.white.withValues(alpha: 0.15)),
+                    const SizedBox(height: 4),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.delete_forever_outlined,
+                          color: AppColors.error),
+                      title: Text(
+                        'Delete account',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(
+                              fontSize: 15,
+                              color: AppColors.error,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      subtitle: Text(
+                        'Permanently remove your business and data',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.gray400),
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded,
+                          color: AppColors.gray400),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DeleteAccountScreen(),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Photo with a real fallback chain: new pick → Firestore photoUrl →
+  /// Google account photo → initial.
+  ///
+  /// Image.network with no errorBuilder renders nothing when the URL
+  /// 404s or Storage rejects the read — which is exactly what a wrong
+  /// storageBucket or a `read: false` rule produces. Now each broken
+  /// URL falls through to the next option and prints why.
+  Widget _avatar(String? photoUrl, String? googlePhotoUrl, String name) {
+    if (_newPhoto != null) {
+      return Image.file(_newPhoto!, fit: BoxFit.cover);
+    }
+    if (photoUrl != null && photoUrl.isNotEmpty) {
+      return Image.network(
+        photoUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, error, stack) {
+          debugPrint('Vendor photo failed to load: $photoUrl');
+          debugPrint('Reason: $error');
+          return _avatar(null, googlePhotoUrl, name);
+        },
+      );
+    }
+    if (googlePhotoUrl != null && googlePhotoUrl.isNotEmpty) {
+      return Image.network(
+        googlePhotoUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, error, stack) => _initialAvatar(name),
+      );
+    }
+    return _initialAvatar(name);
+  }
+
+  Widget _initialAvatar(String name) {
+    return Container(
+      color: AppColors.orange,
+      child: Center(
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : 'V',
+          style: const TextStyle(
+            color: AppColors.white,
+            fontSize: 48,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );

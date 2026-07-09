@@ -81,6 +81,9 @@ class OrderProvider extends ChangeNotifier {
     super.dispose();
   }
 
+  /// Places a cash-on-delivery order. paymentMethod is retained in the
+  /// signature (and always PaymentMethod.cash in this release) so the
+  /// model and Firestore schema stay unchanged.
   Future<void> placeOrder({
     required CustomerModel customer,
     required VendorModel vendor,
@@ -90,8 +93,6 @@ class OrderProvider extends ChangeNotifier {
     _isLoading = true;
     _error = null;
     notifyListeners();
-
-    final isCash = paymentMethod == PaymentMethod.cash;
 
     try {
       final order = OrderModel(
@@ -111,18 +112,16 @@ class OrderProvider extends ChangeNotifier {
         customerLatitude: customer.latitude,
         customerLongitude: customer.longitude,
         listing: listing,
-        paymentMethod: paymentMethod,
-        // Vendor-side customer-finder fee (1%) — cash orders only.
+        paymentMethod: PaymentMethod.cash,
+        // Vendor-side customer-finder fee (1%), accrued on delivery.
         // Never shown to the customer anywhere in the app.
-        finderFee: isCash ? listing.cashFinderFee : 0.0,
-        // No bank involvement on cash orders.
-        bankDisbursementAmount: isCash ? 0.0 : listing.price,
-        originationFeeToMobigas:
-            isCash ? 0.0 : listing.price * MobiGasFees.bankCommissionRate,
+        finderFee: listing.cashFinderFee,
+        bankDisbursementAmount: 0.0,
+        originationFeeToMobigas: 0.0,
         pin: _generatePin(),
         status: OrderStatus.pending,
         createdAt: DateTime.now(),
-        partnerBankName: isCash ? '' : customer.partnerBankName,
+        partnerBankName: '',
       );
 
       // Get vendor FCM token for backend to send push notification
@@ -150,18 +149,11 @@ class OrderProvider extends ChangeNotifier {
               'customerFcmToken': customer.fcmToken ?? '',
               'notificationTitle': 'New order received!',
               'notificationBody':
-                  '${customer.name} ordered ${listing.size} ${_typeLabel(listing.productType)} · KES ${listing.price.toStringAsFixed(0)} · ${isCash ? 'CASH on delivery' : 'Paid by bank credit'}',
+                  '${customer.name} ordered ${listing.size} ${_typeLabel(listing.productType)} · KES ${listing.price.toStringAsFixed(0)} · CASH on delivery',
               'notificationType': 'new_order',
             });
           }
         });
-      }
-
-      // Credit orders reserve the customer's bank credit;
-      // cash orders don't touch it.
-      if (!isCash) {
-        await FirestoreService.updateCreditUsed(
-            customer.id, listing.price);
       }
 
       _activeOrder = order;
@@ -191,8 +183,6 @@ class OrderProvider extends ChangeNotifier {
   }
 
   /// Customer cancels an order the vendor hasn't accepted yet.
-  /// Credit orders get their reserved credit released automatically
-  /// inside updateOrderStatus.
   Future<void> cancelOrder(OrderModel order) async {
     if (order.status != OrderStatus.pending) return;
     await FirestoreService.updateOrderStatus(

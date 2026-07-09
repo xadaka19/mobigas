@@ -12,7 +12,6 @@ import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
-import 'package:mobigas/core/services/api_service.dart';
 import 'package:mobigas/features/shared/order_chat_screen.dart';
 
 class VendorOrderScreen extends StatefulWidget {
@@ -45,7 +44,6 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   double? _customerLat;
   double? _customerLng;
 
-  bool get _isCash => widget.order.paymentMethod == PaymentMethod.cash;
   bool get _isRefill =>
       widget.order.listing.productType == GasProductType.refill;
   String get _amount => widget.order.listing.price.toStringAsFixed(0);
@@ -169,13 +167,6 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     }
   }
 
-  /// Sends the rider the delivery details via the vendor's own SMS
-  /// app — riders aren't MobiGas app users, so there was previously
-  /// NO mechanism at all for them to know where to go; the vendor
-  /// had to relay it verbally. This uses the same URI-scheme handoff
-  /// already used for navigation and calls, so it needs no new
-  /// backend, SMS gateway, or account — it just opens the rider's
-  /// pre-filled text ready to send from the vendor's own number.
   void _openChat() {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     Navigator.push(
@@ -232,6 +223,9 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   }
 
   /// Builds the rider handoff message — shared by SMS and WhatsApp.
+  /// Riders aren't MobiGas app users, so this pre-fills the vendor's
+  /// own SMS/WhatsApp with everything the rider needs: address,
+  /// directions, what to collect, and the live-tracking link.
   String _riderMessageBody() {
     final mapsLink = (_customerLat != null && _customerLng != null)
         ? 'https://www.google.com/maps/dir/?api=1&destination=$_customerLat,$_customerLng&travelmode=driving'
@@ -248,9 +242,8 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     body
       ..writeln('Deliver to: ${widget.order.customerArea}')
       ..writeln('Item: $item')
-      ..write(_isCash
-          ? 'Payment: customer pays KES $_amount (cash or M-Pesa to the vendor). Confirm payment is received before taking the PIN.'
-          : 'Payment: prepaid — nothing to collect. Just get the 4-digit PIN from the customer.');
+      ..write(
+          'Payment: customer pays KES $_amount (cash or M-Pesa to the vendor). Confirm payment is received before taking the PIN.');
     if (mapsLink != null) {
       body.writeln();
       body.write('Directions: $mapsLink');
@@ -403,16 +396,11 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         'deliveredAt': FieldValue.serverTimestamp(),
       });
       // Status change goes through the service — it also accrues the
-      // 1% customer-finder fee for CASH orders. Do not write the
-      // delivered status directly, or the fee is never charged.
+      // 1% customer-finder fee. Do not write the delivered status
+      // directly, or the fee is never charged.
       await FirestoreService.updateOrderStatus(
           widget.order.orderId, OrderStatus.delivered);
       LocationService.stopTracking();
-      // Bank payment trigger — credit orders only; cash was paid
-      // by the customer at the door.
-      if (!_isCash) {
-        ApiService.notifyOrderDelivered(widget.order.orderId);
-      }
       setState(() {
         _step = _Step.confirmed;
         _isLoading = false;
@@ -506,7 +494,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              _isCash ? 'KES $_amount 💵' : 'KES $_amount',
+              'KES $_amount 💵',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: AppColors.orange,
                     fontWeight: FontWeight.w700,
@@ -672,20 +660,12 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   ? '${widget.order.listing.brand} · ${widget.order.listing.size} · ${widget.order.listing.productType.label}'
                   : '${widget.order.listing.size} · ${widget.order.listing.productType.label}'),
           _divider(),
-          _row(
-              _isCash
-                  ? Icons.payments_rounded
-                  : Icons.account_balance_outlined,
-              'You receive',
-              _isCash
-                  ? 'KES $_amount cash from customer'
-                  : 'KES $_amount from bank on delivery'),
+          _row(Icons.payments_rounded, 'You receive',
+              'KES $_amount from customer on delivery'),
         ])),
-        if (_isCash) ...[
-          const SizedBox(height: 16),
-          _infoBox(Icons.payments_rounded,
-              'CASH ORDER: confirm payment of KES $_amount is received (cash or M-Pesa to you) before the customer shares the PIN — the PIN completes the delivery.'),
-        ],
+        const SizedBox(height: 16),
+        _infoBox(Icons.payments_rounded,
+            'Confirm payment of KES $_amount is received (cash or M-Pesa to you) before the customer shares the PIN — the PIN completes the delivery.'),
         const SizedBox(height: 20),
         // Rider assignment
         _card(child: Column(
@@ -886,11 +866,9 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               widget.order.listing.brand.isNotEmpty
                   ? '${widget.order.listing.brand} · ${widget.order.listing.size}'
                   : widget.order.listing.size),
-          if (_isCash) ...[
-            _divider(),
-            _row(Icons.payments_rounded, 'Payment',
-                'KES $_amount — confirm received before PIN'),
-          ],
+          _divider(),
+          _row(Icons.payments_rounded, 'Payment',
+              'KES $_amount — confirm received before PIN'),
           // BUG FIX: rider info was captured on the Prepare step and
           // then never shown again anywhere — the vendor had no way
           // to confirm who they'd actually assigned.
@@ -998,13 +976,13 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               textAlign: TextAlign.center),
         ])),
         const SizedBox(height: 16),
-        if (_isCash)
-          _infoBox(Icons.payments_rounded,
-              'Confirm payment of KES $_amount is received (cash or M-Pesa to you) FIRST — the customer\'s PIN completes the delivery.'),
-        if (_isCash && _isRefill) const SizedBox(height: 12),
-        if (_isRefill)
+        _infoBox(Icons.payments_rounded,
+            'Confirm payment of KES $_amount is received (cash or M-Pesa to you) FIRST — the customer\'s PIN completes the delivery.'),
+        if (_isRefill) ...[
+          const SizedBox(height: 12),
           _infoBox(Icons.swap_horiz_rounded,
               'Collect the empty cylinder from customer before handing over the new gas.'),
+        ],
         if (_useRider && _riderNameController.text.trim().isNotEmpty) ...[
           const SizedBox(height: 12),
           _infoBox(Icons.two_wheeler_outlined,
@@ -1056,12 +1034,8 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
             const CircularProgressIndicator(color: AppColors.orange),
           ],
           const SizedBox(height: 12),
-          _row(
-              Icons.payments_rounded,
-              _isCash ? 'You collected' : 'You receive',
-              _isCash
-                  ? 'KES $_amount cash from customer'
-                  : 'KES $_amount after PIN confirmed'),
+          _row(Icons.payments_rounded, 'You collected',
+              'KES $_amount from customer'),
         ])),
       ],
     );
@@ -1115,10 +1089,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                           fontSize: 24,
                         ),
                   ),
-                  Text(
-                      _isCash
-                          ? 'Collected in cash from the customer'
-                          : 'Instantly sent to your M-Pesa by ${widget.order.partnerBankName.isNotEmpty ? widget.order.partnerBankName : 'the partner bank'}',
+                  Text('Collected from the customer on delivery',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall

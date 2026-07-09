@@ -8,6 +8,7 @@ import 'package:mobigas/features/customer/screens/order_tracking_screen.dart';
 import 'package:mobigas/features/customer/screens/delivery_confirmed_screen.dart';
 import 'package:mobigas/features/customer/screens/login_screen.dart';
 import 'package:mobigas/core/screens/terms_screen.dart';
+import 'package:mobigas/core/screens/delete_account_screen.dart';
 import 'package:mobigas/features/customer/screens/edit_profile_screen.dart';
 import 'package:mobigas/features/customer/screens/support_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_support_screen.dart';
@@ -66,6 +67,11 @@ class AppRouter {
           audience: TermsAudience.vendor,
           isPrivacyPolicy: true,
         ),
+      ),
+      // Shared by both flavors — the screen reads FlavorConfig itself.
+      GoRoute(
+        path: '/delete-account',
+        builder: (context, state) => const DeleteAccountScreen(),
       ),
       GoRoute(
         path: '/login',

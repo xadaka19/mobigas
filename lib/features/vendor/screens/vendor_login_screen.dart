@@ -84,13 +84,13 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
               const Spacer(),
               // Value props
               _valueProp(Icons.payments_rounded,
-                  'Get paid on every delivery — M-Pesa or cash'),
+                  'Get paid on every delivery — cash or M-Pesa, direct to you'),
               const SizedBox(height: 12),
               _valueProp(Icons.people_outline_rounded,
                   'New customers delivered to you'),
               const SizedBox(height: 12),
-              _valueProp(Icons.shield_outlined,
-                  'Credit orders: the bank pays you in seconds'),
+              _valueProp(Icons.insights_rounded,
+                  'Track your sales and export reports anytime'),
               const Spacer(),
               // Google Sign-In button
               _isLoading

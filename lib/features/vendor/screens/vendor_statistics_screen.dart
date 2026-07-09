@@ -7,9 +7,8 @@ import 'package:printing/printing.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 
 /// Detailed sales & fulfillment statistics for a vendor, with a
-/// month-on-month breakdown and a PDF export — built specifically so
-/// a vendor can hand their MobiGas transaction history to ANY bank,
-/// not just MobiGas's partner banks, as independent proof of income.
+/// month-on-month breakdown and a PDF export, so a vendor has a clear
+/// record of their own trading history on the platform.
 ///
 /// Reads from two Cloud Function-maintained aggregate collections
 /// rather than the vendor's raw order history, so this screen stays
@@ -32,8 +31,6 @@ class _MonthStat {
   final int vendorDeclined;
   final int otherCancelled;
   final double cashSales;
-  final double creditSales;
-  final int defaulted;
 
   const _MonthStat({
     required this.month,
@@ -42,13 +39,11 @@ class _MonthStat {
     this.vendorDeclined = 0,
     this.otherCancelled = 0,
     this.cashSales = 0,
-    this.creditSales = 0,
-    this.defaulted = 0,
   });
 
   int get totalCancelled =>
       customerCancelled + vendorDeclined + otherCancelled;
-  double get totalSales => cashSales + creditSales;
+  double get totalSales => cashSales;
 
   factory _MonthStat.empty(DateTime month) => _MonthStat(month: month);
 
@@ -60,8 +55,6 @@ class _MonthStat {
       vendorDeclined: (d['vendorDeclined'] ?? 0) as int,
       otherCancelled: (d['otherCancelled'] ?? 0) as int,
       cashSales: (d['cashSales'] ?? 0).toDouble(),
-      creditSales: (d['creditSales'] ?? 0).toDouble(),
-      defaulted: (d['defaulted'] ?? 0) as int,
     );
   }
 }
@@ -71,7 +64,7 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
   bool _isGeneratingPdf = false;
 
   /// Lifetime running totals — one document, updated by the Cloud
-  /// Function on every order that reaches delivered/cancelled/defaulted.
+  /// Function on every order that reaches delivered/cancelled.
   Stream<DocumentSnapshot<Map<String, dynamic>>> get _alltimeStream {
     return FirebaseFirestore.instance
         .collection('vendor_stats_alltime')
@@ -97,9 +90,8 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
   }
 
   /// Merges the sparse monthly docs (only months with activity have a
-  /// doc) into a continuous 12-month series — a bank reviewing this
-  /// wants to see the shape of the business over time, including
-  /// quiet months, not just months where something happened.
+  /// doc) into a continuous 12-month series — the shape of the
+  /// business over time is clearer when quiet months are shown too.
   List<_MonthStat> _continuousMonths(
       List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     final now = DateTime.now();
@@ -161,10 +153,7 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                       final totalCancelled = customerCancelled +
                           vendorDeclined +
                           otherCancelled;
-                      final defaulted = (a['defaulted'] ?? 0) as int;
-                      final cashSales = (a['cashSales'] ?? 0).toDouble();
-                      final creditSales = (a['creditSales'] ?? 0).toDouble();
-                      final totalSales = cashSales + creditSales;
+                      final totalSales = (a['cashSales'] ?? 0).toDouble();
                       final fulfillmentRate =
                           (fulfilled + totalCancelled) == 0
                               ? 0.0
@@ -186,8 +175,6 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                             const SizedBox(height: 12),
                             _summaryGrid(
                               totalSales: totalSales,
-                              cashSales: cashSales,
-                              creditSales: creditSales,
                               fulfilled: fulfilled,
                               cancelled: totalCancelled,
                               fulfillmentRate: fulfillmentRate,
@@ -227,11 +214,8 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                                       customerCancelled,
                                       vendorDeclined,
                                       otherCancelled,
-                                      defaulted,
                                       monthly,
                                       totalSales,
-                                      cashSales,
-                                      creditSales,
                                       fulfillmentRate),
                               icon: _isGeneratingPdf
                                   ? const SizedBox(
@@ -252,7 +236,7 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'Share this report with any bank as proof of your MobiGas sales history — not limited to MobiGas partner banks.',
+                              'Download or share a record of your MobiGas sales history at any time.',
                               textAlign: TextAlign.center,
                               style: Theme.of(context)
                                   .textTheme
@@ -354,8 +338,6 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
 
   Widget _summaryGrid({
     required double totalSales,
-    required double cashSales,
-    required double creditSales,
     required int fulfilled,
     required int cancelled,
     required double fulfillmentRate,
@@ -363,10 +345,6 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
     final cards = [
       ('Total sales', 'KES ${totalSales.toStringAsFixed(0)}',
           Icons.account_balance_wallet_rounded, AppColors.success),
-      ('Cash sales', 'KES ${cashSales.toStringAsFixed(0)}',
-          Icons.payments_rounded, AppColors.navy),
-      ('Credit sales', 'KES ${creditSales.toStringAsFixed(0)}',
-          Icons.credit_score_rounded, AppColors.orange),
       ('Orders fulfilled', '$fulfilled',
           Icons.check_circle_rounded, AppColors.success),
       ('Orders cancelled', '$cancelled',
@@ -416,10 +394,10 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
   }
 
   /// Breaks the aggregate "Orders cancelled" figure down by who
-  /// cancelled — a bank cares whether a vendor is unreliable
-  /// (declining orders themselves) versus just serving customers who
-  /// change their minds. "Not recorded" only appears for orders
-  /// cancelled before this tracking existed.
+  /// cancelled — whether a vendor is declining orders themselves is
+  /// meaningfully different from customers changing their minds.
+  /// "Not recorded" only appears for orders cancelled before this
+  /// tracking existed.
   Widget _cancellationBreakdown(
       int customerCancelled, int vendorDeclined, int otherCancelled) {
     if (customerCancelled + vendorDeclined + otherCancelled == 0) {
@@ -539,11 +517,8 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
     int customerCancelled,
     int vendorDeclined,
     int otherCancelled,
-    int defaulted,
     List<_MonthStat> monthly,
     double totalSales,
-    double cashSales,
-    double creditSales,
     double fulfillmentRate,
   ) async {
     setState(() => _isGeneratingPdf = true);
@@ -592,8 +567,7 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
               pw.Divider(color: PdfColors.grey300),
               pw.Text(
                 'This statement reflects transactions recorded on the MobiGas platform '
-                'and is provided for the vendor\'s own use, including with third-party '
-                'lenders. MobiGas does not guarantee third-party credit decisions.',
+                'and is provided for the vendor\'s own reference.',
                 style: pw.TextStyle(fontSize: 8, color: gray),
               ),
               pw.SizedBox(height: 4),
@@ -644,17 +618,12 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
               children: [
                 _pdfRow('Total sales (all time)',
                     'KES ${totalSales.toStringAsFixed(0)}', bold: true),
-                _pdfRow('Cash sales', 'KES ${cashSales.toStringAsFixed(0)}'),
-                _pdfRow(
-                    'Credit sales', 'KES ${creditSales.toStringAsFixed(0)}'),
                 _pdfRow('Orders fulfilled', '$fulfilled'),
                 _pdfRow('Cancelled by customer', '$customerCancelled'),
                 _pdfRow('Declined by vendor', '$vendorDeclined'),
                 if (otherCancelled > 0)
                   _pdfRow('Cancelled (reason not recorded)',
                       '$otherCancelled'),
-                if (defaulted > 0)
-                  _pdfRow('Credit orders defaulted', '$defaulted'),
                 _pdfRow('Fulfillment rate',
                     '${(fulfillmentRate * 100).toStringAsFixed(0)}%'),
               ],
@@ -670,13 +639,11 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
               border:
                   pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
               columnWidths: const {
-                0: pw.FlexColumnWidth(1.3),
-                1: pw.FlexColumnWidth(0.8),
-                2: pw.FlexColumnWidth(1),
+                0: pw.FlexColumnWidth(1.5),
+                1: pw.FlexColumnWidth(1),
+                2: pw.FlexColumnWidth(1.2),
                 3: pw.FlexColumnWidth(1),
                 4: pw.FlexColumnWidth(1),
-                5: pw.FlexColumnWidth(0.9),
-                6: pw.FlexColumnWidth(0.9),
               },
               children: [
                 pw.TableRow(
@@ -684,9 +651,7 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                   children: [
                     _pdfHeaderCell('Month'),
                     _pdfHeaderCell('Orders'),
-                    _pdfHeaderCell('Cash'),
-                    _pdfHeaderCell('Credit'),
-                    _pdfHeaderCell('Total'),
+                    _pdfHeaderCell('Sales'),
                     _pdfHeaderCell('Cust.\nCancel'),
                     _pdfHeaderCell('Vendor\nDecline'),
                   ],
@@ -694,8 +659,6 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                 ...monthly.map((m) => pw.TableRow(children: [
                       _pdfCell(_monthLabel(m.month)),
                       _pdfCell('${m.fulfilled}'),
-                      _pdfCell(m.cashSales.toStringAsFixed(0)),
-                      _pdfCell(m.creditSales.toStringAsFixed(0)),
                       _pdfCell(m.totalSales.toStringAsFixed(0)),
                       _pdfCell('${m.customerCancelled}'),
                       _pdfCell('${m.vendorDeclined}'),

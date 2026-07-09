@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:mobigas/core/services/storage_metadata.dart';
 import 'dart:io';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/device_fingerprint_service.dart';
@@ -126,7 +126,8 @@ class AuthProvider extends ChangeNotifier {
       // Capture device fingerprint for fraud prevention
       final deviceFingerprint = await DeviceFingerprintService.getFingerprint();
 
-      // Check for duplicate phone or national ID, and flag shared-device usage
+      // Check for duplicate phone (and National ID when one was
+      // provided — it's optional in v1), and flag shared-device usage.
       final duplicates = await FirestoreService.checkDuplicates(
         phone: phone.trim(),
         nationalId: nationalId.trim(),
@@ -140,7 +141,9 @@ class AuthProvider extends ChangeNotifier {
         return;
       }
 
-      if (duplicates['idTaken'] == true) {
+      // Only enforce the ID-duplicate guard when the customer actually
+      // entered an ID — a blank ID can never be "taken".
+      if (nationalId.trim().isNotEmpty && duplicates['idTaken'] == true) {
         _error = 'An account already exists with this National ID. Please sign in instead.';
         _state = AuthState.unauthenticated;
         notifyListeners();
@@ -177,38 +180,19 @@ class AuthProvider extends ChangeNotifier {
         guarantors: guarantors,
       );
 
-      // SPEED FIX: these three used to run fully sequentially — the
-      // selfie upload (Storage) has nothing to do with the two
-      // Firestore writes below, and createUser/submitBankApplication
-      // write to different collections and don't depend on each
-      // other's results either. Kick the selfie upload off now
-      // without awaiting it yet, run the two independent Firestore
-      // writes in parallel, then only wait on the upload at the end
-      // to patch in the URL. Shaves real wall-clock time off every
-      // signup instead of serializing three independent operations.
+      // Create the customer profile. Kick the optional selfie upload
+      // off in parallel (Storage write is independent of the Firestore
+      // profile write), then patch in the URL once it lands.
       final selfieUploadFuture = selfieFile == null
           ? Future<String?>.value(null)
           : (() async {
               final ref =
                   FirebaseStorage.instance.ref().child('selfies').child(uid);
-              await ref.putFile(selfieFile);
+              await ref.putFile(selfieFile, imageMetadata(selfieFile));
               return ref.getDownloadURL();
             })();
 
-      await Future.wait([
-        FirestoreService.createUser(customer),
-        FirestoreService.submitBankApplication(
-          customerId: uid,
-          name: name,
-          phone: phone,
-          nationalId: nationalId,
-          county: county,
-          area: area,
-          guarantors: guarantors
-              .map((g) => {'name': g.name, 'phone': g.phone})
-              .toList(),
-        ),
-      ]);
+      await FirestoreService.createUser(customer);
 
       final selfieUrl = await selfieUploadFuture;
       if (selfieUrl != null) {
@@ -240,86 +224,8 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> submitCreditApplication({
-    required List<GuarantorModel> guarantors,
-  }) async {
-    if (_customer == null) return;
-
-    // BUG FIX: this reconstruction was dropping email,
-    // deviceFingerprint, deviceFlagged, selfieUrl, and fcmToken from
-    // the in-memory customer object (Firestore itself was fine —
-    // only 'guarantors'/'bankStatus'/'updatedAt' get written below —
-    // but the app's own copy of the customer lost those fields until
-    // the next full refetch).
-    _customer = CustomerModel(
-      id: _customer!.id,
-      name: _customer!.name,
-      email: _customer!.email,
-      phone: _customer!.phone,
-      deviceFingerprint: _customer!.deviceFingerprint,
-      deviceFlagged: _customer!.deviceFlagged,
-      nationalId: _customer!.nationalId,
-      county: _customer!.county,
-      area: _customer!.area,
-      estate: _customer!.estate,
-      latitude: _customer!.latitude,
-      longitude: _customer!.longitude,
-      bankApprovedLimit: _customer!.bankApprovedLimit,
-      bankCreditUsed: _customer!.bankCreditUsed,
-      bankStatus: BankApprovalStatus.pending,
-      partnerBankName: _customer!.partnerBankName,
-      guarantors: guarantors,
-      selfieUrl: _customer!.selfieUrl,
-      fcmToken: _customer!.fcmToken,
-    );
-
-    // Save guarantors to Firestore user document
-    await FirebaseService.users.doc(_customer!.id).update({
-      'guarantors': guarantors
-          .map((g) => {'name': g.name, 'phone': g.phone})
-          .toList(),
-      'bankStatus': BankApprovalStatus.pending.name,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    // Submit KYC to bank application queue
-    await FirestoreService.submitBankApplication(
-      customerId: _customer!.id,
-      name: _customer!.name,
-      phone: _customer!.phone,
-      nationalId: _customer!.nationalId,
-      county: _customer!.county,
-      area: _customer!.area,
-      guarantors: guarantors
-          .map((g) => {'name': g.name, 'phone': g.phone})
-          .toList(),
-    );
-
-    notifyListeners();
-  }
-
   Future<void> resetPassword(String email) async {
     await FirebaseService.auth.sendPasswordResetEmail(email: email);
-  }
-
-  Future<void> requestBankApproval() async {
-    if (_customer == null) return;
-
-    // Poll Firestore for bank response
-    // In real system: bank API calls our backend webhook
-    // Backend updates bank_applications collection
-    // We listen for changes here
-
-    
-    // For pilot: manual approval via admin dashboard
-    await Future.delayed(const Duration(seconds: 2));
-
-    // Check if bank has responded
-    final updated = await FirestoreService.getUser(_customer!.id);
-    if (updated != null) {
-      _customer = updated;
-      notifyListeners();
-    }
   }
 
   Future<void> refreshCustomer() async {
@@ -341,11 +247,11 @@ class AuthProvider extends ChangeNotifier {
   String _authError(String code) {
     switch (code) {
       case 'user-not-found':
-        return 'No account found with this phone number';
+        return 'No account found with this email';
       case 'wrong-password':
         return 'Incorrect password';
       case 'email-already-in-use':
-        return 'An account already exists with this phone number';
+        return 'An account already exists with this email';
       case 'weak-password':
         return 'Password must be at least 6 characters';
       case 'network-request-failed':
