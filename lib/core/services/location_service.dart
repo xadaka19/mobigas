@@ -17,9 +17,18 @@ class LocationService {
     }
 
     _locationSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
+      locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 10, // update every 10 meters
+        // Required for Android to keep sending location updates once
+        // the app is backgrounded or the screen is off. Without this,
+        // the OS throttles/kills the stream shortly after the vendor
+        // leaves the app, and the customer's live map goes stale.
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'MobiGas delivery in progress',
+          notificationText: 'Sharing your location with the customer',
+          enableWakeLock: true,
+        ),
       ),
     ).listen((Position position) {
       _updateOrderLocation(orderId, position);
