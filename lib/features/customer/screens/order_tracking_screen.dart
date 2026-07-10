@@ -71,8 +71,15 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
       _customerLocation = LatLng(customer.latitude, customer.longitude);
     }
 
+    // The customerId filter is not decoration. Under the scoped
+    // `orders` rules, a query filtered on orderId alone is rejected —
+    // Firestore cannot prove the result belongs to this customer, so
+    // it refuses rather than leak someone else's order. Two equality
+    // filters need no composite index.
     final snap = await FirebaseService.orders
         .where('orderId', isEqualTo: activeOrder.orderId)
+        .where('customerId', isEqualTo: customer?.id ?? '')
+        .limit(1)
         .get();
 
     if (snap.docs.isNotEmpty) {

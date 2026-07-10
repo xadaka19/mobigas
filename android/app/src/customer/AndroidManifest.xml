@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The customer app reads location only while on screen: to find
+         vendors within range, to pin a delivery address, and to show
+         the rider's map. It never runs a location foreground service,
+         so it declares no FOREGROUND_SERVICE permissions. -->
+    <application android:label="MobiGas" />
+</manifest>

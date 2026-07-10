@@ -248,11 +248,10 @@ class FirestoreService {
       'riderName': order.riderName,
       'riderPhone': order.riderPhone,
       'createdAt': FieldValue.serverTimestamp(),
-      'bankRepaymentDueDate': order.paymentMethod == PaymentMethod.credit
-          ? Timestamp.fromDate(
-              DateTime.now().add(const Duration(days: 30)),
-            )
-          : null,
+      // bankRepaymentDueDate is a BNPL field. Nothing sets
+      // paymentMethod to credit in v1, so the ternary always produced
+      // null — and the orders rules now reject a create that carries
+      // an unexpected status anyway. It comes back with the BNPL branch.
     });
     return ref.id;
   }
@@ -285,16 +284,54 @@ class FirestoreService {
             }).toList());
   }
 
+  /// Resolves an order the CURRENT USER is a party to.
+  ///
+  /// Orders are stored with an auto-generated document ID and the
+  /// human-readable orderId as a field, so every lookup is a query.
+  /// Under the scoped `orders` rules a query filtered on orderId alone
+  /// is rejected outright — Firestore cannot prove the result belongs
+  /// to the caller, so it refuses rather than leak. Each lookup must
+  /// therefore also filter on customerId or vendorId.
+  ///
+  /// (The durable fix is to make the document ID equal the orderId, so
+  /// these become .doc(orderId) gets that rules evaluate per-document.
+  /// That's a data migration — worth doing on the branch after launch.)
+  static Future<DocumentReference?> _myOrderRef(String orderId) async {
+    final uid = FirebaseService.auth.currentUser?.uid;
+    if (uid == null) return null;
+
+    for (final field in ['customerId', 'vendorId']) {
+      final snap = await FirebaseService.orders
+          .where('orderId', isEqualTo: orderId)
+          .where(field, isEqualTo: uid)
+          .limit(1)
+          .get();
+      if (snap.docs.isNotEmpty) return snap.docs.first.reference;
+    }
+    return null;
+  }
+
+  /// Status transitions a client is allowed to make.
+  ///
+  /// `delivered` is deliberately NOT among them. It is written only by
+  /// the confirmDelivery Cloud Function, after the server has compared
+  /// the PIN the customer read out — and that same function accrues
+  /// the 1% finder fee. Previously this method compared nothing,
+  /// wrote `delivered` on the vendor's say-so, and then asked the
+  /// vendor's own phone to charge itself a fee. A patched client
+  /// simply skipped that step.
   static Future<void> updateOrderStatus(
       String orderId, OrderStatus status,
       {String? cancelledBy}) async {
-    final snap = await FirebaseService.orders
-        .where('orderId', isEqualTo: orderId)
-        .get();
-    if (snap.docs.isEmpty) return;
+    if (status == OrderStatus.delivered) {
+      throw ArgumentError(
+        'Delivered is written only by the confirmDelivery Cloud Function. '
+        'Call it instead — otherwise the finder fee is never charged.',
+      );
+    }
 
-    final docRef = snap.docs.first.reference;
-    final data = snap.docs.first.data() as Map<String, dynamic>;
+    final docRef = await _myOrderRef(orderId);
+    if (docRef == null) return;
 
     await docRef.update({
       'status': status.name,
@@ -303,76 +340,6 @@ class FirestoreService {
       // null on other status transitions.
       'cancelledBy': ?cancelledBy,
     });
-
-    // Cash orders: accrue the 1% customer-finder fee the vendor owes
-    // MobiGas — only once, and only when delivery is confirmed.
-    if (status == OrderStatus.delivered &&
-        (data['paymentMethod'] ?? 'cash') == 'cash' &&
-        (data['finderFeeAccrued'] ?? false) == false) {
-      final fee = (data['finderFee'] ?? 0).toDouble();
-      final vendorId = data['vendorId'] ?? '';
-      if (fee > 0 && vendorId.isNotEmpty) {
-        await _accrueFinderFee(
-          orderDocRef: docRef,
-          orderId: orderId,
-          vendorId: vendorId,
-          vendorName: data['vendorName'] ?? '',
-          fee: fee,
-          gasPrice: (data['gasPrice'] ?? 0).toDouble(),
-        );
-      }
-    }
-
-    // Cancelled credit orders: release the customer's reserved bank
-    // credit — only once (guarded so retries can't double-refund).
-    if (status == OrderStatus.cancelled &&
-        (data['paymentMethod'] ?? 'cash') == 'credit' &&
-        (data['creditRefunded'] ?? false) == false) {
-      final price = (data['gasPrice'] ?? 0).toDouble();
-      final customerId = data['customerId'] ?? '';
-      if (price > 0 && customerId.isNotEmpty) {
-        await docRef.update({'creditRefunded': true});
-        await updateCreditUsed(customerId, -price);
-      }
-    }
-  }
-
-  static Future<void> _accrueFinderFee({
-    required DocumentReference orderDocRef,
-    required String orderId,
-    required String vendorId,
-    required String vendorName,
-    required double fee,
-    required double gasPrice,
-  }) async {
-    // Mark accrued first so a retry can't double-charge.
-    await orderDocRef.update({'finderFeeAccrued': true});
-
-    await FirebaseFirestore.instance
-        .collection('vendors')
-        .doc(vendorId)
-        .update({'feesOwed': FieldValue.increment(fee)});
-
-    await FirebaseFirestore.instance.collection('platform_fees').add({
-      'orderId': orderId,
-      'vendorId': vendorId,
-      'vendorName': vendorName,
-      'orderAmount': gasPrice,
-      'fee': fee,
-      'feeType': 'cash_finder_fee',
-      'status': 'accrued', // accrued -> paid (admin marks on settlement)
-      'accruedAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  static Future<bool> confirmPin(
-      String orderId, String enteredPin) async {
-    final snap = await FirebaseService.orders
-        .where('orderId', isEqualTo: orderId)
-        .get();
-    if (snap.docs.isEmpty) return false;
-    final data = snap.docs.first.data() as Map<String, dynamic>;
-    return data['pin'] == enteredPin;
   }
 
   static OrderModel _orderFromMap(

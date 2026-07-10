@@ -9,7 +9,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:mobigas/core/services/screen_security_service.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
-import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/shared/order_chat_screen.dart';
@@ -56,18 +55,29 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     ScreenSecurityService.enableSecureMode();
   }
 
+  /// Every read of the order document must prove to Firestore that
+  /// this vendor is a party to it. Under the scoped `orders` rules a
+  /// query filtered on orderId ALONE is rejected outright — Firestore
+  /// cannot know the result belongs to you, so it refuses rather than
+  /// leak. Two equality filters need no composite index.
+  Future<DocumentReference?> _orderRef() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+    final snap = await FirebaseService.orders
+        .where('orderId', isEqualTo: widget.order.orderId)
+        .where('vendorId', isEqualTo: uid)
+        .limit(1)
+        .get();
+    return snap.docs.isEmpty ? null : snap.docs.first.reference;
+  }
+
   /// Watches riderLocation on the order doc — the field the rider's
   /// tracking page writes — so the vendor sees their rider moving on
   /// the en-route map exactly like the customer does.
   void _watchRiderPosition() {
-    FirebaseService.orders
-        .where('orderId', isEqualTo: widget.order.orderId)
-        .limit(1)
-        .get()
-        .then((snap) {
-      if (snap.docs.isEmpty || !mounted) return;
-      _riderPositionSub =
-          snap.docs.first.reference.snapshots().listen((doc) {
+    _orderRef().then((ref) {
+      if (ref == null || !mounted) return;
+      _riderPositionSub = ref.snapshots().listen((doc) {
         if (!mounted) return;
         final data = doc.data() as Map<String, dynamic>?;
         final loc = data?['riderLocation'] as Map<String, dynamic>?;
@@ -100,11 +110,10 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
 
     // Load customer coordinates from Firestore
     try {
-      final snap = await FirebaseService.orders
-          .where('orderId', isEqualTo: widget.order.orderId)
-          .get();
-      if (snap.docs.isNotEmpty) {
-        final data = snap.docs.first.data() as Map<String, dynamic>;
+      final ref = await _orderRef();
+      final doc = await ref?.get();
+      final data = doc?.data() as Map<String, dynamic>?;
+      if (data != null) {
         final cLat = (data['customerLatitude'] ?? 0.0).toDouble();
         final cLng = (data['customerLongitude'] ?? 0.0).toDouble();
         if (cLat != 0 && mounted) {
@@ -114,16 +123,19 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           });
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // Not silent. A permission-denied here means the orders rules
+      // reject this vendor's read, and the delivery map will open on
+      // nothing with no explanation.
+      debugPrint('VendorOrderScreen: could not load customer coords — \$e');
+    }
   }
 
   Future<void> _updateStatus(OrderStatus status,
       {Map<String, dynamic>? extra}) async {
-    final snap = await FirebaseService.orders
-        .where('orderId', isEqualTo: widget.order.orderId)
-        .get();
-    if (snap.docs.isNotEmpty) {
-      await snap.docs.first.reference.update({
+    final ref = await _orderRef();
+    if (ref != null) {
+      await ref.update({
         'status': status.name,
         'updatedAt': FieldValue.serverTimestamp(),
         if (_useRider && _riderNameController.text.isNotEmpty)
@@ -354,7 +366,28 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     // the moving rider. Only track this phone when the vendor
     // themselves is delivering.
     if (!_useRider) {
-      await LocationService.startTracking(widget.order.orderId);
+      final result = await LocationService.startTracking(widget.order.orderId);
+      // The trip still starts — a delivery without a live map is
+      // degraded, not broken. But the old code advanced to enRoute
+      // regardless, so a vendor who denied the location permission
+      // saw a normal delivery while the customer's map never moved.
+      if (result != TrackingResult.started && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(switch (result) {
+            TrackingResult.locationServicesOff =>
+              'Turn on location — the customer cannot see you on the map.',
+            TrackingResult.permissionDeniedForever =>
+              'Location is blocked. Enable it in Settings > Apps > MobiGas Vendor.',
+            TrackingResult.permissionDenied =>
+              'Without location the customer cannot track your delivery.',
+            TrackingResult.notSignedIn => 'You are signed out.',
+            TrackingResult.orderNotFound => 'Could not find this order.',
+            TrackingResult.started => '',
+          }),
+          backgroundColor: AppColors.warning,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
     }
     setState(() {
       _step = _Step.enRoute;
@@ -372,44 +405,65 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     });
   }
 
+  /// The PIN is checked on the SERVER, by the confirmDelivery callable.
+  ///
+  /// It used to be compared here, in Dart, against a `pin` field this
+  /// phone had already downloaded — so nothing anywhere verified the
+  /// customer had ever produced it, and a modified client could
+  /// confirm its own deliveries (and accrue the finder fee) with no
+  /// customer present. Firestore rules cannot close that: a rule can
+  /// only inspect values the client chooses to send.
+  ///
+  /// confirmDelivery is now the only writer of status 'delivered'. It
+  /// also clears riderLocation and rate-limits PIN attempts.
   Future<void> _verifyPin(String pin) async {
     setState(() {
       _isLoading = true;
       _pinError = false;
     });
 
-    final snap = await FirebaseService.orders
-        .where('orderId', isEqualTo: widget.order.orderId)
-        .get();
-
-    if (snap.docs.isEmpty) {
-      setState(() {
-        _pinError = true;
-        _isLoading = false;
+    try {
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('confirmDelivery');
+      await callable.call({
+        'orderId': widget.order.orderId,
+        'pin': pin,
       });
-      return;
-    }
 
-    final data = snap.docs.first.data() as Map<String, dynamic>;
-    if (pin == data['pin']) {
-      await snap.docs.first.reference.update({
-        'deliveredAt': FieldValue.serverTimestamp(),
-      });
-      // Status change goes through the service — it also accrues the
-      // 1% customer-finder fee. Do not write the delivered status
-      // directly, or the fee is never charged.
-      await FirestoreService.updateOrderStatus(
-          widget.order.orderId, OrderStatus.delivered);
-      LocationService.stopTracking();
+      await LocationService.stopTracking();
+      if (!mounted) return;
       setState(() {
         _step = _Step.confirmed;
         _isLoading = false;
       });
-    } else {
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      // invalid-argument is a wrong PIN — show it on the field, the
+      // way a wrong PIN always looked. Everything else is a real
+      // failure the vendor needs told about.
+      final wrongPin = e.code == 'invalid-argument';
       setState(() {
-        _pinError = true;
+        _pinError = wrongPin;
         _isLoading = false;
       });
+      if (!wrongPin) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.message ?? 'Could not confirm delivery.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pinError = false;
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No connection. Try confirming again.'),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
