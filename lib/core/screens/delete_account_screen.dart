@@ -115,7 +115,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             ? 'A deletion request for this account is already being '
                 'processed. We will contact you shortly.'
             : 'We could not submit your request. Check your connection '
-                'and try again, or email support@mobigas.co.ke.';
+                'and try again, or email hello@mobigas.co.ke.';
       });
     } catch (e) {
       debugPrint('Account deletion request failed: $e');
@@ -123,7 +123,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       setState(() {
         _submitting = false;
         _errorText = 'We could not submit your request. Check your '
-            'connection and try again, or email support@mobigas.co.ke.';
+            'connection and try again, or email hello@mobigas.co.ke.';
       });
     }
   }

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
+import 'package:mobigas/core/widgets/google_sign_in_button.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _isGoogleLoading = false;
 
   @override
   void dispose() {
@@ -41,15 +43,32 @@ class _LoginScreenState extends State<LoginScreen> {
     final auth = context.read<AuthProvider>();
     // Accounts are created with the customer's real email during
     // registration, so login authenticates against that email
-    // directly. (The old phone→"$phone@mobigas.app" synthesis never
-    // matched a real account and always failed.)
+    // directly.
     await auth.login(email.toLowerCase(), _passwordController.text);
 
+    if (!mounted) return;
     if (auth.error != null) {
       _showError(auth.error!);
-    } else if (mounted) {
+    } else {
       context.go('/home');
     }
+  }
+
+  /// Same entry point as signup — an existing Google customer signs
+  /// in, a new one gets a profile created on the spot.
+  Future<void> _continueWithGoogle() async {
+    setState(() => _isGoogleLoading = true);
+    final auth = context.read<AuthProvider>();
+    final ok = await auth.signInWithGoogle();
+
+    if (!mounted) return;
+    setState(() => _isGoogleLoading = false);
+
+    if (!ok) {
+      _showError(auth.error ?? 'Google sign-in did not complete.');
+      return;
+    }
+    context.go('/home');
   }
 
   void _showError(String msg) {
@@ -58,8 +77,7 @@ class _LoginScreenState extends State<LoginScreen> {
         content: Text(msg),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -67,7 +85,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final isLoading = auth.state == AuthState.loading;
+    final isLoading = auth.state == AuthState.loading && !_isGoogleLoading;
+    final busy = isLoading || _isGoogleLoading;
 
     return Scaffold(
       backgroundColor: AppColors.orangeWarm,
@@ -81,16 +100,20 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 8),
+                    GoogleSignInButton(
+                      isLoading: _isGoogleLoading,
+                      onPressed: busy ? null : _continueWithGoogle,
+                    ),
+                    const SizedBox(height: 20),
+                    const OrDivider(label: 'or sign in with email'),
+                    const SizedBox(height: 24),
                     _label('Email address'),
                     TextFormField(
                       controller: _identifierController,
                       keyboardType: TextInputType.emailAddress,
+                      autocorrect: false,
                       onChanged: (_) => setState(() {}),
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: AppColors.navy,
-                            fontWeight: FontWeight.w500,
-                          ),
+                      style: _fieldStyle(context),
                       decoration: const InputDecoration(
                         hintText: 'jane@gmail.com',
                         prefixIcon: Icon(
@@ -105,10 +128,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     TextFormField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: AppColors.navy,
-                            fontWeight: FontWeight.w500,
-                          ),
+                      keyboardType: TextInputType.text,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      autofillHints: const [AutofillHints.password],
+                      style: _fieldStyle(context),
                       decoration: InputDecoration(
                         hintText: 'Enter your password',
                         prefixIcon: const Icon(Icons.lock_outline_rounded,
@@ -150,7 +174,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             );
                           }
                         },
-                        child: Text(
+                        child: const Text(
                           'Forgot password?',
                           style: TextStyle(color: AppColors.orange),
                         ),
@@ -158,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 24),
                     ElevatedButton(
-                      onPressed: isLoading ? null : _login,
+                      onPressed: busy ? null : _login,
                       child: isLoading
                           ? const SizedBox(
                               height: 22,
@@ -182,13 +206,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           onTap: () => context.go('/register'),
                           child: Text(
                             'Create account',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: AppColors.orange,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: AppColors.orange,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                           ),
                         ),
                       ],
@@ -200,19 +222,26 @@ class _LoginScreenState extends State<LoginScreen> {
                         GestureDetector(
                           onTap: () => context.push('/terms'),
                           child: Text('Terms of Service',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
                                     color: AppColors.orange,
                                     decoration: TextDecoration.underline,
                                   )),
                         ),
                         Text('  ·  ',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppColors.gray400,
-                                )),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.gray400,
+                                    )),
                         GestureDetector(
                           onTap: () => context.push('/privacy'),
                           child: Text('Privacy Policy',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
                                     color: AppColors.orange,
                                     decoration: TextDecoration.underline,
                                   )),
@@ -230,6 +259,12 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+
+  TextStyle? _fieldStyle(BuildContext context) =>
+      Theme.of(context).textTheme.bodyLarge?.copyWith(
+            color: AppColors.navy,
+            fontWeight: FontWeight.w500,
+          );
 
   Widget _buildHeader() {
     return Container(

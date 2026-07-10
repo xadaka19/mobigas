@@ -307,7 +307,7 @@ class FirestoreService {
     // Cash orders: accrue the 1% customer-finder fee the vendor owes
     // MobiGas — only once, and only when delivery is confirmed.
     if (status == OrderStatus.delivered &&
-        (data['paymentMethod'] ?? 'credit') == 'cash' &&
+        (data['paymentMethod'] ?? 'cash') == 'cash' &&
         (data['finderFeeAccrued'] ?? false) == false) {
       final fee = (data['finderFee'] ?? 0).toDouble();
       final vendorId = data['vendorId'] ?? '';
@@ -326,7 +326,7 @@ class FirestoreService {
     // Cancelled credit orders: release the customer's reserved bank
     // credit — only once (guarded so retries can't double-refund).
     if (status == OrderStatus.cancelled &&
-        (data['paymentMethod'] ?? 'credit') == 'credit' &&
+        (data['paymentMethod'] ?? 'cash') == 'credit' &&
         (data['creditRefunded'] ?? false) == false) {
       final price = (data['gasPrice'] ?? 0).toDouble();
       final customerId = data['customerId'] ?? '';
@@ -400,8 +400,8 @@ class FirestoreService {
         brand: data['gasBrand'] ?? '',
       ),
       paymentMethod: PaymentMethod.values.firstWhere(
-        (m) => m.name == (data['paymentMethod'] ?? 'credit'),
-        orElse: () => PaymentMethod.credit,
+        (m) => m.name == (data['paymentMethod'] ?? 'cash'),
+        orElse: () => PaymentMethod.cash,
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
       cancelledBy: data['cancelledBy'],

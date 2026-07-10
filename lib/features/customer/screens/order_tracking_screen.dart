@@ -28,6 +28,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   OrderModel? _order;
   OrderStatus _status = OrderStatus.pending;
   bool _pinRevealed = false;
+
+  /// The delivered snapshot arrives more than once — Firestore replays
+  /// the document on any subsequent field write, and the local-cache
+  /// echo fires before the server ack. Without this latch we pushed
+  /// /delivery-confirmed on every one of them.
+  bool _deliveredHandled = false;
+
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
 
@@ -42,25 +49,42 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     final orders = context.read<OrderProvider>();
     final auth = context.read<AuthProvider>();
     final activeOrder = orders.activeOrder;
-    if (activeOrder == null) return;
 
-    // Set customer location
+    // No active order means this screen was reached directly (deep
+    // link, stale notification tap). The old code just returned and
+    // left a spinner running forever.
+    if (activeOrder == null) {
+      if (mounted) context.go('/home');
+      return;
+    }
+
+    // Set _order BEFORE attaching the listener. The first snapshot can
+    // land before the trailing setState below runs, and the progress
+    // notification reads _order?.vendorName — it used to send an empty
+    // vendor name on the very first update.
+    _order = activeOrder;
+
     final customer = auth.customer;
-    if (customer != null) {
+    if (customer != null &&
+        customer.latitude != 0 &&
+        customer.longitude != 0) {
       _customerLocation = LatLng(customer.latitude, customer.longitude);
     }
 
-    // Listen to order updates in Firestore
     final snap = await FirebaseService.orders
         .where('orderId', isEqualTo: activeOrder.orderId)
         .get();
 
     if (snap.docs.isNotEmpty) {
-      _orderSubscription = snap.docs.first.reference
-          .snapshots()
-          .listen((doc) {
+      _orderSubscription =
+          snap.docs.first.reference.snapshots().listen((doc) {
         if (!mounted) return;
-        final data = doc.data() as Map<String, dynamic>;
+
+        // A deleted or not-yet-existent doc returns null data — casting
+        // it straight to a Map throws inside the stream callback, where
+        // nothing catches it.
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) return;
 
         setState(() {
           _status = OrderStatus.values.firstWhere(
@@ -68,7 +92,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
             orElse: () => OrderStatus.pending,
           );
 
-          // Update rider location
           final riderLoc = data['riderLocation'] as Map<String, dynamic>?;
           if (riderLoc != null) {
             _riderLocation = LatLng(
@@ -79,63 +102,75 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
         });
 
         _updateMap();
-
-        // Update persistent notification like Uber
-        DeliveryNotificationService.showDeliveryProgress(
-          vendorName: _order?.vendorName ?? '',
-          gasSize: _order?.listing.size ?? '',
-          status: _status == OrderStatus.outForDelivery
-              ? '🚴 Rider is on the way to you'
-              : _status == OrderStatus.accepted
-                  ? '✅ Order accepted — preparing your gas'
-                  : _statusLabel(),
-        );
-
-        // Navigate to confirmed screen when delivered
-        if (_status == OrderStatus.delivered && mounted) {
-          DeliveryNotificationService.cancelDeliveryNotification();
-          DeliveryNotificationService.showDeliveryConfirmed(
-            gasSize: _order?.listing.size ?? '',
-            amount: _order?.customerTotal.toStringAsFixed(0) ?? '',
-            isCash: true,
-          );
-          context.go('/delivery-confirmed');
-        }
+        _syncNotifications();
       });
     }
 
-    setState(() {
-      _order = activeOrder;
-    });
+    if (mounted) setState(() {});
     _updateMap();
+  }
+
+  /// Keeps the notification shade in step with the order status.
+  ///
+  /// showDeliveryProgress posts an `ongoing: true` notification under a
+  /// fixed id (1001). The old code called it on *every* snapshot,
+  /// including the delivered one, and only then cancelled it — two
+  /// un-awaited plugin calls against the same id, racing. A sticky
+  /// "delivery in progress" notification could survive the delivery.
+  void _syncNotifications() {
+    final inFlight = _status == OrderStatus.accepted ||
+        _status == OrderStatus.outForDelivery;
+
+    if (inFlight) {
+      DeliveryNotificationService.showDeliveryProgress(
+        vendorName: _order?.vendorName ?? '',
+        gasSize: _order?.listing.size ?? '',
+        status: _status == OrderStatus.outForDelivery
+            ? '🚴 Rider is on the way to you'
+            : '✅ Order accepted — preparing your gas',
+      );
+      return;
+    }
+
+    if (_status == OrderStatus.delivered && !_deliveredHandled) {
+      _deliveredHandled = true;
+      DeliveryNotificationService.cancelDeliveryNotification();
+      DeliveryNotificationService.showDeliveryConfirmed(
+        gasSize: _order?.listing.size ?? '',
+        // Cash on delivery — customerTotal is the gas price, the same
+        // figure shown on the vendor card and the PIN panel.
+        amount: _order?.customerTotal.toStringAsFixed(0) ?? '',
+      );
+      if (mounted) context.go('/delivery-confirmed');
+      return;
+    }
+
+    if (_status == OrderStatus.cancelled) {
+      DeliveryNotificationService.cancelDeliveryNotification();
+    }
   }
 
   void _updateMap() {
     final markers = <Marker>{};
     final polylines = <Polyline>{};
 
-    // Customer marker
     if (_customerLocation != null) {
       markers.add(Marker(
         markerId: const MarkerId('customer'),
         position: _customerLocation!,
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueOrange),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
         infoWindow: const InfoWindow(title: 'Your location'),
       ));
     }
 
-    // Rider marker
     if (_riderLocation != null) {
       markers.add(Marker(
         markerId: const MarkerId('rider'),
         position: _riderLocation!,
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueGreen),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         infoWindow: const InfoWindow(title: 'Rider'),
       ));
 
-      // Polyline from rider to customer
       if (_customerLocation != null) {
         polylines.add(Polyline(
           polylineId: const PolylineId('route'),
@@ -148,7 +183,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           ],
         ));
 
-        // Animate camera to show both points
         _mapController?.animateCamera(
           CameraUpdate.newLatLngBounds(
             LatLngBounds(
@@ -174,7 +208,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
         );
       }
     } else if (_customerLocation != null) {
-      // Just show customer location
       _mapController?.animateCamera(
         CameraUpdate.newLatLngZoom(_customerLocation!, 15),
       );
@@ -219,16 +252,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // Map
           _buildMap(),
-          // Header
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             child: _buildHeader(),
           ),
-          // Bottom card
           Positioned(
             bottom: 0,
             left: 0,
@@ -325,8 +355,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ),
               ),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: _statusColor().withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(20),
@@ -343,10 +372,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text(_statusLabel(),
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: _statusColor(),
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
@@ -367,8 +393,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.white,
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.1),
@@ -382,7 +407,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Order info
           Row(
             children: [
               Container(
@@ -392,10 +416,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                   color: AppColors.orange.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                    Icons.local_fire_department_rounded,
-                    color: AppColors.orange,
-                    size: 24),
+                child: const Icon(Icons.local_fire_department_rounded,
+                    color: AppColors.orange, size: 24),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -426,11 +448,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 children: [
                   Text(
                     'KES ${order.customerTotal.toStringAsFixed(0)}',
-                    style:
-                        Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: AppColors.orange,
-                              fontWeight: FontWeight.w700,
-                            ),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: AppColors.orange,
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
                   Text(
                     'Pay on delivery',
@@ -446,7 +467,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           const SizedBox(height: 20),
           const Divider(color: AppColors.gray200),
           const SizedBox(height: 16),
-          // PIN section
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(16),
@@ -470,25 +490,21 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                     ),
                     const Spacer(),
                     GestureDetector(
-                      onTap: () =>
-                          setState(() => _pinRevealed = !_pinRevealed),
+                      onTap: () => setState(() => _pinRevealed = !_pinRevealed),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color:
-                              AppColors.orange.withValues(alpha: 0.2),
+                          color: AppColors.orange.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           _pinRevealed ? 'Hide' : 'Reveal',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: AppColors.orange,
-                                fontWeight: FontWeight.w600,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.orange,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                         ),
                       ),
                     ),
@@ -497,10 +513,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 const SizedBox(height: 12),
                 Text(
                   _pinRevealed ? order.pin : '• • • •',
-                  style: Theme.of(context)
-                      .textTheme
-                      .displayLarge
-                      ?.copyWith(
+                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
                         color: AppColors.white,
                         fontSize: 40,
                         fontWeight: FontWeight.w800,

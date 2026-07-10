@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mobigas/core/theme/app_theme.dart';
-import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import 'package:provider/provider.dart';
+import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
-import 'package:mobigas/core/widgets/location_picker_widget.dart';
+import 'package:mobigas/core/widgets/google_sign_in_button.dart';
 
+/// Signup is now one screen. Phone number, delivery location and
+/// verification moved to the profile banner on the home screen —
+/// a customer reaches the vendor list in three fields instead of
+/// three steps.
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -16,77 +17,87 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _idController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
   final _emailController = TextEditingController();
-  File? _selfie;
-  bool _isCapturingSelfie = false;
-  String _selectedAddress = '';
+  final _passwordController = TextEditingController();
 
+  bool _obscurePassword = true;
   bool _isLoading = false;
-  int _currentStep = 0;
-
-  double? _latitude;
-  double? _longitude;
-
+  bool _isGoogleLoading = false;
 
   @override
   void dispose() {
     _nameController.dispose();
-    _idController.dispose();
-    _phoneController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
     _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
-  void _nextStep() {
-    if (_currentStep == 0) {
-      if (_nameController.text.trim().isEmpty) {
-        _showError('Please enter your full name');
-        return;
-      }
-      if (!_emailController.text.contains('@')) {
-        _showError('Please enter a valid email address');
-        return;
-      }
-      // National ID and selfie are optional in v1 — a customer can
-      // skip both and still create an account. If an ID is entered,
-      // it must be a plausible length.
-      final idText = _idController.text.trim();
-      if (idText.isNotEmpty && idText.length < 7) {
-        _showError('Please enter a valid National ID number, or leave it blank');
-        return;
-      }
-    }
-    if (_currentStep == 1) {
-      if (_phoneController.text.trim().length < 9) {
-        _showError('Please enter a valid phone number');
-        return;
-      }
-      if (_latitude == null || _longitude == null) {
-        _showError('Please pin your exact location on the map');
-        return;
-      }
-    }
-    if (_currentStep == 2) {
-      if (_passwordController.text != _confirmPasswordController.text) {
-        _showError('Passwords do not match');
-        return;
-      }
-      if (_passwordController.text.length < 6) {
-        _showError('Password must be at least 6 characters');
-        return;
-      }
-      _submit();
+  // ---------------------------------------------------------------
+  // Password rules: length, at least one letter, at least one number.
+  // ---------------------------------------------------------------
+
+  bool get _hasLength => _passwordController.text.length >= 6;
+  bool get _hasLetter => RegExp(r'[A-Za-z]').hasMatch(_passwordController.text);
+  bool get _hasNumber => RegExp(r'[0-9]').hasMatch(_passwordController.text);
+
+  String? _passwordProblem() {
+    if (!_hasLength) return 'Password must be at least 6 characters';
+    if (!_hasLetter) return 'Password must include at least one letter';
+    if (!_hasNumber) return 'Password must include at least one number';
+    return null;
+  }
+
+  Future<void> _submit() async {
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+
+    if (name.isEmpty) {
+      _showError('Enter your full name');
       return;
     }
-    setState(() => _currentStep++);
+    if (!email.contains('@') || !email.contains('.')) {
+      _showError('Enter a valid email address');
+      return;
+    }
+    final passwordProblem = _passwordProblem();
+    if (passwordProblem != null) {
+      _showError(passwordProblem);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    final auth = context.read<AuthProvider>();
+
+    await auth.register(
+      name: name,
+      email: email.toLowerCase(),
+      password: _passwordController.text,
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (auth.error != null) {
+      _showError(auth.error!);
+      return;
+    }
+    context.go('/home');
+  }
+
+  Future<void> _continueWithGoogle() async {
+    setState(() => _isGoogleLoading = true);
+    final auth = context.read<AuthProvider>();
+    final ok = await auth.signInWithGoogle();
+
+    if (!mounted) return;
+    setState(() => _isGoogleLoading = false);
+
+    if (!ok) {
+      _showError(auth.error ?? 'Google sign-in did not complete.');
+      return;
+    }
+    context.go('/home');
   }
 
   void _showError(String msg) {
@@ -100,151 +111,172 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Future<void> _captureSelfie() async {
-    setState(() => _isCapturingSelfie = true);
-    try {
-      final picker = ImagePicker();
-      final photo = await picker.pickImage(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
-        imageQuality: 80,
-        maxWidth: 800,
-        maxHeight: 800,
-      );
-      if (photo != null) {
-        setState(() => _selfie = File(photo.path));
-      }
-    } catch (e) {
-      _showError('Could not access camera. Please allow camera access.');
-    }
-    setState(() => _isCapturingSelfie = false);
-  }
-
-
-  Future<void> _submit() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final auth = context.read<AuthProvider>();
-      await auth.register(
-        name: _nameController.text.trim(),
-        email: _emailController.text.trim().toLowerCase(),
-        phone: _phoneController.text.trim(),
-        nationalId: _idController.text.trim(),
-        county: _selectedAddress.split(',').last.trim(),
-        area: _selectedAddress,
-        estate: _selectedAddress,
-        latitude: _latitude ?? 0.0,
-        longitude: _longitude ?? 0.0,
-        password: _passwordController.text,
-        guarantors: [],
-        selfieFile: _selfie,
-      );
-
-      if (auth.error != null) {
-        _showError(auth.error!);
-        setState(() => _isLoading = false);
-        return;
-      }
-
-      if (mounted) context.go('/home');
-    } catch (e) {
-      _showError('Registration failed. Please try again.');
-      setState(() => _isLoading = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    final busy = _isLoading || _isGoogleLoading;
+
     return Scaffold(
       backgroundColor: AppColors.orangeWarm,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildStepIndicator(),
-            Expanded(
-              child: SingleChildScrollView(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildHeader(),
+              Padding(
                 padding: const EdgeInsets.all(24),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_currentStep == 0) _buildStep1(),
-                      if (_currentStep == 1) _buildStep2(),
-                      if (_currentStep == 2) _buildStep3(),
-                      const SizedBox(height: 32),
-                      _buildNextButton(),
-                      const SizedBox(height: 16),
-                      _buildLoginLink(),
-                    ],
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    GoogleSignInButton(
+                      isLoading: _isGoogleLoading,
+                      onPressed: busy ? null : _continueWithGoogle,
+                      label: 'Continue with Google',
+                    ),
+                    const SizedBox(height: 20),
+                    const OrDivider(label: 'or sign up with email'),
+                    const SizedBox(height: 24),
+                    _label('Full name'),
+                    TextFormField(
+                      controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
+                      style: _fieldStyle(context),
+                      decoration: const InputDecoration(
+                        hintText: 'e.g. Jane Wanjiku Mwangi',
+                        prefixIcon: Icon(Icons.person_outline_rounded,
+                            color: AppColors.gray400, size: 20),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _label('Email address'),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      autocorrect: false,
+                      style: _fieldStyle(context),
+                      decoration: const InputDecoration(
+                        hintText: 'e.g. jane@gmail.com',
+                        prefixIcon: Icon(Icons.email_outlined,
+                            color: AppColors.gray400, size: 20),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _label('Password'),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      // Explicit text keyboard — without this Android
+                      // can hand back a numeric pad on some OEM
+                      // keyboards, which is why passwords were coming
+                      // through as digits only.
+                      keyboardType: TextInputType.text,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      autofillHints: const [AutofillHints.newPassword],
+                      onChanged: (_) => setState(() {}),
+                      style: _fieldStyle(context),
+                      decoration: InputDecoration(
+                        hintText: 'Letters and numbers, 6 or more',
+                        prefixIcon: const Icon(Icons.lock_outline_rounded,
+                            color: AppColors.gray400, size: 20),
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword),
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            color: AppColors.gray400,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildPasswordRules(),
+                    const SizedBox(height: 28),
+                    ElevatedButton(
+                      onPressed: busy ? null : _submit,
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: AppColors.white,
+                              ),
+                            )
+                          : const Text('Create account'),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'You can add your phone number and delivery '
+                      'location right after — it takes about a minute.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.gray600,
+                            fontSize: 12,
+                            height: 1.5,
+                          ),
+                    ),
+                    const SizedBox(height: 20),
+                    _buildLoginLink(),
+                    const SizedBox(height: 16),
+                    _buildLegalRow(),
+                    const SizedBox(height: 8),
+                  ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
+  TextStyle? _fieldStyle(BuildContext context) =>
+      Theme.of(context).textTheme.bodyLarge?.copyWith(
+            color: AppColors.navy,
+            fontWeight: FontWeight.w500,
+          );
+
   Widget _buildHeader() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
       decoration: const BoxDecoration(
         color: AppColors.navy,
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              GestureDetector(
-                onTap: () {
-                  if (_currentStep > 0) {
-                    setState(() => _currentStep--);
-                  } else {
-                    context.go('/onboarding');
-                  }
-                },
-                child: const Icon(
-                  Icons.arrow_back_ios_rounded,
-                  color: AppColors.white,
-                  size: 20,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.orange.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'Step ${_currentStep + 1} of 3',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.orange,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ),
-            ],
+          GestureDetector(
+            onTap: () => context.go('/onboarding'),
+            child: const Icon(Icons.arrow_back_ios_rounded,
+                color: AppColors.white, size: 20),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColors.orange,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.local_fire_department_rounded,
+                color: AppColors.white, size: 32),
+          ),
+          const SizedBox(height: 20),
           Text(
-            _stepTitle(),
+            'Create your account',
             style: Theme.of(context).textTheme.displayMedium?.copyWith(
                   color: AppColors.white,
-                  fontSize: 24,
+                  fontSize: 28,
                 ),
           ),
           const SizedBox(height: 4),
           Text(
-            _stepSubtitle(),
+            'Order cooking gas from vendors near you',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppColors.gray400,
                 ),
@@ -254,319 +286,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  String _stepTitle() {
-    switch (_currentStep) {
-      case 0:
-        return 'Personal details';
-      case 1:
-        return 'Location & contact';
-      case 2:
-        return 'Secure your account';
-      default:
-        return '';
-    }
-  }
-
-  String _stepSubtitle() {
-    switch (_currentStep) {
-      case 0:
-        return 'Just a few details to set up your account';
-      case 1:
-        return 'Your location helps us find the nearest gas vendor';
-      case 2:
-        return 'Choose a strong password for your MobiGas account';
-      default:
-        return '';
-    }
-  }
-
-  Widget _buildStepIndicator() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Row(
-        children: List.generate(3, (i) {
-          final isActive = i == _currentStep;
-          final isDone = i < _currentStep;
-          return Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: isDone || isActive
-                          ? AppColors.orange
-                          : AppColors.gray200,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                if (i < 2) const SizedBox(width: 4),
-              ],
-            ),
-          );
-        }),
+  Widget _buildPasswordRules() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.orangeLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.orange.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _rule('At least 6 characters', _hasLength),
+          const SizedBox(height: 6),
+          _rule('Includes a letter', _hasLetter),
+          const SizedBox(height: 6),
+          _rule('Includes a number', _hasNumber),
+        ],
       ),
     );
   }
 
-  Widget _buildStep1() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _rule(String text, bool met) {
+    return Row(
       children: [
-        _label('Full name'),
-        _input(
-          controller: _nameController,
-          hint: 'e.g. Jane Wanjiku Mwangi',
-          icon: Icons.person_outline_rounded,
-          textCapitalization: TextCapitalization.words,
+        Icon(
+          met
+              ? Icons.check_circle_rounded
+              : Icons.radio_button_unchecked_rounded,
+          size: 16,
+          color: met ? AppColors.success : AppColors.orange,
         ),
-        const SizedBox(height: 20),
-        _label('Email address'),
-        _input(
-          controller: _emailController,
-          hint: 'e.g. jane@gmail.com',
-          icon: Icons.email_outlined,
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 20),
-        _label('National ID number (optional)'),
-        _input(
-          controller: _idController,
-          hint: 'e.g. 12345678',
-          icon: Icons.badge_outlined,
-          keyboardType: TextInputType.number,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(8),
-          ],
-        ),
-        const SizedBox(height: 20),
-        _label('Profile photo (optional)'),
-        _buildSelfieCapture(),
-        const SizedBox(height: 16),
-        _infoCard(
-          icon: Icons.info_outline_rounded,
-          text:
-              'A profile photo and National ID are optional — you can skip them and add them later. If added, they are stored securely and never shared.',
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSelfieCapture() {
-    return GestureDetector(
-      onTap: _isCapturingSelfie ? null : _captureSelfie,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        width: double.infinity,
-        height: 160,
-        decoration: BoxDecoration(
-          color: _selfie != null
-              ? Colors.transparent
-              : AppColors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: _selfie != null
-                ? AppColors.success
-                : AppColors.gray200,
-            width: _selfie != null ? 2 : 1,
-          ),
-        ),
-        child: _selfie != null
-            ? Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Image.file(
-                      _selfie!,
-                      width: double.infinity,
-                      height: 160,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: GestureDetector(
-                      onTap: _captureSelfie,
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppColors.navy.withValues(alpha: 0.7),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.refresh_rounded,
-                            color: AppColors.white, size: 18),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 8,
-                    left: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.success.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.check_circle_rounded,
-                              color: AppColors.white, size: 14),
-                          const SizedBox(width: 4),
-                          Text('Photo added',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: AppColors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            : _isCapturingSelfie
-                ? const Center(
-                    child: CircularProgressIndicator(
-                        color: AppColors.orange),
-                  )
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: AppColors.orange.withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.camera_alt_outlined,
-                          color: AppColors.orange,
-                          size: 32,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Add a profile photo',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              color: AppColors.navy,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Optional · Front camera · Tap to add or skip',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(
-                              color: AppColors.gray400,
-                              fontSize: 11,
-                            ),
-                      ),
-                    ],
-                  ),
-      ),
-    );
-  }
-
-  Widget _buildStep2() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _label('Phone number'),
-        _input(
-          controller: _phoneController,
-          hint: 'e.g. 0712 345 678',
-          icon: Icons.phone_outlined,
-          keyboardType: TextInputType.phone,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(10),
-          ],
-        ),
-        const SizedBox(height: 20),
-        _label('Your home location'),
-        LocationPickerWidget(
-          hint: 'Search your home address in Kenya...',
-          darkMode: false,
-          initialValue: _selectedAddress.isNotEmpty ? _selectedAddress : null,
-          onSelected: (address, lat, lng) {
-            setState(() {
-              _selectedAddress = address;
-              _latitude = lat;
-              _longitude = lng;
-            });
-          },
-        ),
-        const SizedBox(height: 16),
-        _infoCard(
-          icon: Icons.location_on_rounded,
-          text:
-              'Your location is used to find the nearest gas vendor to you. Be as specific as possible — include your building or street name.',
-        ),
-      ],
-    );
-  }
-
-
-  Widget _buildStep3() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _label('Password'),
-        TextFormField(
-          controller: _passwordController,
-          obscureText: true,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w500,
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: met ? AppColors.success : AppColors.orangeDeep,
+                fontSize: 12,
+                fontWeight: met ? FontWeight.w600 : FontWeight.w400,
               ),
-          decoration: const InputDecoration(
-            hintText: 'At least 6 characters',
-            prefixIcon: Icon(Icons.lock_outline_rounded,
-                color: AppColors.gray400, size: 20),
-          ),
-        ),
-        const SizedBox(height: 20),
-        _label('Confirm password'),
-        TextFormField(
-          controller: _confirmPasswordController,
-          obscureText: true,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w500,
-              ),
-          decoration: const InputDecoration(
-            hintText: 'Re-enter your password',
-            prefixIcon: Icon(Icons.lock_outline_rounded,
-                color: AppColors.gray400, size: 20),
-          ),
-        ),
-        const SizedBox(height: 20),
-        _infoCard(
-          icon: Icons.shield_outlined,
-          text:
-              'You\'re all set — create your account and start ordering gas right away.',
         ),
       ],
     );
   }
-
-
-
 
   Widget _label(String text) {
     return Padding(
@@ -579,77 +341,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               color: AppColors.navy,
             ),
       ),
-    );
-  }
-
-  Widget _input({
-    required TextEditingController controller,
-    required String hint,
-    required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
-    TextCapitalization textCapitalization = TextCapitalization.none,
-    List<TextInputFormatter>? inputFormatters,
-  }) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      textCapitalization: textCapitalization,
-      inputFormatters: inputFormatters,
-      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-            color: AppColors.navy,
-            fontWeight: FontWeight.w500,
-          ),
-      decoration: InputDecoration(
-        hintText: hint,
-        prefixIcon: Icon(icon, color: AppColors.gray400, size: 20),
-      ),
-    );
-  }
-
-
-
-
-  Widget _infoCard({required IconData icon, required String text}) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.orangeLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.orange.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: AppColors.orange, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.orangeDeep,
-                    height: 1.5,
-                    fontSize: 12,
-                  ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNextButton() {
-    return ElevatedButton(
-      onPressed: _isLoading ? null : _nextStep,
-      child: _isLoading
-          ? const SizedBox(
-              height: 22,
-              width: 22,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: AppColors.white,
-              ),
-            )
-          : Text(_currentStep < 2 ? 'Continue' : 'Create Account'),
     );
   }
 
@@ -670,6 +361,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   fontWeight: FontWeight.w600,
                 ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLegalRow() {
+    final linkStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: AppColors.orange,
+          fontSize: 11,
+          decoration: TextDecoration.underline,
+        );
+    final plainStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: AppColors.gray600,
+          fontSize: 11,
+        );
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text('By continuing you agree to our ', style: plainStyle),
+        GestureDetector(
+          onTap: () => context.push('/terms'),
+          child: Text('Terms', style: linkStyle),
+        ),
+        Text(' & ', style: plainStyle),
+        GestureDetector(
+          onTap: () => context.push('/privacy'),
+          child: Text('Privacy Policy', style: linkStyle),
         ),
       ],
     );

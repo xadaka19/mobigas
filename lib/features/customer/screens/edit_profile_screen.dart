@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -7,7 +8,9 @@ import 'package:mobigas/core/services/storage_metadata.dart';
 import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/providers/auth_provider.dart';
+import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/widgets/location_picker_widget.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -21,8 +24,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   File? _newSelfie;
   bool _isUploading = false;
   bool _isSaving = false;
+
   late TextEditingController _nameController;
   late TextEditingController _phoneController;
+  late TextEditingController _idController;
+
+  /// The phone and ID we started with. Duplicate checks only run when
+  /// a value actually changed — `checkDuplicates` matches against the
+  /// whole users collection, including this account, so re-saving an
+  /// unchanged phone would always come back "taken".
+  late String _originalPhone;
+
+  /// A National ID is write-once. Blank means the customer skipped it
+  /// at signup (it's optional in v1) and can still add one here.
+  /// Once set, it's locked — changing it would invalidate any KYC.
+  late bool _idWasSet;
+
   String _selectedAddress = '';
   double _selectedLat = 0.0;
   double _selectedLng = 0.0;
@@ -33,6 +50,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final customer = context.read<AuthProvider>().customer;
     _nameController = TextEditingController(text: customer?.name ?? '');
     _phoneController = TextEditingController(text: customer?.phone ?? '');
+    _idController = TextEditingController(text: customer?.nationalId ?? '');
+    _originalPhone = (customer?.phone ?? '').trim();
+    _idWasSet = (customer?.nationalId ?? '').trim().isNotEmpty;
     _selectedAddress = customer?.estate ?? '';
     _selectedLat = customer?.latitude ?? 0;
     _selectedLng = customer?.longitude ?? 0;
@@ -42,20 +62,41 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
+    _idController.dispose();
     super.dispose();
   }
 
   Future<void> _takeSelfie() async {
-    final picker = ImagePicker();
-    final photo = await picker.pickImage(
-      source: ImageSource.camera,
-      preferredCameraDevice: CameraDevice.front,
-      imageQuality: 80,
-      maxWidth: 800,
-    );
-    if (photo != null) {
-      setState(() => _newSelfie = File(photo.path));
+    try {
+      final picker = ImagePicker();
+      final photo = await picker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.front,
+        imageQuality: 80,
+        maxWidth: 800,
+      );
+      if (photo != null && mounted) {
+        setState(() => _newSelfie = File(photo.path));
+      }
+    } catch (e) {
+      // Denying the camera permission throws — don't let it crash the
+      // screen the way an unguarded pickImage() does.
+      if (mounted) {
+        _error('Could not open the camera. Allow camera access to add a photo.');
+      }
     }
+  }
+
+  void _error(String msg, {Duration? duration}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        duration: duration ?? const Duration(seconds: 4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   /// Turns a Firebase failure into something a human can act on.
@@ -73,49 +114,96 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return e.toString();
   }
 
+  /// Returns an error message, or null when everything is valid.
+  String? _validate() {
+    if (_nameController.text.trim().isEmpty) {
+      return 'Enter your full name';
+    }
+    if (_phoneController.text.trim().length < 9) {
+      return 'Enter a valid phone number';
+    }
+    if (!_idWasSet) {
+      final id = _idController.text.trim();
+      if (id.isNotEmpty && id.length < 7) {
+        return 'Enter a valid National ID number, or leave it blank';
+      }
+    }
+    return null;
+  }
+
   Future<void> _saveProfile() async {
     final auth = context.read<AuthProvider>();
     final uid = auth.customer?.id;
     // Bail BEFORE flipping _isSaving — the old order left the spinner
     // running forever when uid was null, and the button never came back.
     if (uid == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You are signed out. Please sign in again.'),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _error('You are signed out. Please sign in again.');
+      return;
+    }
+
+    final problem = _validate();
+    if (problem != null) {
+      _error(problem);
       return;
     }
 
     setState(() => _isSaving = true);
 
     try {
+      final phone = _phoneController.text.trim();
+      final newId = _idWasSet ? null : _idController.text.trim();
+
+      // Only check values that actually changed. checkDuplicates scans
+      // every user, this account included, so an unchanged phone would
+      // always report itself as taken.
+      final phoneChanged = phone != _originalPhone;
+      final addingId = newId != null && newId.isNotEmpty;
+
+      if (phoneChanged || addingId) {
+        final fingerprint = await DeviceFingerprintService.getFingerprint();
+        final duplicates = await FirestoreService.checkDuplicates(
+          phone: phoneChanged ? phone : '',
+          nationalId: addingId ? newId : '',
+          deviceFingerprint: fingerprint,
+        );
+
+        if (phoneChanged && duplicates['phoneTaken'] == true) {
+          if (mounted) setState(() => _isSaving = false);
+          _error('Another account already uses this phone number.');
+          return;
+        }
+        if (addingId && duplicates['idTaken'] == true) {
+          if (mounted) setState(() => _isSaving = false);
+          _error('Another account already uses this National ID.');
+          return;
+        }
+      }
+
       String? selfieUrl;
 
-      // Upload new selfie if selected
       if (_newSelfie != null) {
         setState(() => _isUploading = true);
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('selfies')
-            .child(uid);
+        final ref = FirebaseStorage.instance.ref().child('selfies').child(uid);
         await ref.putFile(_newSelfie!, imageMetadata(_newSelfie!));
         selfieUrl = await ref.getDownloadURL();
         if (mounted) setState(() => _isUploading = false);
       }
 
-      // Update Firestore
       final updates = <String, dynamic>{
         'name': _nameController.text.trim(),
-        'phone': _phoneController.text.trim(),
+        'phone': phone,
         'estate': _selectedAddress,
         'area': _selectedAddress,
+        // BUG FIX: county was never written, so the locked County field
+        // displayed a value that nothing in the app could ever change.
+        // Location is a single free-text area in v1 — mirror it, the
+        // same way saveLocation() does from the profile banner.
+        'county': _selectedAddress,
         'latitude': _selectedLat,
         'longitude': _selectedLng,
       };
       if (selfieUrl != null) updates['selfieUrl'] = selfieUrl;
+      if (addingId) updates['nationalId'] = newId;
 
       await FirebaseService.users.doc(uid).update(updates);
       if (mounted) await auth.refreshCustomer();
@@ -123,11 +211,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Profile updated successfully'),
+          content: const Text('Profile updated'),
           backgroundColor: AppColors.success,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
       // Pop LAST. Anything after this runs on a disposed widget.
@@ -145,14 +232,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _isUploading = false;
           _isSaving = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_describeError(e)),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 8),
-          ),
-        );
+        _error(_describeError(e), duration: const Duration(seconds: 8));
       }
     }
   }
@@ -166,13 +246,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header
             Container(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               decoration: const BoxDecoration(
                 color: AppColors.navy,
-                borderRadius:
-                    BorderRadius.vertical(bottom: Radius.circular(24)),
+                borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
               ),
               child: Row(
                 children: [
@@ -195,7 +273,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    // Selfie section
                     Center(
                       child: Stack(
                         children: [
@@ -210,8 +287,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                     color: AppColors.orange, width: 3),
                               ),
                               child: ClipOval(
-                                child: _avatar(customer?.selfieUrl,
-                                    customer?.name ?? ''),
+                                child: _avatar(
+                                    customer?.selfieUrl, customer?.name ?? ''),
                               ),
                             ),
                           ),
@@ -246,8 +323,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                     if (_isUploading) ...[
                       const SizedBox(height: 8),
-                      const LinearProgressIndicator(
-                          color: AppColors.orange),
+                      const LinearProgressIndicator(color: AppColors.orange),
                       Text('Uploading...',
                           style: Theme.of(context)
                               .textTheme
@@ -255,27 +331,34 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               ?.copyWith(color: AppColors.orange)),
                     ],
                     const SizedBox(height: 24),
-                    // Fields
                     _buildField('Full name', _nameController,
-                        Icons.person_outline_rounded),
+                        Icons.person_outline_rounded,
+                        textCapitalization: TextCapitalization.words),
                     const SizedBox(height: 16),
-                    _buildField('Phone number', _phoneController,
-                        Icons.phone_outlined,
-                        keyboardType: TextInputType.phone),
+                    _buildField(
+                      'Phone number',
+                      _phoneController,
+                      Icons.phone_outlined,
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(10),
+                      ],
+                    ),
                     const SizedBox(height: 16),
                     Text('Location',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontSize: 13,
-                              color: AppColors.navy,
-                              fontWeight: FontWeight.w600,
-                            )),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontSize: 13,
+                                  color: AppColors.navy,
+                                  fontWeight: FontWeight.w600,
+                                )),
                     const SizedBox(height: 6),
                     LocationPickerWidget(
                       hint: 'Search your home address...',
                       darkMode: false,
-                      initialValue: _selectedAddress.isNotEmpty
-                          ? _selectedAddress
-                          : null,
+                      initialValue:
+                          _selectedAddress.isNotEmpty ? _selectedAddress : null,
                       onSelected: (address, lat, lng) {
                         setState(() {
                           _selectedAddress = address;
@@ -284,13 +367,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         });
                       },
                     ),
-                    const SizedBox(height: 8),
-                    // Read-only fields
-                    _readOnlyField('National ID',
-                        customer?.nationalId ?? '', Icons.badge_outlined),
                     const SizedBox(height: 16),
-                    _readOnlyField('County', customer?.county ?? '',
-                        Icons.map_outlined),
+                    // A skipped National ID stays addable. Once set it
+                    // locks, since changing it would invalidate KYC.
+                    if (_idWasSet)
+                      _readOnlyField('National ID', customer?.nationalId ?? '',
+                          Icons.badge_outlined)
+                    else
+                      _buildField(
+                        'National ID (optional)',
+                        _idController,
+                        Icons.badge_outlined,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(8),
+                        ],
+                        helper: 'You can only set this once.',
+                      ),
                     const SizedBox(height: 32),
                     ElevatedButton(
                       onPressed: _isSaving ? null : _saveProfile,
@@ -299,8 +393,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               height: 22,
                               width: 22,
                               child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
-                                  color: AppColors.white),
+                                  strokeWidth: 2.5, color: AppColors.white),
                             )
                           : const Text('Save changes'),
                     ),
@@ -316,10 +409,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           color: AppColors.error),
                       title: Text(
                         'Delete account',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
                               fontSize: 15,
                               color: AppColors.error,
                               fontWeight: FontWeight.w600,
@@ -402,6 +492,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     TextEditingController controller,
     IconData icon, {
     TextInputType keyboardType = TextInputType.text,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    List<TextInputFormatter>? inputFormatters,
+    String? helper,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -416,14 +509,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         TextFormField(
           controller: controller,
           keyboardType: keyboardType,
+          textCapitalization: textCapitalization,
+          inputFormatters: inputFormatters,
           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 color: AppColors.navy,
               ),
           decoration: InputDecoration(
-            prefixIcon:
-                Icon(icon, color: AppColors.gray400, size: 20),
+            prefixIcon: Icon(icon, color: AppColors.gray400, size: 20),
           ),
         ),
+        if (helper != null) ...[
+          const SizedBox(height: 6),
+          Text(helper,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: AppColors.gray400, fontSize: 11)),
+        ],
       ],
     );
   }
@@ -441,8 +543,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         const SizedBox(height: 6),
         Container(
           width: double.infinity,
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: AppColors.gray100,
             borderRadius: BorderRadius.circular(12),
@@ -452,10 +553,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               Icon(icon, color: AppColors.gray400, size: 20),
               const SizedBox(width: 12),
-              Text(value,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.gray600,
-                      )),
+              Expanded(
+                child: Text(value.isEmpty ? 'Not set' : value,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: AppColors.gray600,
+                        )),
+              ),
               const SizedBox(width: 8),
               const Icon(Icons.lock_outline_rounded,
                   color: AppColors.gray400, size: 14),

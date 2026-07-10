@@ -476,7 +476,7 @@ class OrderModel {
     this.riderName,
     this.riderPhone,
     required this.partnerBankName,
-    this.paymentMethod = PaymentMethod.credit,
+    this.paymentMethod = PaymentMethod.cash,
     this.finderFee = 0.0,
     this.cancelledBy,
   });

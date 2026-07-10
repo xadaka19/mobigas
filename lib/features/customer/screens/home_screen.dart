@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -8,6 +9,7 @@ import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
+import 'package:mobigas/core/widgets/profile_completion_banner.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
 
@@ -20,37 +22,90 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0;
-  bool _initializedForCustomer = false;
+
+  bool _ordersWatched = false;
+  double? _loadedLat;
+  double? _loadedLng;
+
+  late final OrderProvider _orderProvider;
+  late final VoidCallback _orderListener;
+  OrderStatus? _lastOrderStatus;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Listen for active order status changes → auto-open tracking
-      context.read<OrderProvider>().addListener(() {
-        final order = context.read<OrderProvider>().activeOrder;
-        if (order?.status == OrderStatus.outForDelivery && mounted) {
-          context.push('/order-tracking');
-        }
-      });
-      _initForCustomer();
-    });
+    _orderProvider = context.read<OrderProvider>();
+
+    // Auto-open tracking when an order *transitions* into
+    // out-for-delivery. Firing on every notify would stack tracking
+    // screens on any refresh that happens mid-delivery.
+    _orderListener = () {
+      final status = _orderProvider.activeOrder?.status;
+      if (status == OrderStatus.outForDelivery &&
+          _lastOrderStatus != OrderStatus.outForDelivery &&
+          mounted) {
+        context.push('/order-tracking');
+      }
+      _lastOrderStatus = status;
+    };
+    _orderProvider.addListener(_orderListener);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initForCustomer());
   }
 
-  /// Loads vendors + order stream once the customer object exists.
-  /// Called from initState AND build, because on cold start the
-  /// customer is still hydrating from Firestore when initState runs —
-  /// loading vendors before we have coordinates means no distances.
+  @override
+  void dispose() {
+    _orderProvider.removeListener(_orderListener);
+    super.dispose();
+  }
+
+  bool get _needsVendorReload {
+    final c = context.read<AuthProvider>().customer;
+    if (c == null || c.latitude == 0 || c.longitude == 0) return false;
+    return _loadedLat != c.latitude || _loadedLng != c.longitude;
+  }
+
+  /// Starts the order stream as soon as we have a customer, and
+  /// (re)loads vendors whenever real coordinates land — on cold start,
+  /// or the moment the customer pins their location from the profile
+  /// banner. Vendor matching is a Haversine search around the pin, so
+  /// loading against 0,0 searches the middle of the Atlantic and
+  /// returns nothing. We simply don't call it until we have a pin.
   void _initForCustomer() {
-    if (_initializedForCustomer) return;
     final customer = context.read<AuthProvider>().customer;
     if (customer == null) return;
-    _initializedForCustomer = true;
+
+    if (!_ordersWatched) {
+      _ordersWatched = true;
+      context.read<OrderProvider>().watchOrders(customer.id);
+    }
+
+    if (customer.latitude == 0 || customer.longitude == 0) return;
+    if (_loadedLat == customer.latitude && _loadedLng == customer.longitude) {
+      return;
+    }
+
+    _loadedLat = customer.latitude;
+    _loadedLng = customer.longitude;
     context.read<VendorProvider>().loadVendors(
           lat: customer.latitude,
           lng: customer.longitude,
         );
-    context.read<OrderProvider>().watchOrders(customer.id);
+  }
+
+  /// Ordering needs a phone number and a delivery pin. Rather than
+  /// failing at vendor-matching or at checkout, send the customer
+  /// straight to the step they're missing.
+  void _goToOrder() {
+    final auth = context.read<AuthProvider>();
+    if (!auth.isProfileComplete) {
+      ProfileCompletionSheet.show(
+        context,
+        initialStep: auth.firstIncompleteStep,
+      );
+      return;
+    }
+    context.push('/order');
   }
 
   @override
@@ -65,9 +120,9 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Customer just became available (cold start) — load vendors with
-    // real coordinates and start the order stream.
-    if (!_initializedForCustomer) {
+    // Cold start (customer just hydrated) or the customer just saved a
+    // location from the banner — both need a vendor load.
+    if (!_ordersWatched || _needsVendorReload) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _initForCustomer());
     }
 
@@ -101,10 +156,12 @@ class _HomeScreenState extends State<HomeScreen> {
       color: AppColors.orange,
       onRefresh: () async {
         context.read<OrderProvider>().refreshOrders();
-        await context.read<VendorProvider>().loadVendors(
-              lat: customer.latitude,
-              lng: customer.longitude,
-            );
+        if (customer.latitude != 0 && customer.longitude != 0) {
+          await context.read<VendorProvider>().loadVendors(
+                lat: customer.latitude,
+                lng: customer.longitude,
+              );
+        }
       },
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -115,6 +172,7 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
+                  const ProfileCompletionBanner(),
                   _buildOrderNowCard(),
                   const SizedBox(height: 20),
                   _buildVendorPreview(),
@@ -139,6 +197,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ? 'Good afternoon 👋'
             : 'Good evening 👋';
 
+    final firstName =
+        customer.name.trim().isEmpty ? 'there' : customer.name.split(' ').first;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
@@ -159,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: AppColors.gray400,
                           )),
                   Text(
-                    customer.name.split(' ').first,
+                    firstName,
                     style: Theme.of(context)
                         .textTheme
                         .displayMedium
@@ -171,12 +232,10 @@ class _HomeScreenState extends State<HomeScreen> {
               StreamBuilder<List<Map<String, dynamic>>>(
                 stream: FirestoreService.watchNotifications(customer.id),
                 builder: (context, snap) {
-                  final unreadCount = (snap.data ?? [])
-                      .where((n) => n['read'] != true)
-                      .length;
+                  final unreadCount =
+                      (snap.data ?? []).where((n) => n['read'] != true).length;
                   return GestureDetector(
-                    onTap: () =>
-                        _showNotifications(context, customer.id),
+                    onTap: () => _showNotifications(context, customer.id),
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
@@ -238,7 +297,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildOrderNowCard() {
     return GestureDetector(
-      onTap: () => context.push('/order'),
+      onTap: _goToOrder,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
@@ -331,28 +390,23 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: step.color.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
-                          child:
-                              Icon(step.icon, color: step.color, size: 22),
+                          child: Icon(step.icon, color: step.color, size: 22),
                         ),
                         const SizedBox(height: 6),
                         Text(step.title,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: AppColors.navy,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 11,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.navy,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 11,
+                                    ),
                             textAlign: TextAlign.center),
                         Text(step.subtitle,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: AppColors.gray400,
-                                  fontSize: 10,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.gray400,
+                                      fontSize: 10,
+                                    ),
                             textAlign: TextAlign.center),
                       ],
                     ),
@@ -370,7 +424,48 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildVendorPreview() {
+    final auth = context.watch<AuthProvider>();
     final vendors = context.watch<VendorProvider>().onlineVendors;
+
+    // Without a pin there is nothing to match against — say so, and
+    // give the customer the one action that fixes it.
+    if (!auth.hasLocation) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.gray200),
+        ),
+        child: Column(
+          children: [
+            const Icon(Icons.location_off_outlined,
+                size: 36, color: AppColors.gray400),
+            const SizedBox(height: 10),
+            Text('Pin your location to see vendors',
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(color: AppColors.navy, fontSize: 14)),
+            const SizedBox(height: 4),
+            Text('We match you with vendors within 8 km of your pin.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppColors.gray400)),
+            const SizedBox(height: 14),
+            OutlinedButton(
+              onPressed: () =>
+                  ProfileCompletionSheet.show(context, initialStep: 1),
+              child: const Text('Pin my location'),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -384,7 +479,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     )),
             const Spacer(),
             GestureDetector(
-              onTap: () => context.push('/order'),
+              onTap: _goToOrder,
               child: Text('${vendors.length} online →',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.success,
@@ -417,8 +512,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               )
             : Column(
-                children:
-                    vendors.take(3).map((v) => _vendorCard(v)).toList(),
+                children: vendors.take(3).map((v) => _vendorCard(v)).toList(),
               ),
       ],
     );
@@ -426,9 +520,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _vendorCard(VendorModel vendor) {
     final available = vendor.listings.where((l) => l.available).toList();
-    final refills = available
-        .where((l) => l.productType == GasProductType.refill)
-        .toList();
+    final refills =
+        available.where((l) => l.productType == GasProductType.refill).toList();
     final hasFullKit =
         available.any((l) => l.productType == GasProductType.fullKit);
     final hasGrillKit =
@@ -460,8 +553,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   )),
         );
 
+    final initial = vendor.businessName.trim().isEmpty
+        ? '?'
+        : vendor.businessName[0].toUpperCase();
+
     return GestureDetector(
-      onTap: () => context.push('/order'),
+      onTap: _goToOrder,
       child: Container(
         width: double.infinity,
         margin: const EdgeInsets.only(bottom: 10),
@@ -479,7 +576,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 CircleAvatar(
                   radius: 18,
                   backgroundColor: AppColors.orange,
-                  child: Text(vendor.businessName[0].toUpperCase(),
+                  child: Text(initial,
                       style: const TextStyle(
                           color: AppColors.white,
                           fontWeight: FontWeight.w700,
@@ -509,8 +606,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 7, vertical: 2),
                             decoration: BoxDecoration(
-                              color: AppColors.success
-                                  .withValues(alpha: 0.12),
+                              color: AppColors.success.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text('Online',
@@ -531,8 +627,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
-                            ?.copyWith(
-                                color: AppColors.gray400, fontSize: 11),
+                            ?.copyWith(color: AppColors.gray400, fontSize: 11),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
@@ -614,10 +709,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               )
             : Column(
-                children: orders.orders
-                    .take(3)
-                    .map((o) => _orderTile(o))
-                    .toList()),
+                children:
+                    orders.orders.take(3).map((o) => _orderTile(o)).toList()),
       ],
     );
   }
@@ -676,8 +769,10 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('${order.listing.size} — ${order.vendorName}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontSize: 14, color: AppColors.navy)),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontSize: 14, color: AppColors.navy)),
                 Text('${order.orderId} · Pay on delivery',
                     style: Theme.of(context)
                         .textTheme
@@ -689,8 +784,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                  'KES ${order.customerTotal.toStringAsFixed(0)}',
+              Text('KES ${order.customerTotal.toStringAsFixed(0)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,
                       color: order.status == OrderStatus.cancelled
@@ -698,8 +792,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           : AppColors.navy,
                       fontWeight: FontWeight.w700)),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
@@ -745,8 +838,7 @@ class _HomeScreenState extends State<HomeScreen> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Cancel this order?'),
         content: Text(
           '${order.listing.size} from ${order.vendorName} — the vendor hasn\'t accepted it yet.',
@@ -754,8 +846,8 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: Text('Keep order',
-                style: TextStyle(color: AppColors.gray600)),
+            child:
+                Text('Keep order', style: TextStyle(color: AppColors.gray600)),
           ),
           TextButton(
             onPressed: () {
@@ -819,40 +911,41 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 )
               : orders.orders.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.receipt_long_outlined,
-                          size: 64, color: AppColors.gray400),
-                      const SizedBox(height: 16),
-                      Text('No orders yet',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(color: AppColors.gray600)),
-                      const SizedBox(height: 24),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 48),
-                        child: ElevatedButton(
-                          onPressed: () => context.push('/order'),
-                          child: const Text('Order gas now'),
-                        ),
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.receipt_long_outlined,
+                              size: 64, color: AppColors.gray400),
+                          const SizedBox(height: 16),
+                          Text('No orders yet',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(color: AppColors.gray600)),
+                          const SizedBox(height: 24),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 48),
+                            child: ElevatedButton(
+                              onPressed: _goToOrder,
+                              child: const Text('Order gas now'),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  color: AppColors.orange,
-                  onRefresh: () =>
-                      context.read<OrderProvider>().refreshOrders(),
-                  child: ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(16),
-                    itemCount: orders.orders.length,
-                    itemBuilder: (_, i) => _orderTile(orders.orders[i]),
-                  ),
-                ),
+                    )
+                  : RefreshIndicator(
+                      color: AppColors.orange,
+                      onRefresh: () =>
+                          context.read<OrderProvider>().refreshOrders(),
+                      child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(16),
+                        itemCount: orders.orders.length,
+                        itemBuilder: (_, i) => _orderTile(orders.orders[i]),
+                      ),
+                    ),
         ),
       ],
     );
@@ -860,6 +953,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── PROFILE TAB ───────────────────────────────────────────────────
   Widget _buildProfileTab(CustomerModel customer, AuthProvider auth) {
+    // A Google account has no password to change.
+    final isGoogleAccount = FirebaseAuth.instance.currentUser?.providerData
+            .any((p) => p.providerId == 'google.com') ??
+        false;
+
+    // The green tick means "we checked an ID", not "this person has an
+    // avatar". A Google customer's selfieUrl is just their Google photo.
+    final isIdVerified = customer.nationalId.trim().isNotEmpty;
+
+    final location = _dedupeJoin(customer.estate, customer.county);
+    final initial =
+        customer.name.trim().isEmpty ? '?' : customer.name[0].toUpperCase();
+
     return SingleChildScrollView(
       child: Column(
         children: [
@@ -868,14 +974,14 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
             decoration: const BoxDecoration(
               color: AppColors.navy,
-              borderRadius:
-                  BorderRadius.vertical(bottom: Radius.circular(28)),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
             ),
             child: Column(
               children: [
                 GestureDetector(
                   onTap: customer.selfieUrl != null
-                      ? () => _showSelfie(context, customer.selfieUrl!)
+                      ? () => _showSelfie(context, customer.selfieUrl!,
+                          verified: isIdVerified)
                       : null,
                   child: Stack(
                     children: [
@@ -886,14 +992,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? NetworkImage(customer.selfieUrl!)
                             : null,
                         child: customer.selfieUrl == null
-                            ? Text(customer.name[0],
+                            ? Text(initial,
                                 style: const TextStyle(
                                     color: AppColors.white,
                                     fontSize: 32,
                                     fontWeight: FontWeight.w700))
                             : null,
                       ),
-                      if (customer.selfieUrl != null)
+                      if (isIdVerified)
                         Positioned(
                           bottom: 0,
                           right: 0,
@@ -921,8 +1027,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 GestureDetector(
                   onTap: () => context.push('/edit-profile'),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     decoration: BoxDecoration(
                       color: AppColors.orange.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -934,23 +1040,34 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: AppColors.orange, size: 14),
                         const SizedBox(width: 6),
                         Text('Edit profile',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: AppColors.orange,
-                                  fontWeight: FontWeight.w600,
-                                )),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.orange,
+                                      fontWeight: FontWeight.w600,
+                                    )),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(customer.phone,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: AppColors.gray400)),
+                customer.phone.trim().isEmpty
+                    ? GestureDetector(
+                        onTap: () =>
+                            ProfileCompletionSheet.show(context, initialStep: 0),
+                        child: Text('Add your phone number',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: AppColors.orange,
+                                  fontWeight: FontWeight.w600,
+                                )),
+                      )
+                    : Text(customer.phone,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: AppColors.gray400)),
               ],
             ),
           ),
@@ -959,15 +1076,16 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 if ((customer.email ?? '').isNotEmpty)
-                  _profileTile(Icons.email_outlined, 'Email',
-                      customer.email!),
-                _profileTile(Icons.badge_outlined, 'National ID',
-                    customer.nationalId),
+                  _profileTile(Icons.email_outlined, 'Email', customer.email!),
+                if (customer.nationalId.trim().isNotEmpty)
+                  _profileTile(Icons.badge_outlined, 'National ID',
+                      customer.nationalId),
                 _profileTile(Icons.location_on_outlined, 'Location',
-                    _dedupeJoin(customer.estate, customer.county)),
+                    location.isEmpty ? 'Not set' : location),
                 const SizedBox(height: 8),
-                _profileAction(Icons.lock_outline_rounded, 'Change password',
-                    onTap: () => _showChangePassword(context)),
+                if (!isGoogleAccount)
+                  _profileAction(Icons.lock_outline_rounded, 'Change password',
+                      onTap: () => _showChangePassword(context)),
                 _profileAction(Icons.card_giftcard_rounded, 'Refer & Earn',
                     highlight: true,
                     onTap: () => Navigator.push(
@@ -986,9 +1104,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () => _showAbout(context)),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
-                  onPressed: () {
-                    auth.logout();
-                    context.go('/');
+                  onPressed: () async {
+                    final router = GoRouter.of(context);
+                    await auth.logout();
+                    router.go('/');
                   },
                   icon: const Icon(Icons.logout_rounded, size: 18),
                   label: const Text('Sign out'),
@@ -1056,8 +1175,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
         tileColor: highlight
             ? AppColors.success.withValues(alpha: 0.08)
             : AppColors.white,
@@ -1070,15 +1188,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         leading: Icon(icon, color: iconColor, size: 20),
         title: Text(label,
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(
-                    color: highlight ? AppColors.success : AppColors.navy,
-                    fontWeight: highlight ? FontWeight.w600 : FontWeight.w400)),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: highlight ? AppColors.success : AppColors.navy,
+                fontWeight: highlight ? FontWeight.w600 : FontWeight.w400)),
         trailing: Icon(Icons.arrow_forward_ios_rounded,
-            size: 14,
-            color: highlight ? AppColors.success : AppColors.gray400),
+            size: 14, color: highlight ? AppColors.success : AppColors.gray400),
         onTap: onTap ?? () {},
       ),
     );
@@ -1088,10 +1202,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildBottomNav() {
     final items = [
       _NavItem(Icons.home_outlined, Icons.home_rounded, 'Home'),
-      _NavItem(Icons.receipt_long_outlined, Icons.receipt_long_rounded,
-          'Orders'),
       _NavItem(
-          Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
+          Icons.receipt_long_outlined, Icons.receipt_long_rounded, 'Orders'),
+      _NavItem(Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
     ];
 
     return Container(
@@ -1123,25 +1236,21 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Icon(
                         isActive ? item.activeIcon : item.icon,
-                        color: isActive
-                            ? AppColors.orange
-                            : AppColors.gray400,
+                        color: isActive ? AppColors.orange : AppColors.gray400,
                         size: 24,
                       ),
                       const SizedBox(height: 4),
                       Text(item.label,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: isActive
-                                    ? AppColors.orange
-                                    : AppColors.gray400,
-                                fontSize: 10,
-                                fontWeight: isActive
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                              )),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: isActive
+                                        ? AppColors.orange
+                                        : AppColors.gray400,
+                                    fontSize: 10,
+                                    fontWeight: isActive
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                  )),
                     ],
                   ),
                 ),
@@ -1154,7 +1263,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ── MODALS ────────────────────────────────────────────────────────
-  void _showSelfie(BuildContext context, String selfieUrl) {
+  void _showSelfie(BuildContext context, String selfieUrl,
+      {required bool verified}) {
     showDialog(
       context: context,
       builder: (_) => Dialog(
@@ -1167,44 +1277,42 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Image.network(
                 selfieUrl,
                 fit: BoxFit.cover,
-                loadingBuilder: (_, child, progress) =>
-                    progress == null
-                        ? child
-                        : const Center(
-                            child: CircularProgressIndicator(
-                                color: AppColors.orange)),
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : const Center(
+                        child: CircularProgressIndicator(
+                            color: AppColors.orange)),
               ),
             ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.success.withValues(alpha: 0.9),
-                borderRadius: BorderRadius.circular(20),
+            if (verified) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.success.withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.verified_rounded,
+                        color: AppColors.white, size: 16),
+                    const SizedBox(width: 6),
+                    Text('Identity verified',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.white,
+                              fontWeight: FontWeight.w600,
+                            )),
+                  ],
+                ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.verified_rounded,
-                      color: AppColors.white, size: 16),
-                  const SizedBox(width: 6),
-                  Text('Identity verified',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                            color: AppColors.white,
-                            fontWeight: FontWeight.w600,
-                          )),
-                ],
-              ),
-            ),
+            ],
             const SizedBox(height: 8),
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Close',
-                  style: TextStyle(color: AppColors.white)),
+              child:
+                  const Text('Close', style: TextStyle(color: AppColors.white)),
             ),
           ],
         ),
@@ -1217,204 +1325,191 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setModalState) => Container(
-          height: MediaQuery.of(context).size.height * 0.75,
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: AppColors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text('Notifications',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(color: AppColors.navy)),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () =>
-                        FirestoreService.markAllNotificationsRead(
-                            customerId),
-                    child: Text('Mark all read',
-                        style: TextStyle(
-                            color: AppColors.orange, fontSize: 13)),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text('Close',
-                        style: TextStyle(color: AppColors.orange)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: FirestoreService.watchNotifications(customerId),
-                  builder: (context, snap) {
-                    if (!snap.hasData) {
-                      return const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.orange));
-                    }
-                    final notifications = snap.data!;
-                    if (notifications.isEmpty) {
-                      return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.notifications_none_rounded,
-                                size: 64, color: AppColors.gray400),
-                            const SizedBox(height: 12),
-                            Text('No notifications yet',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(color: AppColors.gray600)),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Order and delivery updates\nwill appear here',
-                              textAlign: TextAlign.center,
+      builder: (_) => Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('Notifications',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(color: AppColors.navy)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () =>
+                      FirestoreService.markAllNotificationsRead(customerId),
+                  child: Text('Mark all read',
+                      style: TextStyle(color: AppColors.orange, fontSize: 13)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child:
+                      Text('Close', style: TextStyle(color: AppColors.orange)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: FirestoreService.watchNotifications(customerId),
+                builder: (context, snap) {
+                  if (!snap.hasData) {
+                    return const Center(
+                        child:
+                            CircularProgressIndicator(color: AppColors.orange));
+                  }
+                  final notifications = snap.data!;
+                  if (notifications.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.notifications_none_rounded,
+                              size: 64, color: AppColors.gray400),
+                          const SizedBox(height: 12),
+                          Text('No notifications yet',
                               style: Theme.of(context)
                                   .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: AppColors.gray400),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                    return ListView.separated(
-                      itemCount: notifications.length,
-                      separatorBuilder: (_, __) =>
+                                  .titleMedium
+                                  ?.copyWith(color: AppColors.gray600)),
                           const SizedBox(height: 8),
-                      itemBuilder: (_, i) {
-                        final n = notifications[i];
-                        final isRead = n['read'] == true;
-                        final createdAt = n['createdAt'] as DateTime?;
-                        return Dismissible(
-                          key: ValueKey(n['id']),
-                          direction: DismissDirection.endToStart,
-                          onDismissed: (_) => FirestoreService
-                              .deleteNotification(n['id'] as String),
-                          background: Container(
-                            alignment: Alignment.centerRight,
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 20),
-                            decoration: BoxDecoration(
-                              color: AppColors.error,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(Icons.delete_outline_rounded,
-                                color: AppColors.white),
+                          Text(
+                            'Order and delivery updates\nwill appear here',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppColors.gray400),
                           ),
-                          child: GestureDetector(
-                            onTap: () {
-                              if (!isRead) {
-                                FirestoreService.markNotificationRead(
-                                    n['id'] as String);
-                              }
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: isRead
-                                    ? AppColors.white
-                                    : AppColors.orange
-                                        .withValues(alpha: 0.06),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: isRead
-                                        ? AppColors.gray200
-                                        : AppColors.orange
-                                            .withValues(alpha: 0.3)),
-                              ),
-                              child: Row(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  if (!isRead)
-                                    Container(
-                                      margin:
-                                          const EdgeInsets.only(top: 5),
-                                      width: 8,
-                                      height: 8,
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.orange,
-                                        shape: BoxShape.circle,
-                                      ),
+                        ],
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    itemCount: notifications.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) {
+                      final n = notifications[i];
+                      final isRead = n['read'] == true;
+                      final createdAt = n['createdAt'] as DateTime?;
+                      return Dismissible(
+                        key: ValueKey(n['id']),
+                        direction: DismissDirection.endToStart,
+                        onDismissed: (_) => FirestoreService.deleteNotification(
+                            n['id'] as String),
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          decoration: BoxDecoration(
+                            color: AppColors.error,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.delete_outline_rounded,
+                              color: AppColors.white),
+                        ),
+                        child: GestureDetector(
+                          onTap: () {
+                            if (!isRead) {
+                              FirestoreService.markNotificationRead(
+                                  n['id'] as String);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: isRead
+                                  ? AppColors.white
+                                  : AppColors.orange.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: isRead
+                                      ? AppColors.gray200
+                                      : AppColors.orange
+                                          .withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (!isRead)
+                                  Container(
+                                    margin: const EdgeInsets.only(top: 5),
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: AppColors.orange,
+                                      shape: BoxShape.circle,
                                     ),
-                                  if (!isRead) const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          (n['title'] as String).isNotEmpty
-                                              ? n['title'] as String
-                                              : 'MobiGas',
+                                  ),
+                                if (!isRead) const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        (n['title'] as String).isNotEmpty
+                                            ? n['title'] as String
+                                            : 'MobiGas',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
+                                                color: AppColors.navy,
+                                                fontWeight: isRead
+                                                    ? FontWeight.w500
+                                                    : FontWeight.w700),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(n['body'] as String,
                                           style: Theme.of(context)
                                               .textTheme
-                                              .bodyMedium
+                                              .bodySmall
                                               ?.copyWith(
-                                                  color: AppColors.navy,
-                                                  fontWeight: isRead
-                                                      ? FontWeight.w500
-                                                      : FontWeight.w700),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(n['body'] as String,
+                                                  color: AppColors.gray600,
+                                                  height: 1.4)),
+                                      if (createdAt != null) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                            '${createdAt.day}/${createdAt.month}/${createdAt.year} · ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
                                             style: Theme.of(context)
                                                 .textTheme
                                                 .bodySmall
                                                 ?.copyWith(
-                                                    color:
-                                                        AppColors.gray600,
-                                                    height: 1.4)),
-                                        if (createdAt != null) ...[
-                                          const SizedBox(height: 4),
-                                          Text(
-                                              '${createdAt.day}/${createdAt.month}/${createdAt.year} · ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.copyWith(
-                                                      color: AppColors
-                                                          .gray400,
-                                                      fontSize: 10)),
-                                        ],
+                                                    color: AppColors.gray400,
+                                                    fontSize: 10)),
                                       ],
-                                    ),
+                                    ],
                                   ),
-                                  GestureDetector(
-                                    onTap: () => FirestoreService
-                                        .deleteNotification(
-                                            n['id'] as String),
-                                    child: const Padding(
-                                      padding: EdgeInsets.all(4),
-                                      child: Icon(
-                                          Icons.close_rounded,
-                                          size: 16,
-                                          color: AppColors.gray400),
-                                    ),
+                                ),
+                                GestureDetector(
+                                  onTap: () =>
+                                      FirestoreService.deleteNotification(
+                                          n['id'] as String),
+                                  child: const Padding(
+                                    padding: EdgeInsets.all(4),
+                                    child: Icon(Icons.close_rounded,
+                                        size: 16, color: AppColors.gray400),
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           ),
-                        );
-                      },
-                    );
-                  },
-                ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1422,44 +1517,116 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showChangePassword(BuildContext context) {
     final controller = TextEditingController();
+    final currentController = TextEditingController();
+    var saving = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: AppColors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Change password',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(color: AppColors.navy)),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: controller,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  hintText: 'New password',
-                  prefixIcon: Icon(Icons.lock_outline_rounded,
-                      color: AppColors.gray400, size: 20),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Change password',
+                    style: Theme.of(sheetContext)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(color: AppColors.navy)),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: currentController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Current password',
+                    prefixIcon: Icon(Icons.lock_clock_outlined,
+                        color: AppColors.gray400, size: 20),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Update password'),
-              ),
-            ],
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: controller,
+                  obscureText: true,
+                  keyboardType: TextInputType.text,
+                  decoration: const InputDecoration(
+                    hintText: 'New password — letters and numbers',
+                    prefixIcon: Icon(Icons.lock_outline_rounded,
+                        color: AppColors.gray400, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          final navigator = Navigator.of(sheetContext);
+                          final next = controller.text;
+                          final current = currentController.text;
+
+                          if (next.length < 6 ||
+                              !RegExp(r'[A-Za-z]').hasMatch(next) ||
+                              !RegExp(r'[0-9]').hasMatch(next)) {
+                            messenger.showSnackBar(const SnackBar(
+                              content: Text(
+                                  'Password needs 6+ characters, a letter and a number'),
+                              backgroundColor: AppColors.error,
+                              behavior: SnackBarBehavior.floating,
+                            ));
+                            return;
+                          }
+
+                          setSheetState(() => saving = true);
+                          try {
+                            final user = FirebaseAuth.instance.currentUser!;
+                            // Firebase requires a recent login before a
+                            // password change — reauthenticate first.
+                            await user.reauthenticateWithCredential(
+                              EmailAuthProvider.credential(
+                                email: user.email!,
+                                password: current,
+                              ),
+                            );
+                            await user.updatePassword(next);
+                            navigator.pop();
+                            messenger.showSnackBar(const SnackBar(
+                              content: Text('Password updated'),
+                              backgroundColor: AppColors.success,
+                              behavior: SnackBarBehavior.floating,
+                            ));
+                          } on FirebaseAuthException catch (e) {
+                            setSheetState(() => saving = false);
+                            messenger.showSnackBar(SnackBar(
+                              content: Text(e.code == 'wrong-password' ||
+                                      e.code == 'invalid-credential'
+                                  ? 'Current password is incorrect'
+                                  : 'Could not update password. Try again.'),
+                              backgroundColor: AppColors.error,
+                              behavior: SnackBarBehavior.floating,
+                            ));
+                          }
+                        },
+                  child: saving
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: AppColors.white),
+                        )
+                      : const Text('Update password'),
+                ),
+              ],
+            ),
           ),
         ),
       ),

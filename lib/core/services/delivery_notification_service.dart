@@ -24,7 +24,7 @@ class DeliveryNotificationService {
   }
 
   /// Generic notification — for all non-delivery pushes
-  /// (credit updates, new orders, payments, announcements).
+  /// (new orders, payments, announcements).
   /// Title and body come from the FCM message, never hardcoded.
   /// [type] is stored as the tap payload for navigation.
   static Future<void> showGeneralNotification({
@@ -37,7 +37,7 @@ class DeliveryNotificationService {
     final androidDetails = AndroidNotificationDetails(
       'general_channel',
       'MobiGas Updates',
-      channelDescription: 'Account, credit and order updates',
+      channelDescription: 'Account and order updates',
       importance: Importance.high,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
@@ -91,10 +91,21 @@ class DeliveryNotificationService {
     await _plugin.cancel(id: 1001);
   }
 
+  /// Sent when the vendor confirms delivery.
+  ///
+  /// v1 is pay-on-delivery only — the customer settles with the vendor
+  /// at the door, in cash or by M-Pesa, so there is never anything to
+  /// repay. The body deliberately doesn't name the method, because this
+  /// call site doesn't know which one was used.
+  ///
+  /// BUG FIX: the old signature took `bool isCash = false` and branched
+  /// on it, so any caller that omitted the argument pushed "Repay KES X
+  /// within 30 days" to a customer who had just handed over cash. The
+  /// parameter is gone rather than defaulted the other way — a flag
+  /// with no second branch is an invitation to reintroduce one.
   static Future<void> showDeliveryConfirmed({
     required String gasSize,
     required String amount,
-    bool isCash = false,
   }) async {
     await initialize();
     final androidDetails = AndroidNotificationDetails(
@@ -110,9 +121,7 @@ class DeliveryNotificationService {
     await _plugin.show(
       id: 1002,
       title: 'Gas delivered! ✅',
-      body: isCash
-          ? '$gasSize delivered · Paid KES $amount in cash — thank you!'
-          : '$gasSize delivered · Repay KES $amount within 30 days',
+      body: '$gasSize delivered · Paid KES $amount — thank you!',
       notificationDetails: details,
       payload: 'order_update',
     );
