@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
+import 'package:mobigas/core/services/google_auth_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
@@ -15,6 +16,22 @@ import 'package:mobigas/features/vendor/screens/vendor_statistics_screen.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
+
+/// Server-computed earnings. Reading every delivered order just to add
+/// up a number does not scale, and capping the read at N silently
+/// caps the number too — a vendor with 50 deliveries would watch their
+/// "total earnings" stop growing at 20.
+class _VendorEarnings {
+  final double total;
+  final double today;
+  final int deliveries;
+  const _VendorEarnings({
+    required this.total,
+    required this.today,
+    required this.deliveries,
+  });
+  static const zero = _VendorEarnings(total: 0, today: 0, deliveries: 0);
+}
 
 class VendorHomeScreen extends StatefulWidget {
   const VendorHomeScreen({super.key});
@@ -30,7 +47,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   bool _isLoadingVendor = true;
   StreamSubscription<User?>? _authSub;
 
+  _VendorEarnings? _earnings;
+  bool _earningsFailed = false;
+
   String get _vendorId => FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  String get _businessName => (_vendorData?['businessName'] ?? '').toString();
 
   @override
   void initState() {
@@ -46,17 +68,21 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     // we load the profile the moment a real user becomes available,
     // however long that takes.
     _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user != null) _loadVendorData();
+      if (user != null) _refreshAll();
     });
     // Also try immediately, in case auth is already resolved (the
     // normal case for anyone who didn't just reinstall).
-    _loadVendorData();
+    _refreshAll();
   }
 
   @override
   void dispose() {
     _authSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([_loadVendorData(), _loadEarnings()]);
   }
 
   Future<void> _loadVendorData() async {
@@ -87,17 +113,62 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     }
   }
 
+  /// Totals come from Firestore aggregate queries — sum() and count()
+  /// run server-side and cost roughly one document read each, however
+  /// many delivered orders the vendor has. The alternative (streaming
+  /// every order and folding over it) gets slower and more expensive
+  /// with every delivery, which is backwards.
+  ///
+  /// Trade-off: aggregates are a Future, not a Stream, so these
+  /// numbers refresh on pull-to-refresh and after an order completes
+  /// rather than tick live. Correct and slightly stale beats live and
+  /// wrong.
+  Future<void> _loadEarnings() async {
+    if (_vendorId.isEmpty) return;
+
+    final base = FirebaseService.orders
+        .where('vendorId', isEqualTo: _vendorId)
+        .where('status', isEqualTo: OrderStatus.delivered.name);
+
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+
+    try {
+      final allSnap = await base.aggregate(sum('gasPrice'), count()).get();
+      final todaySnap = await base
+          .where('createdAt',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+          .aggregate(sum('gasPrice'))
+          .get();
+
+      if (!mounted) return;
+      setState(() {
+        _earnings = _VendorEarnings(
+          total: allSnap.getSum('gasPrice') ?? 0,
+          deliveries: allSnap.count ?? 0,
+          today: todaySnap.getSum('gasPrice') ?? 0,
+        );
+        _earningsFailed = false;
+      });
+    } catch (e) {
+      // Most likely a missing composite index the first time this
+      // runs — Firestore prints a create-index link in the console.
+      debugPrint('Earnings aggregate failed: $e');
+      if (mounted) setState(() => _earningsFailed = true);
+    }
+  }
+
   /// Mirrors VendorModel.documentsSubmitted (app_models.dart) — kept
   /// as a raw-map check here since this screen reads _vendorData
   /// directly rather than through the model. Update both together.
   bool get _documentsSubmitted {
     String s(String key) => (_vendorData?[key] ?? '').toString();
-    final hasEpraProof =
-        s('epraCertificateUrl').isNotEmpty || s('subDealerAuthorizationUrl').isNotEmpty;
-    final hasScaleProof =
-        s('weighingScaleCertUrl').isNotEmpty || s('weighingScalePhotoUrl').isNotEmpty;
-    final hasBrandProof =
-        s('brandAuthorizationUrl').isNotEmpty || s('dealerAssociationLetterUrl').isNotEmpty;
+    final hasEpraProof = s('epraCertificateUrl').isNotEmpty ||
+        s('subDealerAuthorizationUrl').isNotEmpty;
+    final hasScaleProof = s('weighingScaleCertUrl').isNotEmpty ||
+        s('weighingScalePhotoUrl').isNotEmpty;
+    final hasBrandProof = s('brandAuthorizationUrl').isNotEmpty ||
+        s('dealerAssociationLetterUrl').isNotEmpty;
     final isSole = (_vendorData?['businessType'] ?? 'sole') == 'sole';
     final hasBusinessReg = !isSole || s('businessRegistrationUrl').isNotEmpty;
     return hasEpraProof &&
@@ -129,12 +200,29 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       );
       return;
     }
+
     final newStatus = !_isOnline;
     setState(() => _isOnline = newStatus);
-    await FirebaseService.vendors.doc(_vendorId).update({
-      'isOnline': newStatus,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await FirebaseService.vendors.doc(_vendorId).update({
+        'isOnline': newStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      // The write failed but the toggle already flipped — a vendor
+      // sitting on a green "You are online" badge while Firestore
+      // still says offline will never understand why no orders come.
+      if (!mounted) return;
+      setState(() => _isOnline = !newStatus);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'Could not update your status. Check your connection.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Stream<List<OrderModel>> get _pendingOrdersStream {
@@ -153,7 +241,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             }).toList());
   }
 
-  Stream<List<OrderModel>> get _completedOrdersStream {
+  /// The 20 most recent completed orders, for the Orders tab list.
+  /// This limit is about how many rows to render — earnings totals do
+  /// NOT derive from it (see _loadEarnings).
+  Stream<List<OrderModel>> get _recentCompletedOrdersStream {
     return FirebaseService.orders
         .where('vendorId', isEqualTo: _vendorId)
         .where('status', isEqualTo: OrderStatus.delivered.name)
@@ -176,6 +267,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       customerName: data['customerName'] ?? '',
       customerArea: data['customerArea'] ?? '',
       customerPhone: data['customerPhone'] ?? '',
+      // BUG FIX: this local copy of the mapper silently dropped the
+      // customer's coordinates, so every OrderModel handed to
+      // VendorOrderScreen carried 0,0 and any map or navigation
+      // pointed at the Gulf of Guinea. The FirestoreService mapper
+      // always had these; the two drifted because this one exists.
+      customerLatitude: (data['customerLatitude'] ?? 0.0).toDouble(),
+      customerLongitude: (data['customerLongitude'] ?? 0.0).toDouble(),
       listing: GasListing(
         size: data['gasSize'] ?? '',
         kg: data['gasKg'] ?? 0,
@@ -193,8 +291,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
       cancelledBy: data['cancelledBy'],
-      bankDisbursementAmount:
-          (data['bankDisbursementAmount'] ?? 0).toDouble(),
+      bankDisbursementAmount: (data['bankDisbursementAmount'] ?? 0).toDouble(),
       originationFeeToMobigas:
           (data['originationFeeToMobigas'] ?? 0).toDouble(),
       pin: data['pin'] ?? '',
@@ -209,18 +306,49 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     );
   }
 
+  /// Accepting re-reads the order first. The vendor's list can be a
+  /// few seconds stale, and the old code wrote `status: accepted`
+  /// unconditionally — a customer who cancelled while the vendor was
+  /// deciding would find their order resurrected. The write also
+  /// wasn't awaited, so failures vanished.
   Future<void> _acceptOrder(OrderModel order) async {
-    await FirebaseService.orders
-        .where('orderId', isEqualTo: order.orderId)
-        .get()
-        .then((snap) {
-      if (snap.docs.isNotEmpty) {
-        snap.docs.first.reference.update({
-          'status': OrderStatus.accepted.name,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+    try {
+      final snap = await FirebaseService.orders
+          .where('orderId', isEqualTo: order.orderId)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return;
+
+      final doc = snap.docs.first;
+      final current = (doc.data() as Map<String, dynamic>)['status'];
+      if (current != OrderStatus.pending.name) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(current == OrderStatus.cancelled.name
+                ? 'This order was cancelled by the customer.'
+                : 'This order is no longer pending.'),
+            backgroundColor: AppColors.warning,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
       }
-    });
+
+      await doc.reference.update({
+        'status': OrderStatus.accepted.name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Could not accept the order. Try again.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _declineOrder(OrderModel order) async {
@@ -231,20 +359,25 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         cancelledBy: 'vendor');
   }
 
+  /// launchUrl RETURNS false on failure — it does not throw. The old
+  /// try/catch could never fire, so on a device with no dialer the
+  /// Call button silently did nothing.
   Future<void> _callCustomer(String phone) async {
     final uri = Uri(scheme: 'tel', path: phone);
+    var launched = false;
     try {
-      await launchUrl(uri);
+      launched = await launchUrl(uri);
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Could not open the phone app.'),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      launched = false;
+    }
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open the phone app. Call $phone directly.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -253,32 +386,31 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     if (_isLoadingVendor) {
       return const Scaffold(
         backgroundColor: AppColors.navy,
-        body: Center(
-            child: CircularProgressIndicator(color: AppColors.orange)),
+        body: Center(child: CircularProgressIndicator(color: AppColors.orange)),
       );
     }
 
     return DoubleBackToExit(
       child: Scaffold(
-      backgroundColor: AppColors.orangeWarm,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: IndexedStack(
-                index: _currentTab,
-                children: [
-                  _buildHomeTab(),
-                  _buildOrdersTab(),
-                  _buildEarningsTab(),
-                  _buildProfileTab(),
-                ],
+        backgroundColor: AppColors.orangeWarm,
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: IndexedStack(
+                  index: _currentTab,
+                  children: [
+                    _buildHomeTab(),
+                    _buildOrdersTab(),
+                    _buildEarningsTab(),
+                    _buildProfileTab(),
+                  ],
+                ),
               ),
-            ),
-            _buildBottomNav(),
-          ],
+              _buildBottomNav(),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -288,213 +420,144 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     return RefreshIndicator(
       color: AppColors.orange,
       backgroundColor: AppColors.white,
-      onRefresh: _loadVendorData,
+      onRefresh: _refreshAll,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: Column(
           children: [
             _buildVendorHeader(),
-          // Platform fees (cash-order finder fees) banner
-          const VendorFeesBanner(),
-          // Setup incomplete banner
-          if (_vendorData == null || (_vendorData?['businessName'] ?? '').isEmpty)
-            GestureDetector(
-              onTap: () async {
-                final done = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => VendorSetupScreen(
-                        existingData: _vendorData),
-                  ),
-                );
-                if (done == true) _loadVendorData();
-              },
-              child: Container(
-                width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.orange.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                      color: AppColors.orange.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.store_outlined,
-                        color: AppColors.orange, size: 22),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Complete your business setup',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  color: AppColors.orange,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
-                                ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Add your business details and gas prices to start receiving orders',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: AppColors.orange,
-                                  height: 1.4,
-                                  fontSize: 11,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.arrow_forward_ios_rounded,
-                        color: AppColors.orange, size: 14),
-                  ],
-                ),
-              ),
-            )
-          else if (!_documentsSubmitted)
-            // No customer will see this vendor until these are
-            // submitted AND approved — but they can go online and
-            // prepare their shop in the meantime.
-            GestureDetector(
-              onTap: () async {
-                final done = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => VendorSetupScreen(
-                        existingData: _vendorData,
-                        mode: VendorEditMode.documentsOnly),
-                  ),
-                );
-                if (done == true) _loadVendorData();
-              },
-              child: Container(
-                width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.orange.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                      color: AppColors.orange.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.fact_check_outlined,
-                        color: AppColors.orange, size: 22),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Get your verified badge',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  color: AppColors.orange,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
-                                ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Upload your EPRA certificate, business permit, fire certificate and the rest — customers only see verified vendors',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: AppColors.orange,
-                                  height: 1.4,
-                                  fontSize: 11,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.arrow_forward_ios_rounded,
-                        color: AppColors.orange, size: 14),
-                  ],
-                ),
-              ),
-            )
-          else if (_vendorData?['isVerified'] != true)
-            // All five documents are in — now it's on MobiGas, not
-            // the vendor. Informational only; does not block going
-            // online, and there's nothing actionable left for them
-            // to tap here.
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.warning.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: AppColors.warning.withValues(alpha: 0.4)),
-              ),
-              child: Row(
+            // Platform fees (cash-order finder fees) banner
+            const VendorFeesBanner(),
+            if (_vendorData == null || _businessName.isEmpty)
+              _setupBanner()
+            else if (!_documentsSubmitted)
+              _documentsBanner()
+            else if (_vendorData?['isVerified'] != true)
+              _underReviewBanner(),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
                 children: [
-                  const Icon(Icons.hourglass_top_rounded,
-                      color: AppColors.warning, size: 22),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Documents under review',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                color: AppColors.warning,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14,
-                              ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'MobiGas is verifying your documents. You can prepare orders now — customers will see you as soon as you\'re approved.',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: AppColors.warning,
-                                height: 1.4,
-                                fontSize: 11,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _buildOnlineToggle(),
+                  const SizedBox(height: 20),
+                  _buildStatsRow(),
+                  const SizedBox(height: 20),
+                  _buildIncomingOrders(),
                 ],
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.all(20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _setupBanner() {
+    return GestureDetector(
+      onTap: () async {
+        final done = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => VendorSetupScreen(existingData: _vendorData),
+          ),
+        );
+        if (done == true) _refreshAll();
+      },
+      child: _banner(
+        icon: Icons.store_outlined,
+        color: AppColors.orange,
+        title: 'Complete your business setup',
+        body:
+            'Add your business details and gas prices to start receiving orders',
+        showChevron: true,
+      ),
+    );
+  }
+
+  Widget _documentsBanner() {
+    // No customer will see this vendor until these are submitted AND
+    // approved — but they can go online and prepare their shop in the
+    // meantime.
+    return GestureDetector(
+      onTap: () async {
+        final done = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => VendorSetupScreen(
+                existingData: _vendorData,
+                mode: VendorEditMode.documentsOnly),
+          ),
+        );
+        if (done == true) _refreshAll();
+      },
+      child: _banner(
+        icon: Icons.fact_check_outlined,
+        color: AppColors.orange,
+        title: 'Get your verified badge',
+        body:
+            'Upload your EPRA certificate, business permit, fire certificate and the rest — customers only see verified vendors',
+        showChevron: true,
+      ),
+    );
+  }
+
+  Widget _underReviewBanner() {
+    // All documents are in — now it's on MobiGas, not the vendor.
+    // Informational only; nothing actionable left for them to tap.
+    return _banner(
+      icon: Icons.hourglass_top_rounded,
+      color: AppColors.warning,
+      title: 'Documents under review',
+      body:
+          'MobiGas is verifying your documents. You can prepare orders now — customers will see you as soon as you\'re approved.',
+      showChevron: false,
+    );
+  }
+
+  Widget _banner({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String body,
+    required bool showChevron,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildOnlineToggle(),
-                const SizedBox(height: 20),
-                _buildStatsRow(),
-                const SizedBox(height: 20),
-                _buildIncomingOrders(),
+                Text(title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        )),
+                const SizedBox(height: 2),
+                Text(body,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: color,
+                          height: 1.4,
+                          fontSize: 11,
+                        )),
               ],
             ),
           ),
+          if (showChevron)
+            Icon(Icons.arrow_forward_ios_rounded, color: color, size: 14),
         ],
       ),
-    ),
     );
   }
 
@@ -524,31 +587,31 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         children: [
           Row(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Welcome back 👋',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.gray400,
-                        ),
-                  ),
-                  Text(
-                    _vendorData?['businessName'] ?? 'Vendor',
-                    style: Theme.of(context)
-                        .textTheme
-                        .displayMedium
-                        ?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 20,
-                        ),
-                  ),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Welcome back 👋',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.gray400,
+                          ),
+                    ),
+                    Text(
+                      _businessName.isEmpty ? 'Vendor' : _businessName,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                            color: AppColors.white,
+                            fontSize: 20,
+                          ),
+                    ),
+                  ],
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 12),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: _isOnline
                       ? AppColors.success.withValues(alpha: 0.2)
@@ -561,22 +624,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        color: _isOnline
-                            ? AppColors.success
-                            : AppColors.error,
+                        color: _isOnline ? AppColors.success : AppColors.error,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 6),
                     Text(
                       _isOnline ? 'Online' : 'Offline',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                            color: _isOnline
-                                ? AppColors.success
-                                : AppColors.error,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                _isOnline ? AppColors.success : AppColors.error,
                             fontWeight: FontWeight.w600,
                           ),
                     ),
@@ -655,10 +712,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         : _isOnline
                             ? 'You are online'
                             : 'You are offline',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           color: AppColors.white,
                           fontSize: 18,
                         ),
@@ -683,47 +737,26 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     );
   }
 
-  Widget _buildStatsRow() {
-    return StreamBuilder<List<OrderModel>>(
-      stream: _completedOrdersStream,
-      builder: (context, snap) {
-        final orders = snap.data ?? [];
-        final todayOrders = orders.where((o) {
-          final now = DateTime.now();
-          return o.createdAt.day == now.day &&
-              o.createdAt.month == now.month &&
-              o.createdAt.year == now.year;
-        }).toList();
-        // Vendor revenue = gas price on every completed order, paid
-        // directly by the customer on delivery.
-        final todayEarnings =
-            todayOrders.fold(0.0, (acc, o) => acc + o.listing.price);
-        final totalEarnings =
-            orders.fold(0.0, (acc, o) => acc + o.listing.price);
+  String _money(double? v) =>
+      v == null ? '—' : 'KES ${v.toStringAsFixed(0)}';
 
-        return Row(
-          children: [
-            _statCard('Today',
-                'KES ${todayEarnings.toStringAsFixed(0)}',
-                Icons.today_rounded, AppColors.orange),
-            const SizedBox(width: 12),
-            _statCard('Total earnings',
-                'KES ${totalEarnings.toStringAsFixed(0)}',
-                Icons.account_balance_wallet_rounded, AppColors.success),
-            const SizedBox(width: 12),
-            _statCard('Deliveries',
-                '${orders.length}',
-                Icons.two_wheeler_rounded, AppColors.navy),
-          ],
-        );
-      },
+  Widget _buildStatsRow() {
+    final e = _earnings;
+    return Row(
+      children: [
+        _statCard('Today', _money(e?.today), Icons.today_rounded,
+            AppColors.orange),
+        const SizedBox(width: 12),
+        _statCard('Total earnings', _money(e?.total),
+            Icons.account_balance_wallet_rounded, AppColors.success),
+        const SizedBox(width: 12),
+        _statCard('Deliveries', e == null ? '—' : '${e.deliveries}',
+            Icons.two_wheeler_rounded, AppColors.navy),
+      ],
     );
   }
 
-
-
-  Widget _statCard(
-      String label, String value, IconData icon, Color color) {
+  Widget _statCard(String label, String value, IconData icon, Color color) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(14),
@@ -769,8 +802,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(
-                  child:
-                      CircularProgressIndicator(color: AppColors.orange));
+                  child: CircularProgressIndicator(color: AppColors.orange));
             }
             final orders = snap.data ?? [];
             if (orders.isEmpty) {
@@ -796,8 +828,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       ),
       child: Column(
         children: [
-          const Icon(Icons.inbox_outlined,
-              size: 48, color: AppColors.gray400),
+          const Icon(Icons.inbox_outlined, size: 48, color: AppColors.gray400),
           const SizedBox(height: 12),
           Text(
             _isOnline ? 'No orders yet' : 'You are offline',
@@ -824,8 +855,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   Widget _orderCard(OrderModel order) {
     final isPending = order.status == OrderStatus.pending;
     final isAccepted = order.status == OrderStatus.accepted;
-    final isOutForDelivery =
-        order.status == OrderStatus.outForDelivery;
+    final isOutForDelivery = order.status == OrderStatus.outForDelivery;
 
     Color statusColor = isPending
         ? AppColors.warning
@@ -850,14 +880,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
       ),
       child: Column(
         children: [
-          // Status bar
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: statusColor.withValues(alpha: 0.1),
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(14)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(14)),
             ),
             child: Row(
               children: [
@@ -871,23 +899,20 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
                 const SizedBox(width: 8),
                 Text(statusLabel,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: statusColor,
                           fontWeight: FontWeight.w600,
                         )),
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: AppColors.navy,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    '💵 CASH on delivery',
+                    'Pay on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.white,
                           fontSize: 9,
@@ -935,14 +960,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       children: [
                         Text(
                           'KES ${order.listing.price.toStringAsFixed(0)}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleLarge
-                              ?.copyWith(
-                                color: AppColors.navy,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 20,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 20,
+                                  ),
                         ),
                         Text(order.listing.size,
                             style: Theme.of(context)
@@ -958,10 +981,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 // price, and size before deciding to accept — no
                 // product type, no brand, no way to check they
                 // actually stock what's being asked for, and no
-                // phone number to call the customer. All of this
-                // existed on the POST-accept prepare screen already;
-                // it just needed to also show here, before the
-                // accept/decline decision.
+                // phone number to call the customer.
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1049,18 +1069,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 const SizedBox(height: 10),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: AppColors.navy.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     'Collect KES ${order.listing.price.toStringAsFixed(0)} from the customer on delivery (cash or M-Pesa to you).',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.navy,
                           fontSize: 11,
                           height: 1.4,
@@ -1068,17 +1085,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Action buttons
                 if (isPending) ...[
                   Row(
                     children: [
-                     Expanded(
+                      Expanded(
                         child: OutlinedButton(
                           onPressed: () => _declineOrder(order),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.error,
-                            side: const BorderSide(
-                                color: AppColors.error),
+                            side: const BorderSide(color: AppColors.error),
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 4, vertical: 12),
                           ),
@@ -1100,16 +1115,18 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   ),
                 ] else if (isAccepted || isOutForDelivery) ...[
                   ElevatedButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            VendorOrderScreen(order: order),
-                      ),
-                    ),
-                    child: Text(isAccepted
-                        ? 'Start delivery'
-                        : 'Continue delivery'),
+                    onPressed: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => VendorOrderScreen(order: order),
+                        ),
+                      );
+                      // A completed delivery changes the totals.
+                      _loadEarnings();
+                    },
+                    child: Text(
+                        isAccepted ? 'Start delivery' : 'Continue delivery'),
                   ),
                 ],
               ],
@@ -1128,7 +1145,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
           color: AppColors.navy,
           child: Row(children: [
-            Text('All orders',
+            Text('Recent orders',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       color: AppColors.white,
                     )),
@@ -1136,7 +1153,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         ),
         Expanded(
           child: StreamBuilder<List<OrderModel>>(
-            stream: _completedOrdersStream,
+            stream: _recentCompletedOrdersStream,
             builder: (context, snap) {
               final orders = snap.data ?? [];
               if (orders.isEmpty) {
@@ -1158,8 +1175,29 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
               }
               return ListView.builder(
                 padding: const EdgeInsets.all(16),
-                itemCount: orders.length,
-                itemBuilder: (_, i) => _completedOrderTile(orders[i]),
+                itemCount: orders.length + 1,
+                itemBuilder: (_, i) {
+                  if (i == orders.length) {
+                    // The list is capped at 20; the earnings totals
+                    // are not. Say so rather than let a vendor think
+                    // these are all the orders they've ever had.
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        orders.length < 20
+                            ? ''
+                            : 'Showing your 20 most recent deliveries. '
+                                'Full history is in Statistics & Reports.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.gray400, fontSize: 11),
+                      ),
+                    );
+                  }
+                  return _completedOrderTile(orders[i]);
+                },
               );
             },
           ),
@@ -1201,8 +1239,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                         .textTheme
                         .titleMedium
                         ?.copyWith(fontSize: 14, color: AppColors.navy)),
-                Text(
-                    '${order.listing.size} · Cash · $dateStr',
+                Text('${order.listing.size} · $dateStr',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -1210,8 +1247,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
               ],
             ),
           ),
-          Text(
-              'KES ${order.listing.price.toStringAsFixed(0)}',
+          Text('KES ${order.listing.price.toStringAsFixed(0)}',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontSize: 14,
                     color: AppColors.success,
@@ -1224,149 +1260,155 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
 
   // ── EARNINGS TAB ──────────────────────────────────────────────────
   Widget _buildEarningsTab() {
-    return StreamBuilder<List<OrderModel>>(
-      stream: _completedOrdersStream,
-      builder: (context, snap) {
-        final orders = snap.data ?? [];
-        final total =
-            orders.fold(0.0, (acc, o) => acc + o.listing.price);
-        final today = orders.where((o) {
-          final now = DateTime.now();
-          return o.createdAt.day == now.day;
-        }).fold(0.0, (acc, o) => acc + o.listing.price);
+    final e = _earnings;
 
-        return SingleChildScrollView(
-          child: Column(
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
-                decoration: const BoxDecoration(
-                  color: AppColors.navy,
-                  borderRadius:
-                      BorderRadius.vertical(bottom: Radius.circular(28)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Total earnings',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: AppColors.gray400)),
-                    Text(
-                      'KES ${total.toStringAsFixed(0)}',
+    return RefreshIndicator(
+      color: AppColors.orange,
+      backgroundColor: AppColors.white,
+      onRefresh: _loadEarnings,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
+              decoration: const BoxDecoration(
+                color: AppColors.navy,
+                borderRadius:
+                    BorderRadius.vertical(bottom: Radius.circular(28)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Total earnings',
                       style: Theme.of(context)
                           .textTheme
-                          .displayLarge
-                          ?.copyWith(
-                            color: AppColors.white,
-                            fontSize: 40,
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text('Today: KES ${today.toStringAsFixed(0)}',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: AppColors.orange)),
-                  ],
-                ),
+                          .bodyMedium
+                          ?.copyWith(color: AppColors.gray400)),
+                  Text(
+                    _money(e?.total),
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                          color: AppColors.white,
+                          fontSize: 40,
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Today: ${_money(e?.today)}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppColors.orange)),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${orders.length} deliveries completed',
+            ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_earningsFailed)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        'Could not load your totals. Pull down to retry.',
                         style: Theme.of(context)
                             .textTheme
-                            .titleMedium
-                            ?.copyWith(color: AppColors.navy)),
-                    const SizedBox(height: 16),
-                    Container(
+                            .bodySmall
+                            ?.copyWith(color: AppColors.error),
+                      ),
+                    ),
+                  Text(
+                      e == null
+                          ? 'Loading deliveries…'
+                          : '${e.deliveries} deliveries completed',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(color: AppColors.navy)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.gray200),
+                    ),
+                    child: Column(
+                      children: [
+                        _earningsRow('How you get paid',
+                            'Customer pays you directly on delivery — cash or M-Pesa'),
+                        _earningsRow(
+                            'Your M-Pesa', _vendorData?['phone'] ?? ''),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  GestureDetector(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => VendorStatisticsScreen(
+                            vendorData: _vendorData ?? {}),
+                      ),
+                    ),
+                    child: Container(
+                      width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: AppColors.white,
+                        color: AppColors.navy,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.gray200),
                       ),
-                      child: Column(
+                      child: Row(
                         children: [
-                          _earningsRow('How you get paid',
-                              'Customer pays you directly on delivery — cash or M-Pesa'),
-                          _earningsRow('Your M-Pesa',
-                              _vendorData?['phone'] ?? ''),
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: AppColors.orange.withValues(alpha: 0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.bar_chart_rounded,
+                                color: AppColors.orange, size: 22),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Statistics & Reports',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                            color: AppColors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Text(
+                                    'Month-on-month sales, fulfillment rate, PDF export',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                            color: AppColors.gray400,
+                                            fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios_rounded,
+                              color: AppColors.orange, size: 14),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => VendorStatisticsScreen(
-                              vendorData: _vendorData ?? {}),
-                        ),
-                      ),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.navy,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                color: AppColors.orange.withValues(alpha: 0.2),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.bar_chart_rounded,
-                                  color: AppColors.orange, size: 22),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Statistics & Reports',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                              color: AppColors.white,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w700)),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                      'Month-on-month sales, fulfillment rate, PDF export',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                              color: AppColors.gray400,
-                                              fontSize: 11)),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.arrow_forward_ios_rounded,
-                                color: AppColors.orange, size: 14),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        );
-      },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1397,6 +1439,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   // ── PROFILE TAB ───────────────────────────────────────────────────
   Widget _buildProfileTab() {
     final user = FirebaseAuth.instance.currentUser;
+    final photoUrl =
+        (_vendorData?['photoUrl'] as String?) ?? user?.photoURL;
+
+    // BUG FIX: `(_vendorData?['businessName'] ?? 'V')[0]` — `??` only
+    // catches null, and a vendor who hasn't run setup has an EMPTY
+    // businessName, which is exactly the condition the setup banner
+    // tests for. ''[0] throws RangeError, so every brand-new vendor
+    // crashed the moment they opened this tab.
+    final initial = _businessName.isEmpty ? 'V' : _businessName[0].toUpperCase();
+
     return SingleChildScrollView(
       child: Column(
         children: [
@@ -1405,20 +1457,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
             decoration: const BoxDecoration(
               color: AppColors.navy,
-              borderRadius:
-                  BorderRadius.vertical(bottom: Radius.circular(28)),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
             ),
             child: Column(
               children: [
                 CircleAvatar(
                   radius: 40,
                   backgroundColor: AppColors.orange,
-                  backgroundImage: (_vendorData?['photoUrl'] ?? user?.photoURL) != null
-                      ? NetworkImage(_vendorData?['photoUrl'] ?? user!.photoURL!)
+                  backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                      ? NetworkImage(photoUrl)
                       : null,
-                  child: (_vendorData?['photoUrl'] ?? user?.photoURL) == null
+                  child: (photoUrl == null || photoUrl.isEmpty)
                       ? Text(
-                          (_vendorData?['businessName'] ?? 'V')[0],
+                          initial,
                           style: const TextStyle(
                             color: AppColors.white,
                             fontSize: 32,
@@ -1429,7 +1480,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  _vendorData?['businessName'] ?? '',
+                  _businessName.isEmpty ? 'Your business' : _businessName,
+                  textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme
                       .titleLarge
@@ -1445,11 +1497,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                             vendorData: _vendorData ?? {}),
                       ),
                     );
-                    if (updated == true) _loadVendorData();
+                    if (updated == true) _refreshAll();
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     decoration: BoxDecoration(
                       color: AppColors.orange.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -1461,13 +1513,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                             color: AppColors.orange, size: 14),
                         const SizedBox(width: 6),
                         Text('Edit profile',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: AppColors.orange,
-                                  fontWeight: FontWeight.w600,
-                                )),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.orange,
+                                      fontWeight: FontWeight.w600,
+                                    )),
                       ],
                     ),
                   ),
@@ -1482,8 +1532,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
                 const SizedBox(height: 12),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   decoration: BoxDecoration(
                     color: (_vendorData?['isVerified'] == true
                             ? AppColors.success
@@ -1492,18 +1542,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    _vendorData?['isVerified'] == true
-                        ? 'Verified vendor ✓'
-                        : 'Pending verification ⏳',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(
-                          color: _vendorData?['isVerified'] == true
-                              ? AppColors.success
-                              : AppColors.warning,
-                          fontWeight: FontWeight.w600,
-                        )),
+                      _vendorData?['isVerified'] == true
+                          ? 'Verified vendor ✓'
+                          : 'Pending verification ⏳',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: _vendorData?['isVerified'] == true
+                                ? AppColors.success
+                                : AppColors.warning,
+                            fontWeight: FontWeight.w600,
+                          )),
                 ),
               ],
             ),
@@ -1513,13 +1560,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             child: Column(
               children: [
                 _profileTile(Icons.store_outlined, 'Business name',
-                    _vendorData?['businessName'] ?? ''),
+                    _businessName.isEmpty ? 'Not set' : _businessName),
                 _profileTile(Icons.phone_outlined, 'M-Pesa number',
-                    _vendorData?['phone'] ?? ''),
-                _profileTile(Icons.location_on_outlined, 'Location',
-                    '${_vendorData?['address'] ?? _vendorData?['estate'] ?? ''}'),
-                _profileTile(Icons.local_gas_station_outlined,
-                    'Brands',
+                    (_vendorData?['phone'] ?? '').toString()),
+                _profileTile(
+                    Icons.location_on_outlined,
+                    'Location',
+                    (_vendorData?['address'] ?? _vendorData?['estate'] ?? '')
+                        .toString()),
+                _profileTile(Icons.local_gas_station_outlined, 'Brands',
                     (_vendorData?['brands'] as List?)?.join(', ') ?? ''),
                 const SizedBox(height: 8),
                 _editEntryButton(
@@ -1547,7 +1596,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       builder: (_) => ReferEarnScreen(
                         ownerId: _vendorId,
                         ownerType: 'vendor',
-                        ownerName: _vendorData?['businessName'] ?? '',
+                        ownerName: _businessName,
                       ),
                     ),
                   ),
@@ -1573,8 +1622,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () async {
-                    await FirebaseAuth.instance.signOut();
-                    if (mounted) context.go('/');
+                    final router = GoRouter.of(context);
+                    // Signs out of Google as well as Firebase. Without
+                    // the Google half, Play Services keeps the cached
+                    // credential and the next "Continue with Google"
+                    // silently re-signs the SAME account with no
+                    // picker — a vendor who used the wrong account can
+                    // never switch.
+                    await GoogleAuthService.signOut();
+                    router.go('/');
                   },
                   icon: const Icon(Icons.logout_rounded, size: 18),
                   label: const Text('Sign out'),
@@ -1605,7 +1661,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 VendorSetupScreen(existingData: _vendorData, mode: mode),
           ),
         );
-        if (done == true) _loadVendorData();
+        if (done == true) _refreshAll();
       },
       icon: Icon(icon, size: 16),
       label: Text(label),
@@ -1644,11 +1700,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           // Full-width line for the value — a phone number has no
           // spaces to wrap on, so squeezing it into the same row as
           // the label (as before) forced Flutter to hard-break it
-          // mid-digit whenever it didn't fit. Giving it the whole
-          // tile width on its own line means it never has to.
+          // mid-digit whenever it didn't fit.
           Padding(
             padding: const EdgeInsets.only(left: 32),
-            child: Text(value,
+            child: Text(value.isEmpty ? '—' : value,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.navy,
                       fontWeight: FontWeight.w600,
@@ -1663,12 +1718,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   Widget _buildBottomNav() {
     final items = [
       _NavItem(Icons.home_outlined, Icons.home_rounded, 'Home'),
-      _NavItem(Icons.receipt_long_outlined,
-          Icons.receipt_long_rounded, 'Orders'),
+      _NavItem(
+          Icons.receipt_long_outlined, Icons.receipt_long_rounded, 'Orders'),
       _NavItem(Icons.account_balance_wallet_outlined,
           Icons.account_balance_wallet_rounded, 'Earnings'),
-      _NavItem(
-          Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
+      _NavItem(Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
     ];
 
     return Container(
@@ -1693,16 +1747,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
               final isActive = _currentTab == i;
               return Expanded(
                 child: GestureDetector(
-                  onTap: () => setState(() => _currentTab = i),
+                  onTap: () {
+                    setState(() => _currentTab = i);
+                    // Earnings and Home both show totals — refresh
+                    // them when the vendor actually looks.
+                    if (i == 0 || i == 2) _loadEarnings();
+                  },
                   behavior: HitTestBehavior.opaque,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
                         isActive ? item.activeIcon : item.icon,
-                        color: isActive
-                            ? AppColors.orange
-                            : AppColors.gray400,
+                        color: isActive ? AppColors.orange : AppColors.gray400,
                         size: 24,
                       ),
                       const SizedBox(height: 4),

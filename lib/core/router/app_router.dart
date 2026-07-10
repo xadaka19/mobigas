@@ -23,7 +23,6 @@ class AppRouter {
   static final router = GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
-      // TODO: check auth state here when Firebase is wired
       return null;
     },
     routes: [

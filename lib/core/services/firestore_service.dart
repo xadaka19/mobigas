@@ -301,7 +301,7 @@ class FirestoreService {
       'updatedAt': FieldValue.serverTimestamp(),
       // Only cancellation ever sets this — never overwrite it with
       // null on other status transitions.
-      if (cancelledBy != null) 'cancelledBy': cancelledBy,
+      'cancelledBy': ?cancelledBy,
     });
 
     // Cash orders: accrue the 1% customer-finder fee the vendor owes
@@ -558,7 +558,7 @@ class FirestoreService {
       await callable.call({
         'code': code,
         'referredType': referredType,
-        if (deviceFingerprint != null) 'deviceFingerprint': deviceFingerprint,
+        'deviceFingerprint': ?deviceFingerprint,
       });
     } catch (_) {
       // Invalid code, no profile yet, or a transient failure — never

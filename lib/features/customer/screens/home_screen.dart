@@ -1327,11 +1327,15 @@ class _HomeScreenState extends State<HomeScreen> {
       isScrollControlled: true,
       builder: (_) => Container(
         height: MediaQuery.of(context).size.height * 0.75,
-        padding: const EdgeInsets.all(24),
         decoration: const BoxDecoration(
           color: AppColors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
+        // Keeps the last tile clear of the system navigation bar.
+        child: SafeArea(
+          top: false,
+          child: Padding(
+          padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1395,7 +1399,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   }
                   return ListView.separated(
                     itemCount: notifications.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (_, i) {
                       final n = notifications[i];
                       final isRead = n['read'] == true;
@@ -1510,6 +1514,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ],
+        ),
+          ),
         ),
       ),
     );
@@ -1633,63 +1639,123 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// About sheet.
+  ///
+  /// Without `isScrollControlled` the sheet is capped at 9/16 of the
+  /// screen height, and without SafeArea it draws *under* the system
+  /// navigation bar — which is why the last line of the description
+  /// sat behind the gesture pill. The SingleChildScrollView keeps it
+  /// usable on short screens rather than overflowing.
   void _showAbout(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        padding: const EdgeInsets.all(24),
+      isScrollControlled: true,
+      builder: (sheetContext) => Container(
         decoration: const BoxDecoration(
           color: AppColors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                color: AppColors.orange,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(Icons.local_fire_department_rounded,
-                  color: AppColors.white, size: 34),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.gray200,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: AppColors.orange,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(Icons.local_fire_department_rounded,
+                      color: AppColors.white, size: 34),
+                ),
+                const SizedBox(height: 16),
+                Text('MobiGas',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: AppColors.navy, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text('Gas delivered in minutes',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: AppColors.gray600)),
+                const SizedBox(height: 4),
+                FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snap) => Text(
+                    snap.hasData
+                        ? 'Version ${snap.data!.version} (${snap.data!.buildNumber})'
+                        : '',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: AppColors.gray400),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'MobiGas connects you with trusted local gas vendors for fast delivery — compare prices, order in seconds, and pay cash or M-Pesa when your gas arrives.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.gray600, height: 1.5),
+                ),
+                const SizedBox(height: 20),
+                // Play wants Terms and Privacy reachable in-app, and
+                // About is where a reviewer goes looking for them.
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        // Pop the sheet first, then push on the
+                        // screen's context — not the sheet's.
+                        Navigator.pop(sheetContext);
+                        context.push('/terms');
+                      },
+                      child: Text('Terms of Service',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.orange,
+                                    decoration: TextDecoration.underline,
+                                  )),
+                    ),
+                    Text('  ·  ',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.gray400)),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        context.push('/privacy');
+                      },
+                      child: Text('Privacy Policy',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.orange,
+                                    decoration: TextDecoration.underline,
+                                  )),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text('MobiGas',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: AppColors.navy, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 4),
-            Text('Gas delivered in minutes',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: AppColors.gray600)),
-            const SizedBox(height: 4),
-            FutureBuilder<PackageInfo>(
-              future: PackageInfo.fromPlatform(),
-              builder: (context, snap) => Text(
-                snap.hasData
-                    ? 'Version ${snap.data!.version} (${snap.data!.buildNumber})'
-                    : '',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: AppColors.gray400),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'MobiGas connects you with trusted local gas vendors for fast delivery — compare prices, order in seconds, and pay cash or M-Pesa when your gas arrives.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: AppColors.gray600, height: 1.5),
-            ),
-            const SizedBox(height: 16),
-          ],
+          ),
         ),
       ),
     );

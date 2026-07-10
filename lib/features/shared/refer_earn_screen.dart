@@ -109,7 +109,8 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Could not save payout preferences. Try again.'),
+            content:
+                const Text('Could not save payout preferences. Try again.'),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
@@ -126,10 +127,12 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
         ownerType: widget.ownerType,
         ownerName: widget.ownerName,
       );
-      if (mounted) setState(() {
-        _code = code;
-        _isLoadingCode = false;
-      });
+      if (mounted) {
+        setState(() {
+          _code = code;
+          _isLoadingCode = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _isLoadingCode = false);
     }
@@ -147,18 +150,34 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
     );
   }
 
-  // TODO: replace with your actual Play Store package name once
-  // published — find it in Google Play Console under App integrity,
-  // or it's whatever you set as applicationId in android/app/build.gradle.
-  static const String _playStoreUrl =
-      'https://play.google.com/store/apps/details?id=com.mobigas.app';
+  // Two separate Play Store listings, one per flavor. A vendor sharing
+  // their code is recruiting vendors, not customers — sending them to
+  // the customer listing would drop them in the wrong app.
+  static const String _customerAppUrl =
+      'https://play.google.com/store/apps/details?id=com.mobigas.mobigas';
+  static const String _vendorAppUrl =
+      'https://play.google.com/store/apps/details?id=com.mobigas.vendor';
 
-  void _shareCode() {
+  bool get _isVendorReferrer => widget.ownerType == 'vendor';
+
+  String get _shareUrl => _isVendorReferrer ? _vendorAppUrl : _customerAppUrl;
+
+  String get _shareMessage => _isVendorReferrer
+      ? 'Sell more gas on MobiGas — customers find you, you get paid on '
+          'every delivery. Use my code $_code when you sign up and we both '
+          'benefit.\n\nDownload the vendor app: $_shareUrl'
+      : 'Get gas delivered fast on MobiGas! Use my code $_code when you '
+          'sign up and we both benefit.\n\nDownload the app: $_shareUrl';
+
+  Future<void> _shareCode() async {
     if (_code == null) return;
-    Share.share(
-      'Get gas delivered fast on MobiGas! Use my code $_code when you sign up '
-      'and we both benefit.\n\nDownload the app: $_playStoreUrl',
-      subject: 'Join MobiGas with my referral code',
+    // share_plus 11 replaced the top-level Share.share() with an
+    // instance API taking a ShareParams object.
+    await SharePlus.instance.share(
+      ShareParams(
+        text: _shareMessage,
+        subject: 'Join MobiGas with my referral code',
+      ),
     );
   }
 
@@ -176,8 +195,8 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                 builder: (context, snap) {
                   if (!snap.hasData) {
                     return const Center(
-                        child: CircularProgressIndicator(
-                            color: AppColors.orange));
+                        child:
+                            CircularProgressIndicator(color: AppColors.orange));
                   }
                   final referrals = snap.data!;
                   final customerRefs = referrals
@@ -196,8 +215,7 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                       .where((r) => r.status == ReferralStatus.paid)
                       .fold(0.0, (a, r) => a + r.rewardAmount);
 
-                  final totalEarned =
-                      earned(customerRefs) + earned(vendorRefs);
+                  final totalEarned = earned(customerRefs) + earned(vendorRefs);
                   final totalPaid = paid(customerRefs) + paid(vendorRefs);
                   final pendingPayout = totalEarned - totalPaid;
 
@@ -210,15 +228,18 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                         const SizedBox(height: 20),
                         Row(
                           children: [
-                            _statCard('Total earned',
+                            _statCard(
+                                'Total earned',
                                 'KES ${totalEarned.toStringAsFixed(0)}',
                                 AppColors.success),
                             const SizedBox(width: 12),
-                            _statCard('Pending payout',
+                            _statCard(
+                                'Pending payout',
                                 'KES ${pendingPayout.toStringAsFixed(0)}',
                                 AppColors.orange),
                             const SizedBox(width: 12),
-                            _statCard('Paid out',
+                            _statCard(
+                                'Paid out',
                                 'KES ${totalPaid.toStringAsFixed(0)}',
                                 AppColors.navy),
                           ],
@@ -229,7 +250,8 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                           icon: Icons.person_add_alt_1_rounded,
                           list: customerRefs,
                           rewardEach: _customerRate,
-                          qualifyHint: 'earns when they complete their first order',
+                          qualifyHint:
+                              'earns when they complete their first order',
                         ),
                         const SizedBox(height: 20),
                         _categorySection(
@@ -450,7 +472,9 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
               const SizedBox(width: 8),
               Text('How should we pay you?',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.navy, fontWeight: FontWeight.w700, fontSize: 14)),
+                      color: AppColors.navy,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14)),
             ],
           ),
           const SizedBox(height: 4),
@@ -464,7 +488,9 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
           const SizedBox(height: 14),
           Text('Payment method',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray600, fontWeight: FontWeight.w600, fontSize: 12)),
+                  color: AppColors.gray600,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12)),
           const SizedBox(height: 8),
           Row(children: [
             _prefTab('M-Pesa', _payoutMethod == 'mpesa',
@@ -542,7 +568,9 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
           const SizedBox(height: 16),
           Text('Payout schedule',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray600, fontWeight: FontWeight.w600, fontSize: 12)),
+                  color: AppColors.gray600,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12)),
           const SizedBox(height: 8),
           Row(children: [
             _prefTab('Every 14 days', _payoutCadence == '14days',
@@ -623,10 +651,8 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
         children: [
           Expanded(
             child: Text(r.referredName.isNotEmpty ? r.referredName : 'Referral',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: AppColors.navy, fontWeight: FontWeight.w600)),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.navy, fontWeight: FontWeight.w600)),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -636,7 +662,9 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
             ),
             child: Text(statusLabel,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
+                    color: statusColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700)),
           ),
         ],
       ),
