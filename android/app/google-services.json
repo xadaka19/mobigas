@@ -8,76 +8,36 @@
     {
       "client_info": {
         "mobilesdk_app_id": "1:370382275180:android:cb8531902b544351230e49",
-        "android_client_info": {
-          "package_name": "com.mobigas.mobigas"
-        }
+        "android_client_info": { "package_name": "com.mobigas.mobigas" }
       },
       "oauth_client": [
-        {
-          "client_id": "370382275180-0mb4shvv0sdlumbgtkh900i273buh0ss.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.mobigas.mobigas",
-            "certificate_hash": "79e2fdde0bd232752da32b538bd116b6b2262e79"
-          }
-        },
-        {
-          "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com",
-          "client_type": 3
-        }
+        { "client_id": "370382275180-0mb4shvv0sdlumbgtkh900i273buh0ss.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.mobigas.mobigas", "certificate_hash": "79e2fdde0bd232752da32b538bd116b6b2262e79" } },
+        { "client_id": "370382275180-6dkbck9h4o9t2tdteu6uen3spt9ul5t2.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.mobigas.mobigas", "certificate_hash": "72dc4618832a0d27b7056051916371f9911ea2bf" } },
+        { "client_id": "370382275180-ipgtjl9mu0dr7903kh7skorr7n7qk4hv.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.mobigas.mobigas", "certificate_hash": "a0d9eadbae7fde9e893bb61072ffd5ed26fea4b6" } },
+        { "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com", "client_type": 3 }
       ],
       "api_key": [
-        {
-          "current_key": "AIzaSyBBbNZ3NtqlahFPNHXDKxoaMNcLA43jX2U"
-        }
+        { "current_key": "AIzaSyBBbNZ3NtqlahFPNHXDKxoaMNcLA43jX2U" },
+        { "current_key": "AIzaSyCRfHiIpX2wTYUujU8ZBsM63W18J-iVk9U" }
       ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com",
-              "client_type": 3
-            }
-          ]
-        }
-      }
+      "services": { "appinvite_service": { "other_platform_oauth_client": [ { "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com", "client_type": 3 } ] } }
     },
     {
       "client_info": {
         "mobilesdk_app_id": "1:370382275180:android:f9b489e0e75dc3ef230e49",
-        "android_client_info": {
-          "package_name": "com.mobigas.vendor"
-        }
+        "android_client_info": { "package_name": "com.mobigas.vendor" }
       },
       "oauth_client": [
-        {
-          "client_id": "370382275180-5hvfl7ussshn0tul5g0eb6nlp2k8fpii.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.mobigas.vendor",
-            "certificate_hash": "79e2fdde0bd232752da32b538bd116b6b2262e79"
-          }
-        },
-        {
-          "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com",
-          "client_type": 3
-        }
+        { "client_id": "370382275180-5hvfl7ussshn0tul5g0eb6nlp2k8fpii.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.mobigas.vendor", "certificate_hash": "79e2fdde0bd232752da32b538bd116b6b2262e79" } },
+        { "client_id": "370382275180-dma9qf9fnov1r80v47st1btmg8eph03r.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.mobigas.vendor", "certificate_hash": "ebd336fee8b7b5faa95d89fac8924251b592561c" } },
+        { "client_id": "370382275180-qb89s69i2s21rcs18fcq0vsehjtrqr29.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.mobigas.vendor", "certificate_hash": "72dc4618832a0d27b7056051916371f9911ea2bf" } },
+        { "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com", "client_type": 3 }
       ],
       "api_key": [
-        {
-          "current_key": "AIzaSyBBbNZ3NtqlahFPNHXDKxoaMNcLA43jX2U"
-        }
+        { "current_key": "AIzaSyBBbNZ3NtqlahFPNHXDKxoaMNcLA43jX2U" },
+        { "current_key": "AIzaSyCRfHiIpX2wTYUujU8ZBsM63W18J-iVk9U" }
       ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com",
-              "client_type": 3
-            }
-          ]
-        }
-      }
+      "services": { "appinvite_service": { "other_platform_oauth_client": [ { "client_id": "370382275180-2qtg9vu294ad0oo21hv0rjt5i9mqv62c.apps.googleusercontent.com", "client_type": 3 } ] } }
     }
   ],
   "configuration_version": "1"

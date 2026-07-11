@@ -25,12 +25,25 @@ android {
     }
 
     defaultConfig {
+        // Kept as a default; the real applicationId is set per-flavor below.
         applicationId = "com.mobigas.mobigas"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
+    }
+
+    flavorDimensions += "app"
+    productFlavors {
+        create("customer") {
+            dimension = "app"
+            applicationId = "com.mobigas.mobigas"   // MUST stay this — already live in Play
+        }
+        create("vendor") {
+            dimension = "app"
+            applicationId = "com.mobigas.vendor"     // matches your Draft vendor listing
+        }
     }
 
     buildTypes {

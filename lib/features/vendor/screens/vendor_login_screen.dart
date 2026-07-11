@@ -177,6 +177,8 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
         return 'That email address is not valid';
       case 'email-already-in-use':
         return 'An account already exists with this email. Try signing in instead.';
+      case 'account-exists-with-different-credential':
+        return 'This email is already registered. Sign in with your password.';
       case 'weak-password':
         return 'Password is too weak.';
       case 'too-many-requests':
