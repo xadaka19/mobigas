@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
-import 'package:mobigas/core/services/security_service.dart';
 
 class VendorSplashScreen extends StatefulWidget {
   const VendorSplashScreen({super.key});
@@ -36,36 +34,19 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     _navigate();
   }
 
-  void _showSecurityWarning() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('Security Warning'),
-        content: const Text(
-          'MobiGas cannot run on rooted or jailbroken devices for your security. '
-          'Please use a standard device to access the app.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => SystemNavigator.pop(),
-            child: const Text('Exit'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _navigate() async {
-    final isCompromised = await SecurityService.isDeviceCompromised();
-    if (isCompromised && mounted) {
-      _showSecurityWarning();
-      return;
-    }
+    // NOTE: the previous build hard-exited here if a root/jailbreak
+    // check tripped. That check (via the safe_device plugin) is
+    // known to false-positive on stock MIUI/One UI devices, and a
+    // false positive locked a legitimate vendor out of the app
+    // entirely. For a cash-on-delivery app with no financial
+    // product, a hard exit isn't worth that risk, so the gate has
+    // been removed. (Reintroduce Play Integrity API attestation here
+    // if a future feature genuinely needs device attestation.)
 
     // Run the branded splash delay and the real auth determination
     // concurrently — whichever takes longer is what we actually wait
-    // on. This is both a correctness fix and a speed fix:
+    // on.
     //
     // BUG FIX: the old code read FirebaseAuth.instance.currentUser
     // synchronously AFTER a fixed 1800ms delay. On a fresh install,
@@ -77,12 +58,6 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     // logged-in vendor to the login screen. Waiting for the FIRST
     // real authStateChanges() event instead guarantees the correct
     // answer no matter how long Firebase actually takes.
-    //
-    // SPEED FIX: previously this delay ran BEFORE the auth check even
-    // started, making total wait time 1800ms + auth-check-time. Now
-    // both run at once, so total wait is max(authCheckTime, 1800ms)
-    // — the fixed delay only exists to keep the brand splash on
-    // screen long enough to not flash, not to gate the real check.
     final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
     final userFuture = FirebaseAuth.instance.authStateChanges().first;
 
@@ -149,7 +124,7 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Deliver gas. Get paid instantly.',
+                  'Deliver gas. Get paid on every order.',
                   style: Theme.of(context)
                       .textTheme
                       .bodyLarge

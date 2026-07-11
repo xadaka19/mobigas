@@ -20,9 +20,43 @@ import 'package:mobigas/features/vendor/screens/vendor_home_screen.dart';
 import 'package:mobigas/flavors/flavor_config.dart';
 
 class AppRouter {
+  // Routes that only make sense in the customer-flavored build.
+  // Anything NOT in this set and NOT starting with '/vendor' is
+  // treated as shared (terms/privacy/delete-account already read
+  // FlavorConfig themselves to render the right audience).
+  static const _customerOnlyRoutes = {
+    '/onboarding',
+    '/register',
+    '/home',
+    '/order',
+    '/order-tracking',
+    '/delivery-confirmed',
+    '/edit-profile',
+    '/support',
+    '/login',
+  };
+
   static final router = GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
+      final path = state.uri.path;
+
+      // Defense-in-depth against deep links / direct navigation to
+      // the other flavor's routes. This does NOT replace the
+      // account-role checks in AuthProvider.login()/signInWithGoogle()
+      // and VendorLoginScreen — those stop a real cross-role account
+      // from ever being treated as authenticated in the wrong app.
+      // This guard stops navigation to the wrong flavor's screens in
+      // the first place, e.g. via a stale bookmark, a malformed deep
+      // link, or a future code path that calls context.go('/vendor-
+      // home') from customer code by mistake.
+      final isVendorRoute = path.startsWith('/vendor');
+      if (isVendorRoute && FlavorConfig.isCustomer) {
+        return '/';
+      }
+      if (_customerOnlyRoutes.contains(path) && FlavorConfig.isVendor) {
+        return '/';
+      }
       return null;
     },
     routes: [

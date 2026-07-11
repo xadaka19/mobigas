@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
-import 'package:mobigas/core/services/security_service.dart';
-import 'package:mobigas/core/services/screen_security_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -39,64 +35,36 @@ class _SplashScreenState extends State<SplashScreen>
     _navigate();
   }
 
-  void _showSecurityWarning() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('Security Warning'),
-        content: const Text(
-          'MobiGas cannot run on rooted or jailbroken devices for your security. '
-          'Please use a standard device to access the app.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => SystemNavigator.pop(),
-            child: const Text('Exit'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _navigate() async {
-    // Security check — block rooted/jailbroken devices
-    final isCompromised = await SecurityService.isDeviceCompromised();
-    if (isCompromised && mounted) {
-      _showSecurityWarning();
-      return;
-    }
-
-    // Verify app hasn't been repackaged/re-signed by a third party
-    if (!kDebugMode) {
-      final isAuthentic = await ScreenSecurityService.verifyAppSignature();
-      if (!isAuthentic && mounted) {
-        _showSecurityWarning();
-        return;
-      }
-    }
+    // NOTE: the previous build hard-exited here on two checks — a
+    // root/jailbreak block and a client-side APK signature check.
+    // The signature check is fundamentally incompatible with Play
+    // App Signing: Google re-signs the delivered APK with its own
+    // key, so the runtime certificate never matches an upload/debug
+    // key baked into the app, and (because the check fails closed)
+    // EVERY Play-delivered build was blocked at the splash. App
+    // authenticity is already guaranteed by Play App Signing, so
+    // that check has been removed entirely.
+    //
+    // Root detection has also been known to false-positive on stock
+    // MIUI/One UI devices; a false positive there previously locked
+    // a legitimate user out completely. For a cash-on-delivery app
+    // with no financial product, that trade-off isn't worth a hard
+    // exit, so it's no longer a gate. (Reintroduce Play Integrity API
+    // attestation here if a future feature genuinely needs it.)
 
     // Run the branded splash delay and the real auth determination
     // concurrently — whichever takes longer is what we actually wait
-    // on. This is both a correctness fix and a speed fix:
+    // on.
     //
     // BUG FIX: the old code read FirebaseAuth.instance.currentUser
-    // synchronously AFTER a fixed 1800ms delay — and by this point
-    // there was already a security check and a signature verification
-    // stacked in front of it, both real async work. On a fresh
-    // install, Firebase's silently-restored session can still be
-    // resolving by the time all of that finishes, so currentUser
-    // could read null even though a valid session was a moment from
-    // restoring — sending a genuinely logged-in customer to
-    // onboarding/login instead of home. Waiting for the FIRST real
-    // authStateChanges() event instead guarantees the correct answer
-    // no matter how long Firebase actually takes.
-    //
-    // SPEED FIX: the fixed delay previously ran BEFORE the auth check
-    // even started, making total wait time 1800ms + auth-check-time
-    // on top of the security/signature checks. Now the delay and the
-    // auth check run at once, so this stage takes
-    // max(authCheckTime, 1800ms) instead of the sum of both.
+    // synchronously AFTER a fixed 1800ms delay. On a fresh install,
+    // Firebase's silently-restored session can still be resolving at
+    // that moment, so currentUser could read null even though a
+    // valid session was about to restore — sending a genuinely
+    // logged-in customer to onboarding/login instead of home.
+    // Waiting for the FIRST real authStateChanges() event instead
+    // guarantees the correct answer no matter how long Firebase takes.
     final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
     final userFuture = FirebaseAuth.instance.authStateChanges().first;
 

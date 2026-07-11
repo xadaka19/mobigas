@@ -143,7 +143,27 @@ class AuthProvider extends ChangeNotifier {
         email: email.trim().toLowerCase(),
         password: password,
       );
-      await _loadCustomerWithRetry(credential.user!.uid);
+      final uid = credential.user!.uid;
+
+      // SECURITY GUARD: this uid may belong to a vendor account
+      // (e.g. someone typed vendor credentials into the customer
+      // app, or the same email/password was reused across both
+      // flows). Nothing in the router or navigation code prevents a
+      // successfully authenticated user from reaching customer
+      // screens regardless of which account type they actually are
+      // — so the check has to happen right here, before the caller
+      // is ever treated as a customer.
+      final isVendor = await FirestoreService.isRegisteredVendor(uid);
+      if (isVendor) {
+        await GoogleAuthService.signOut();
+        _error = 'This account is registered as a MobiGas vendor. '
+            'Please use the MobiGas Vendor app to sign in.';
+        _state = AuthState.unauthenticated;
+        notifyListeners();
+        return;
+      }
+
+      await _loadCustomerWithRetry(uid);
     } on FirebaseAuthException catch (e) {
       _error = _authError(e.code);
       _state = AuthState.unauthenticated;
@@ -296,6 +316,22 @@ class AuthProvider extends ChangeNotifier {
       }
 
       final user = credential.user!;
+
+      // SECURITY GUARD: must run BEFORE the "no profile yet -> create
+      // one" branch below. Without this, a vendor's Google account
+      // signing in here for the first time would silently get a
+      // brand-new customer profile created on the SAME uid — quietly
+      // turning a vendor's identity into a customer account instead
+      // of rejecting the sign-in.
+      final isVendor = await FirestoreService.isRegisteredVendor(user.uid);
+      if (isVendor) {
+        await GoogleAuthService.signOut();
+        _error = 'This Google account is registered as a MobiGas vendor. '
+            'Please use the MobiGas Vendor app to sign in.';
+        _state = AuthState.unauthenticated;
+        return false;
+      }
+
       final existing = await FirestoreService.getUser(user.uid);
 
       if (existing != null) {

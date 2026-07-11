@@ -152,6 +152,25 @@ class FirestoreService {
     );
   }
 
+  /// True if this uid has a vendor profile document. Used to stop a
+  /// vendor's Google account from being treated as a customer (and
+  /// vice versa via isRegisteredCustomer) if it ever authenticates
+  /// through the wrong app's login screen. Vendor profiles are keyed
+  /// by uid (see vendor_setup_screen.dart's _vendorId), so a direct
+  /// doc lookup is correct here — no query needed.
+  static Future<bool> isRegisteredVendor(String uid) async {
+    final doc = await FirebaseService.vendors.doc(uid).get();
+    return doc.exists;
+  }
+
+  /// True if this uid has a customer profile document. Mirror of
+  /// isRegisteredVendor, used by the vendor login screen to reject a
+  /// customer's Google account.
+  static Future<bool> isRegisteredCustomer(String uid) async {
+    final doc = await FirebaseService.users.doc(uid).get();
+    return doc.exists;
+  }
+
   // ── VENDORS ───────────────────────────────────────────────────────
   static Future<void> createVendor(Map<String, dynamic> vendorData) async {
     await FirebaseService.vendors.add({
