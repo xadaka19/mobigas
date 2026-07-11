@@ -2,7 +2,9 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <application android:label="MobiGas Vendor">
+    <application
+        android:label="MobiGas Vendor"
+        tools:replace="android:label">
         <!-- LocationService.startTracking() streams the rider's position
              during an active delivery. The foreground service and its
              persistent notification are what keep the stream alive once
