@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -79,54 +81,104 @@ Future<void> _recordNotification(RemoteMessage message) async {
 class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
+  /// Guard so the auth listener is only ever wired up once, even if
+  /// initialize() is called more than once across a session.
+  static bool _authListenerAttached = false;
+
   static Future<void> initialize() async {
-    // Request permission
-    await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
+    try {
+      // Request permission
+      await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
 
-    // Set background handler
-    FirebaseMessaging.onBackgroundMessage(
-        firebaseMessagingBackgroundHandler);
+      // Set background handler
+      FirebaseMessaging.onBackgroundMessage(
+          firebaseMessagingBackgroundHandler);
 
-    // Get FCM token and save to Firestore
-    final token = await _messaging.getToken();
-    debugPrint('FCM Token: $token');
-    if (token != null) {
-      await _saveFcmToken(token);
-    }
+      // CORE FIX (#1): the FCM token used to be fetched and saved
+      // exactly once, here in initialize(), which runs from main()
+      // BEFORE Firebase Auth has finished restoring the session on a
+      // cold start. At that moment currentUser is null, so
+      // _saveFcmToken() silently returned and the token was NEVER
+      // written to Firestore — leaving the server with no address to
+      // push to. Notifications then "queued" and never arrived until
+      // the user signed out and back in, which happened to fire a
+      // token save while authenticated. Listening to authStateChanges
+      // guarantees the token is persisted the instant a real user is
+      // available, however long auth restore takes.
+      if (!_authListenerAttached) {
+        _authListenerAttached = true;
+        FirebaseAuth.instance.authStateChanges().listen((user) async {
+          if (user != null) {
+            try {
+              final token = await _messaging.getToken();
+              if (token != null) await _saveFcmToken(token);
+            } catch (e) {
+              debugPrint('Token save on auth change failed: $e');
+            }
+          }
+        });
+      }
 
-    // Refresh token handler
-    _messaging.onTokenRefresh.listen((newToken) {
-      _saveFcmToken(newToken);
-    });
+      // Try an immediate fetch too — covers the case where auth is
+      // already resolved (anyone who didn't just cold-start).
+      final token = await _messaging.getToken();
+      debugPrint('FCM Token: $token');
+      if (token != null) {
+        await _saveFcmToken(token);
+      }
 
-    // Handle foreground messages — show local notification
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      debugPrint('Foreground message: ${message.notification?.title}');
-      _showForegroundNotification(message);
-    });
-
-    // Handle notification tap when app in background
-    // (FCM-displayed notifications; local notification taps are
-    // handled inside DeliveryNotificationService via payload).
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      debugPrint('Notification tapped: ${message.data}');
-      NotificationRouter.navigateForType(message.data['type']);
-    });
-
-    // Handle notification tap when app was terminated.
-    // Delay so the splash screen finishes auth + its own redirect
-    // first; otherwise our navigation gets overwritten by the
-    // splash's context.go().
-    final initialMessage = await _messaging.getInitialMessage();
-    if (initialMessage != null) {
-      Future.delayed(const Duration(seconds: 3), () {
-        NotificationRouter.navigateForType(initialMessage.data['type']);
+      // Refresh token handler
+      _messaging.onTokenRefresh.listen((newToken) {
+        _saveFcmToken(newToken);
       });
+
+      // Handle foreground messages — show local notification
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        debugPrint('Foreground message: ${message.notification?.title}');
+        _showForegroundNotification(message);
+      });
+
+      // Handle notification tap when app in background
+      // (FCM-displayed notifications; local notification taps are
+      // handled inside DeliveryNotificationService via payload).
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('Notification tapped: ${message.data}');
+        NotificationRouter.navigateForType(message.data['type']);
+      });
+
+      // Handle notification tap when app was terminated.
+      // Delay so the splash screen finishes auth + its own redirect
+      // first; otherwise our navigation gets overwritten by the
+      // splash's context.go().
+      final initialMessage = await _messaging.getInitialMessage();
+      if (initialMessage != null) {
+        Future.delayed(const Duration(seconds: 3), () {
+          NotificationRouter.navigateForType(initialMessage.data['type']);
+        });
+      }
+    } catch (e) {
+      // Notification setup must NEVER take down app launch. If any of
+      // the above fails, the app still runs; notifications simply
+      // degrade until the next successful init or token refresh.
+      debugPrint('NotificationService.initialize failed (non-fatal): $e');
+    }
+  }
+
+  /// Public helper so the auth flow (AuthProvider.register / login)
+  /// can force a token save at the exact moment it KNOWS the user's
+  /// Firestore doc exists — closing the brand-new-signup race where
+  /// the doc is created a beat after the credential lands.
+  static Future<void> saveTokenForCurrentUser() async {
+    try {
+      final token = await _messaging.getToken();
+      if (token != null) await _saveFcmToken(token);
+    } catch (e) {
+      debugPrint('saveTokenForCurrentUser failed: $e');
     }
   }
 

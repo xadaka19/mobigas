@@ -62,7 +62,10 @@ class FirestoreService {
     return _customerFromMap(snap.docs.first.id, data);
   }
 
-  static Future<void> createUser(CustomerModel customer) async {
+  static Future<void> createUser(
+    CustomerModel customer, {
+    String? authMethod,
+  }) async {
     await FirebaseService.users.doc(customer.id).set({
       'id': customer.id,
       'name': customer.name,
@@ -83,6 +86,9 @@ class FirestoreService {
       'guarantors': customer.guarantors
           .map((g) => {'name': g.name, 'phone': g.phone})
           .toList(),
+      // Folded in so email/password signup no longer needs a second
+      // write just to set this. Written only when supplied.
+      if (authMethod != null) 'authMethod': authMethod,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });

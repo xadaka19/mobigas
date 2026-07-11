@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/google_auth_service.dart';
+import 'package:mobigas/core/services/notification_service.dart';
 import 'package:mobigas/core/services/storage_metadata.dart';
 
 enum AuthState { unauthenticated, loading, authenticated }
@@ -108,6 +110,11 @@ class AuthProvider extends ChangeNotifier {
         _state = AuthState.authenticated;
         _error = null;
         notifyListeners();
+        // Token save (#1/#6): a signed-in session with a confirmed
+        // profile is exactly when the FCM token must be on the
+        // server. Covers silent session restore on cold start, where
+        // the startup token save ran before auth had resolved.
+        unawaited(NotificationService.saveTokenForCurrentUser());
         return;
       }
       if (attempt < 2) {
@@ -163,6 +170,7 @@ class AuthProvider extends ChangeNotifier {
         return;
       }
 
+      // _loadCustomerWithRetry saves the FCM token on success.
       await _loadCustomerWithRetry(uid);
     } on FirebaseAuthException catch (e) {
       _error = _authError(e.code);
@@ -260,8 +268,9 @@ class AuthProvider extends ChangeNotifier {
               return ref.getDownloadURL();
             })();
 
-      await FirestoreService.createUser(customer);
-      await FirebaseService.users.doc(uid).update({'authMethod': 'password'});
+      // #6: authMethod folded into the create — one write instead of
+      // two (createUser + a separate update just to set authMethod).
+      await FirestoreService.createUser(customer, authMethod: 'password');
 
       final selfieUrl = await selfieUploadFuture;
       if (selfieUrl != null) {
@@ -280,8 +289,17 @@ class AuthProvider extends ChangeNotifier {
         }
       }
 
-      _customer = await FirestoreService.getUser(uid) ?? customer;
+      // #6: skip the final re-read when there's no selfie — we already
+      // hold the object we just wrote. Only re-read when a selfieUrl
+      // was written after createUser, so the local copy reflects it.
+      _customer = selfieUrl != null
+          ? (await FirestoreService.getUser(uid) ?? customer)
+          : customer;
       _state = AuthState.authenticated;
+      // #1/#6: profile doc provably exists now — safe moment to
+      // persist the FCM token for a brand-new account, closing the
+      // race the auth listener alone can't cover.
+      unawaited(NotificationService.saveTokenForCurrentUser());
     } on FirebaseAuthException catch (e) {
       _error = _authError(e.code);
       _state = AuthState.unauthenticated;
@@ -337,6 +355,8 @@ class AuthProvider extends ChangeNotifier {
       if (existing != null) {
         _customer = existing;
         _state = AuthState.authenticated;
+        // #1/#6: existing Google user just authenticated — persist token.
+        unawaited(NotificationService.saveTokenForCurrentUser());
         return true;
       }
 
@@ -363,14 +383,21 @@ class AuthProvider extends ChangeNotifier {
         guarantors: const [],
       );
 
+      // authMethod + optional photo are google-specific; the photo is
+      // only known here, so this branch keeps its single follow-up
+      // update rather than folding into createUser.
       await FirestoreService.createUser(customer);
       await FirebaseService.users.doc(user.uid).update({
         'authMethod': 'google',
         if ((user.photoURL ?? '').isNotEmpty) 'selfieUrl': user.photoURL,
       });
 
+      // Re-read here because the google branch wrote selfieUrl (photo)
+      // after createUser, and we want the local copy to reflect it.
       _customer = await FirestoreService.getUser(user.uid) ?? customer;
       _state = AuthState.authenticated;
+      // #1/#6: new Google account — doc now exists, persist token.
+      unawaited(NotificationService.saveTokenForCurrentUser());
       return true;
     } on FirebaseAuthException catch (e) {
       _error = _authError(e.code);

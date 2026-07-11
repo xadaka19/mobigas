@@ -640,6 +640,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                   ],
                 ),
               ),
+              const SizedBox(width: 12),
+              _buildNotificationBell(),
             ],
           ),
           const SizedBox(height: 16),
@@ -653,6 +655,269 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Notification bell with unread badge — mirrors the customer app's
+  /// bell. Notifications are stored by auth uid (userId == _vendorId),
+  /// written by notification_service.dart when a push arrives, so the
+  /// same FirestoreService.watchNotifications stream works here.
+  Widget _buildNotificationBell() {
+    if (_vendorId.isEmpty) return const SizedBox.shrink();
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: FirestoreService.watchNotifications(_vendorId),
+      builder: (context, snap) {
+        final unreadCount =
+            (snap.data ?? []).where((n) => n['read'] != true).length;
+        return GestureDetector(
+          onTap: () => _showNotifications(context, _vendorId),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.orange.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.notifications_outlined,
+                    color: AppColors.orange, size: 22),
+              ),
+              if (unreadCount > 0)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    constraints:
+                        const BoxConstraints(minWidth: 18, minHeight: 18),
+                    decoration: BoxDecoration(
+                      color: AppColors.error,
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(color: AppColors.navy, width: 1.5),
+                    ),
+                    child: Text(
+                      unreadCount > 9 ? '9+' : '$unreadCount',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showNotifications(BuildContext context, String userId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('Notifications',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(color: AppColors.navy)),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () =>
+                          FirestoreService.markAllNotificationsRead(userId),
+                      child: Text('Mark all read',
+                          style: TextStyle(
+                              color: AppColors.orange, fontSize: 13)),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('Close',
+                          style: TextStyle(color: AppColors.orange)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: StreamBuilder<List<Map<String, dynamic>>>(
+                    stream: FirestoreService.watchNotifications(userId),
+                    builder: (context, snap) {
+                      if (!snap.hasData) {
+                        return const Center(
+                            child: CircularProgressIndicator(
+                                color: AppColors.orange));
+                      }
+                      final notifications = snap.data!;
+                      if (notifications.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.notifications_none_rounded,
+                                  size: 64, color: AppColors.gray400),
+                              const SizedBox(height: 12),
+                              Text('No notifications yet',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(color: AppColors.gray600)),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Order and delivery updates\nwill appear here',
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: AppColors.gray400),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      return ListView.separated(
+                        itemCount: notifications.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (_, i) {
+                          final n = notifications[i];
+                          final isRead = n['read'] == true;
+                          final createdAt = n['createdAt'] as DateTime?;
+                          return Dismissible(
+                            key: ValueKey(n['id']),
+                            direction: DismissDirection.endToStart,
+                            onDismissed: (_) =>
+                                FirestoreService.deleteNotification(
+                                    n['id'] as String),
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              decoration: BoxDecoration(
+                                color: AppColors.error,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(Icons.delete_outline_rounded,
+                                  color: AppColors.white),
+                            ),
+                            child: GestureDetector(
+                              onTap: () {
+                                if (!isRead) {
+                                  FirestoreService.markNotificationRead(
+                                      n['id'] as String);
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: isRead
+                                      ? AppColors.white
+                                      : AppColors.orange
+                                          .withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                      color: isRead
+                                          ? AppColors.gray200
+                                          : AppColors.orange
+                                              .withValues(alpha: 0.3)),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    if (!isRead)
+                                      Container(
+                                        margin: const EdgeInsets.only(top: 5),
+                                        width: 8,
+                                        height: 8,
+                                        decoration: const BoxDecoration(
+                                          color: AppColors.orange,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    if (!isRead) const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            (n['title'] as String).isNotEmpty
+                                                ? n['title'] as String
+                                                : 'MobiGas',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyMedium
+                                                ?.copyWith(
+                                                    color: AppColors.navy,
+                                                    fontWeight: isRead
+                                                        ? FontWeight.w500
+                                                        : FontWeight.w700),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(n['body'] as String,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                      color: AppColors.gray600,
+                                                      height: 1.4)),
+                                          if (createdAt != null) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                                '${createdAt.day}/${createdAt.month}/${createdAt.year} · ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall
+                                                    ?.copyWith(
+                                                        color:
+                                                            AppColors.gray400,
+                                                        fontSize: 10)),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () =>
+                                          FirestoreService.deleteNotification(
+                                              n['id'] as String),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(4),
+                                        child: Icon(Icons.close_rounded,
+                                            size: 16, color: AppColors.gray400),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

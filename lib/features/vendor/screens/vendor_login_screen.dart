@@ -510,8 +510,12 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
     );
   }
 
+  // Input fields are filled white by the global InputDecorationTheme
+  // (filled: true, fillColor: AppColors.white). White text on a white
+  // fill was invisible — which is why nothing showed as you typed.
+  // Navy matches the working customer login.
   TextStyle? _fieldStyle() => const TextStyle(
-        color: AppColors.white,
+        color: AppColors.navy,
         fontWeight: FontWeight.w500,
       );
 
