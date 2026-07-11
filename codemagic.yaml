@@ -4,13 +4,14 @@ workflows:
     max_build_duration: 60
     environment:
       flutter: stable
-      android_signing:
-        - mobigas_keystore
       groups:
         - firebase_credentials
       vars:
         PACKAGE_NAME: "com.mobigas.mobigas"
     scripts:
+      - name: Set up keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > android/app/mobigas-release-key.jks
       - name: Set up Firebase config
         script: |
           echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
@@ -41,13 +42,14 @@ workflows:
     max_build_duration: 60
     environment:
       flutter: stable
-      android_signing:
-        - mobigas_keystore
       groups:
         - firebase_credentials
       vars:
         PACKAGE_NAME: "com.mobigas.vendor"
     scripts:
+      - name: Set up keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > android/app/mobigas-release-key.jks
       - name: Set up Firebase config
         script: |
           echo $GOOGLE_SERVICES_JSON | base64 --decode > android/app/google-services.json
