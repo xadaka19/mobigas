@@ -19,6 +19,7 @@ workflows:
       - name: Build customer APK
         script: |
           flutter build apk --release \
+            --flavor customer \
             --android-skip-build-dependency-validation \
             --target lib/main_customer.dart \
             --obfuscate \
@@ -26,6 +27,7 @@ workflows:
       - name: Build customer AAB
         script: |
           flutter build appbundle --release \
+            --flavor customer \
             --android-skip-build-dependency-validation \
             --target lib/main_customer.dart \
             --obfuscate \
@@ -34,7 +36,6 @@ workflows:
       - build/**/outputs/**/*.apk
       - build/**/outputs/**/*.aab
       - build/debug-info/**
-
   vendor-android:
     name: MobiGas Vendor Android
     max_build_duration: 60
@@ -45,7 +46,7 @@ workflows:
       groups:
         - firebase_credentials
       vars:
-        PACKAGE_NAME: "com.mobigas.mobigas"
+        PACKAGE_NAME: "com.mobigas.vendor"
     scripts:
       - name: Set up Firebase config
         script: |
@@ -55,6 +56,7 @@ workflows:
       - name: Build vendor APK
         script: |
           flutter build apk --release \
+            --flavor vendor \
             --android-skip-build-dependency-validation \
             --target lib/main_vendor.dart \
             --obfuscate \
@@ -62,6 +64,7 @@ workflows:
       - name: Build vendor AAB
         script: |
           flutter build appbundle --release \
+            --flavor vendor \
             --android-skip-build-dependency-validation \
             --target lib/main_vendor.dart \
             --obfuscate \
