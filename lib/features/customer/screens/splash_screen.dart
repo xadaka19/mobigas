@@ -65,7 +65,7 @@ class _SplashScreenState extends State<SplashScreen>
     // logged-in customer to onboarding/login instead of home.
     // Waiting for the FIRST real authStateChanges() event instead
     // guarantees the correct answer no matter how long Firebase takes.
-    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 600));
+    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
     final userFuture = FirebaseAuth.instance.authStateChanges().first;
     final user = await userFuture;
     await splashDelay;

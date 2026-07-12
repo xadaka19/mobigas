@@ -60,7 +60,7 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     // logged-in vendor to the login screen. Waiting for the FIRST
     // real authStateChanges() event instead guarantees the correct
     // answer no matter how long Firebase actually takes.
-    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 600));
+    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
     final userFuture = FirebaseAuth.instance.authStateChanges().first;
     final user = await userFuture;
     await splashDelay;
