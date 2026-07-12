@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-//import 'package:geolocator/geolocator.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
-import 'package:mobigas/core/widgets/location_permission_dialog.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class VendorSplashScreen extends StatefulWidget {
   const VendorSplashScreen({super.key});
@@ -26,12 +24,14 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
-    _fadeAnim = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
-    );
-    _scaleAnim = Tween<double>(begin: 0.8, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
-    );
+    _fadeAnim = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeIn));
+    _scaleAnim = Tween<double>(
+      begin: 0.8,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.elasticOut));
     _controller.forward();
     _navigate();
   }
@@ -60,31 +60,22 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     // logged-in vendor to the login screen. Waiting for the FIRST
     // real authStateChanges() event instead guarantees the correct
     // answer no matter how long Firebase actually takes.
-    // See customer splash: wait for the first real auth event, no fixed
-    // minimum splash time for a logged-in vendor.
-    final user = await FirebaseAuth.instance.authStateChanges().first;
+    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 600));
+    final userFuture = FirebaseAuth.instance.authStateChanges().first;
+    final user = await userFuture;
+    await splashDelay;
     if (!mounted) return;
-
-    // Play-compliant location request before navigating; proceed
-    // regardless of outcome.
-    final prefs0 = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    final askedLocation = prefs0.getBool('asked_location') ?? false;
-    if (!askedLocation) {
-      if (!context.mounted) return;
-      await LocationPermissionDialog.requestWithRationale(context);
-      await prefs0.setBool('asked_location', true);
-      if (!mounted) return;
+    // Request location permission early
+    final permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      await Geolocator.requestPermission();
     }
-
+    if (!mounted) return;
     if (user != null) {
       context.go('/vendor-home');
-      return;
+    } else {
+      context.go('/vendor-login');
     }
-
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    if (!mounted) return;
-    context.go('/vendor-login');
   }
 
   @override
@@ -121,22 +112,18 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
                 const SizedBox(height: 24),
                 Text(
                   'MobiGas Vendor',
-                  style: Theme.of(context)
-                      .textTheme
-                      .displayLarge
-                      ?.copyWith(
-                        color: AppColors.white,
-                        fontSize: 32,
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                    color: AppColors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Deliver gas. Get paid on every order.',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyLarge
-                      ?.copyWith(color: AppColors.gray400),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(color: AppColors.gray400),
                 ),
                 const SizedBox(height: 48),
                 const CircularProgressIndicator(
