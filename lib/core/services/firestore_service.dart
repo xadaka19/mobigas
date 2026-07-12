@@ -88,7 +88,7 @@ class FirestoreService {
           .toList(),
       // Folded in so email/password signup no longer needs a second
       // write just to set this. Written only when supplied.
-      if (authMethod != null) 'authMethod': authMethod,
+      'authMethod': ?authMethod,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -202,6 +202,7 @@ class FirestoreService {
       area: data['area'] ?? '',
       estate: data['estate'] ?? '',
       county: data['county'] ?? '',
+      country: data['country'] ?? 'KE',
       latitude: (data['latitude'] ?? 0.0).toDouble(),
       longitude: (data['longitude'] ?? 0.0).toDouble(),
       brands: List<String>.from(data['brands'] ?? []),
@@ -262,6 +263,7 @@ class FirestoreService {
       'gasPrice': order.listing.price,
       'gasProductType': order.listing.productType.name,
       'gasBrand': order.listing.brand,
+      'country': order.country,
       'paymentMethod': order.paymentMethod.name,
       'finderFee': order.finderFee,
       'finderFeeAccrued': false,
@@ -391,6 +393,7 @@ class FirestoreService {
         ),
         brand: data['gasBrand'] ?? '',
       ),
+      country: data['country'] ?? 'KE',
       paymentMethod: PaymentMethod.values.firstWhere(
         (m) => m.name == (data['paymentMethod'] ?? 'cash'),
         orElse: () => PaymentMethod.cash,

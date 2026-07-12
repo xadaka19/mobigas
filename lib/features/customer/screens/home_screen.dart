@@ -8,6 +8,7 @@ import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/profile_completion_banner.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
@@ -645,7 +646,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   if (cheapestRefill != null)
                     chip(
-                        '${cheapestRefill.size} refill from KES ${cheapestRefill.price.toStringAsFixed(0)}'),
+                        '${cheapestRefill.size} refill from ${Currency.formatFor(vendor.country, cheapestRefill.price)}'),
                   if (hasFullKit) chip('Gas + cylinder'),
                   if (hasGrillKit) chip('Gas + cylinder + grill'),
                 ],
@@ -784,7 +785,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('KES ${order.customerTotal.toStringAsFixed(0)}',
+              Text(Currency.formatFor(order.country, order.customerTotal),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,
                       color: order.status == OrderStatus.cancelled

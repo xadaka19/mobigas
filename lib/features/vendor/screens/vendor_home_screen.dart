@@ -9,6 +9,7 @@ import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/google_auth_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
@@ -30,7 +31,6 @@ class _VendorEarnings {
     required this.today,
     required this.deliveries,
   });
-  static const zero = _VendorEarnings(total: 0, today: 0, deliveries: 0);
 }
 
 class VendorHomeScreen extends StatefulWidget {
@@ -1002,8 +1002,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
     );
   }
 
-  String _money(double? v) =>
-      v == null ? '—' : 'KES ${v.toStringAsFixed(0)}';
+  String _money(double? v) => v == null
+      ? '—'
+      : Currency.formatFor((_vendorData?['country'] as String?) ?? 'KE', v);
 
   Widget _buildStatsRow() {
     final e = _earnings;
@@ -1224,7 +1225,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          'KES ${order.listing.price.toStringAsFixed(0)}',
+                          Currency.formatFor(order.country, order.listing.price),
                           style:
                               Theme.of(context).textTheme.titleLarge?.copyWith(
                                     color: AppColors.navy,
@@ -1341,7 +1342,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    'Collect KES ${order.listing.price.toStringAsFixed(0)} from the customer on delivery (cash or M-Pesa to you).',
+                    'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery (cash or M-Pesa to you).',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.navy,
                           fontSize: 11,
@@ -1512,7 +1513,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
               ],
             ),
           ),
-          Text('KES ${order.listing.price.toStringAsFixed(0)}',
+          Text(Currency.formatFor(order.country, order.listing.price),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontSize: 14,
                     color: AppColors.success,

@@ -15,6 +15,11 @@ import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/widgets/location_picker_widget.dart';
+import 'package:mobigas/core/services/geo_service.dart';
+import 'package:mobigas/core/config/currency.dart';
+import 'package:mobigas/features/vendor/widgets/regulator_text.dart';
+import 'package:mobigas/features/vendor/widgets/vendor_requirements.dart';
+//import 'package:mobigas/features/vendor/widgets/country_confirmation.dart';
 
 /// Which part of the vendor profile this screen instance edits.
 /// fullOnboarding is the original 4-step wizard, used only for a
@@ -67,6 +72,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     'weighingScaleCertUrl': null,
     'weighingScalePhotoUrl': null,
     'premisesPhotoUrl': null,
+    // TZ requires a TRA tax clearance; other countries ignore this key.
+    'taxClearanceUrl': null,
   };
 
   // Either/or toggles — true means "show the ideal document's upload
@@ -74,6 +81,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // Defaulted in initState based on whichever the vendor already has.
   late bool _hasScaleCert;
   late bool _hasBrandAuth;
+  // TZ/UG require the vendor to acknowledge the no-decanting rule. Kenya has
+  // no such tick, so it defaults true (nothing to confirm).
+  bool _ackNoDecanting = false;
 
   // Step 1 - Business
   late TextEditingController _businessNameController;
@@ -166,6 +176,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   String _selectedAddress = '';
   double _selectedLat = 0.0;
   double _selectedLng = 0.0;
+  // Country decided offline from the GPS pin (GeoService), not the phone
+  // number. Drives which regulator's documents Step 3 asks for. Null until a
+  // pin is set, or if the pin falls outside every supported market.
+  String? _detectedCountry;
   // Whether the location picker is actively showing (vs. the saved
   // summary view). Starts true only when there's nothing saved yet.
   late bool _isEditingLocation;
@@ -191,6 +205,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _hasScaleCert = (d['weighingScalePhotoUrl'] ?? '').toString().isEmpty;
     _hasBrandAuth = (d['dealerAssociationLetterUrl'] ?? '').toString().isEmpty;
     _hasOwnEpra = (d['subDealerAuthorizationUrl'] ?? '').toString().isEmpty;
+    _ackNoDecanting = (d['ackNoDecanting'] ?? false) == true;
     // BUG FIX: these three were never restored from existing data,
     // so re-opening setup to edit ANYTHING silently started the
     // location step blank — failing its own validation unless the
@@ -198,6 +213,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _selectedAddress = d['address'] ?? '';
     _selectedLat = (d['latitude'] ?? 0.0).toDouble();
     _selectedLng = (d['longitude'] ?? 0.0).toDouble();
+    _detectedCountry = d['country'] as String? ??
+        (_selectedLat != 0.0
+            ? GeoService.countryFromLatLng(_selectedLat, _selectedLng)
+            : null);
     // Location is "set once" — only show the picker if there's
     // nothing saved yet. An existing address shows as a summary with
     // an explicit Edit action instead of re-prompting every time.
@@ -364,7 +383,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     return true;
   }
 
-  bool get _step1Valid => _selectedAddress.isNotEmpty && _selectedLat != 0.0;
+  bool get _step1Valid =>
+      _selectedAddress.isNotEmpty &&
+      _selectedLat != 0.0 &&
+      _detectedCountry != null;
 
   bool get _step2Valid =>
       _selectedBrands.isNotEmpty &&
@@ -390,6 +412,15 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     if (_selectedLat == 0.0 && _selectedLng == 0.0) {
       setState(() => _isSaving = false);
       _showFocusedError('Please set your business location first');
+      return;
+    }
+
+    // TZ/UG legally prohibit decanting; the vendor must acknowledge it.
+    if (VendorRequirements.forCountry(_detectedCountry).acknowledgment != null &&
+        !_ackNoDecanting) {
+      setState(() => _isSaving = false);
+      _showFocusedError(
+          'Please confirm you understand the no-decanting rule to continue');
       return;
     }
 
@@ -535,6 +566,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'address': _selectedAddress,
         'latitude': _selectedLat,
         'longitude': _selectedLng,
+        // Decided offline from the pin at onboarding. A vendor doesn't change
+        // country by editing their profile; defaults to KE for legacy docs.
+        'country': _detectedCountry ?? 'KE',
         // Geohash + geopoint for radius queries (geoflutterfire_plus).
         // Written on every save so an edited location stays queryable.
         'geo': GeoFirePoint(GeoPoint(_selectedLat, _selectedLng)).data,
@@ -556,6 +590,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'dealerAssociationLetterUrl': docUrls['dealerAssociationLetterUrl'],
         'businessPermitUrl': docUrls['businessPermitUrl'],
         'businessRegistrationUrl': docUrls['businessRegistrationUrl'],
+        // TZ tax clearance (null/absent for other countries).
+        'taxClearanceUrl': docUrls['taxClearanceUrl'],
+        // No-decanting acknowledgment (TZ/UG). True for KE by convention.
+        'ackNoDecanting': _ackNoDecanting,
         'fireCertificateUrl': docUrls['fireCertificateUrl'],
         'weighingScaleCertUrl': docUrls['weighingScaleCertUrl'],
         'weighingScalePhotoUrl': docUrls['weighingScalePhotoUrl'],
@@ -1102,6 +1140,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               _selectedAddress = address;
               _selectedLat = lat;
               _selectedLng = lng;
+              _detectedCountry = GeoService.countryFromLatLng(lat, lng);
             });
           },
         ),
@@ -1191,6 +1230,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         _selectedAddress = address;
         _selectedLat = pos.latitude;
         _selectedLng = pos.longitude;
+        _detectedCountry =
+            GeoService.countryFromLatLng(pos.latitude, pos.longitude);
       });
     } catch (e) {
       if (mounted) {
@@ -1572,6 +1613,19 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   // ── STEP 3: VERIFICATION DOCUMENTS ───────────────────────────────
   Widget _buildStep3() {
+    final reg = RegulatorText.forCountry(_detectedCountry);
+    final req = VendorRequirements.forCountry(_detectedCountry);
+    // Supporting docs (permit, fire, premises) by display order for this
+    // country — used to label the shared upload cards correctly.
+    final permitDoc = req.supportingDocs.firstWhere(
+        (d) => d.key == 'businessPermitUrl',
+        orElse: () => req.supportingDocs.first);
+    final fireDoc = req.supportingDocs.firstWhere(
+        (d) => d.key == 'fireCertificateUrl',
+        orElse: () => req.supportingDocs.first);
+    final premisesDoc = req.supportingDocs.firstWhere(
+        (d) => d.key == 'premisesPhotoUrl',
+        orElse: () => req.supportingDocs.first);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1595,7 +1649,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         ),
         const SizedBox(height: 20),
         Text(
-          'EPRA certificate',
+          reg.licenceSectionTitle,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontSize: 13,
             color: AppColors.white,
@@ -1606,13 +1660,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         Row(
           children: [
             _altToggleTab(
-              label: 'I have my own EPRA certificate',
+              label: reg.ownLicenceToggle,
               selected: _hasOwnEpra,
               onTap: () => setState(() => _hasOwnEpra = true),
             ),
             const SizedBox(width: 8),
             _altToggleTab(
-              label: "I'm a sub-dealer / agent",
+              label: reg.agentToggle,
               selected: !_hasOwnEpra,
               onTap: () => setState(() => _hasOwnEpra = false),
             ),
@@ -1622,29 +1676,26 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         if (_hasOwnEpra)
           _buildVerificationDocUpload(
             docKey: 'epraCertificateUrl',
-            title: 'EPRA certificate',
+            title: reg.ownLicenceTitle,
             description:
-                'Your EPRA operating certificate/license for LPG retail',
+                reg.ownLicenceDescription,
           )
         else ...[
           _buildVerificationDocUpload(
             docKey: 'subDealerAuthorizationUrl',
-            title: 'Sub-dealer / agent authorization letter',
-            description:
-                'A letter or agreement showing you sell on behalf of an '
-                'already EPRA-licensed vendor — accepted in place of your '
-                'own EPRA certificate',
+            title: reg.agentAuthTitle,
+            description: reg.agentAuthDescription,
           ),
           const SizedBox(height: 12),
           _field(
-            'Parent vendor / licensed business name',
+            reg.parentNameLabel,
             _parentVendorNameController,
             Icons.store_outlined,
             hint: 'e.g. Total Kenya Ltd, K-Gas main distributor',
           ),
           const SizedBox(height: 12),
           _field(
-            'Parent vendor EPRA certificate number',
+            reg.parentLicenceNumberLabel,
             _parentEpraNumberController,
             Icons.badge_outlined,
             hint: 'If known — helps MobiGas verify faster',
@@ -1661,24 +1712,34 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
         ],
         const SizedBox(height: 16),
+        // TZ requires a TRA Tax Clearance Certificate — shown only there.
+        if (_detectedCountry == 'TZ') ...[
+          const SizedBox(height: 16),
+          _buildVerificationDocUpload(
+            docKey: 'taxClearanceUrl',
+            title: 'TIN & Tax Clearance Certificate',
+            description:
+                'Your TIN and a valid Tax Clearance Certificate from the '
+                'Tanzania Revenue Authority (TRA)',
+          ),
+        ],
+        const SizedBox(height: 16),
         _buildVerificationDocUpload(
           docKey: 'businessPermitUrl',
-          title: 'County business permit',
-          description: 'Your Single Business Permit from the county government',
+          title: permitDoc.title,
+          description: permitDoc.description,
         ),
         const SizedBox(height: 16),
         _buildVerificationDocUpload(
           docKey: 'fireCertificateUrl',
-          title: 'Fire clearance certificate',
-          description: 'Valid fire safety certificate for your premises',
+          title: fireDoc.title,
+          description: fireDoc.description,
         ),
         const SizedBox(height: 16),
         _buildVerificationDocUpload(
           docKey: 'premisesPhotoUrl',
-          title: 'Photo of your retail point',
-          description:
-              'Showing the cylinder holding cage and neighbouring '
-              'premises — required by EPRA',
+          title: premisesDoc.title,
+          description: premisesDoc.description,
         ),
         const SizedBox(height: 20),
         // ── Weighing scale: certificate OR a photo of the scale ────
@@ -1711,7 +1772,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           _buildVerificationDocUpload(
             docKey: 'weighingScaleCertUrl',
             title: 'Weighing scale calibration certificate',
-            description: 'From the Department of Weights and Measures',
+            description: 'From ${reg.scaleAuthority}',
           )
         else
           _buildVerificationDocUpload(
@@ -1765,6 +1826,54 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 'Authorization letter from an independent LPG dealer '
                 'association, in place of a direct brand letter',
           ),
+        // No-decanting acknowledgment — TZ & UG require it, KE doesn't.
+        if (req.acknowledgment != null) ...[
+          const SizedBox(height: 16),
+          InkWell(
+            onTap: () =>
+                setState(() => _ackNoDecanting = !_ackNoDecanting),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _ackNoDecanting
+                    ? AppColors.orange.withValues(alpha: 0.10)
+                    : AppColors.gray800,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _ackNoDecanting
+                      ? AppColors.orange
+                      : AppColors.gray600,
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    _ackNoDecanting
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded,
+                    color: _ackNoDecanting
+                        ? AppColors.orange
+                        : AppColors.gray400,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      req.acknowledgment!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.white,
+                        height: 1.4,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
@@ -2504,7 +2613,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 fontWeight: FontWeight.w600,
               ),
               decoration: InputDecoration(
-                prefixText: 'KES ',
+                prefixText: '${Currency.symbolFor(_detectedCountry)} ',
                 prefixStyle: TextStyle(
                   color: available ? AppColors.orange : AppColors.gray600,
                   fontSize: 11,

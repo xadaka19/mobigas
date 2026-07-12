@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/config/currency.dart';
 
 class OrderProvider extends ChangeNotifier {
   final List<OrderModel> _orders = [];
@@ -112,6 +113,7 @@ class OrderProvider extends ChangeNotifier {
         customerLatitude: customer.latitude,
         customerLongitude: customer.longitude,
         listing: listing,
+        country: vendor.country,
         paymentMethod: PaymentMethod.cash,
         // Vendor-side customer-finder fee (1%), accrued on delivery.
         // Never shown to the customer anywhere in the app.
@@ -149,7 +151,7 @@ class OrderProvider extends ChangeNotifier {
               'customerFcmToken': customer.fcmToken ?? '',
               'notificationTitle': 'New order received!',
               'notificationBody':
-                  '${customer.name} ordered ${listing.size} ${_typeLabel(listing.productType)} · KES ${listing.price.toStringAsFixed(0)} · CASH on delivery',
+                  '${customer.name} ordered ${listing.size} ${_typeLabel(listing.productType)} · ${Currency.formatFor(vendor.country, listing.price)} · CASH on delivery',
               'notificationType': 'new_order',
             });
           }

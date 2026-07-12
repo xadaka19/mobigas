@@ -223,6 +223,7 @@ class VendorModel {
   final String area;
   final String estate;
   final String county;
+  final String country; // 'KE' | 'TZ' | 'UG' — set once at onboarding from GPS
   final double latitude;
   final double longitude;
   final List<String> brands;
@@ -281,6 +282,7 @@ class VendorModel {
     required this.area,
     required this.estate,
     required this.county,
+    this.country = 'KE',
     required this.latitude,
     required this.longitude,
     required this.brands,
@@ -431,6 +433,9 @@ class OrderModel {
   final double customerLatitude;
   final double customerLongitude;
   final GasListing listing;
+  /// 'KE' | 'TZ' | 'UG' — copied from the vendor at order-creation
+  /// time and frozen, same pattern as finderFee.
+  final String country;
   final double bankDisbursementAmount;
   final double originationFeeToMobigas;
   final String pin;
@@ -467,6 +472,7 @@ class OrderModel {
     this.customerLatitude = 0.0,
     this.customerLongitude = 0.0,
     required this.listing,
+    this.country = 'KE',
     required this.bankDisbursementAmount,
     required this.originationFeeToMobigas,
     required this.pin,

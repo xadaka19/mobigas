@@ -71,6 +71,8 @@ dependencies:
   printing: ^5.15.0
   geocoding: ^5.0.0
   share_plus: ^13.2.0
+  country_flags: ^3.1.0
+
 
 dev_dependencies:
   flutter_test:

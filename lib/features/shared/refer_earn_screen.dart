@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
+import 'package:mobigas/core/config/currency.dart';
 
 /// Shared referral dashboard — used by both the customer and vendor
 /// apps (same codebase, two flavors). The caller passes in who's
@@ -30,6 +32,9 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
   bool _isLoadingCode = true;
   double _customerRate = 0;
   double _vendorRate = 0;
+  // Only vendors carry a country today (set at onboarding from GPS).
+  // Customers don't yet — defaults to KE until that's added.
+  String _ownerCountry = 'KE';
 
   // Payout preferences
   String _payoutMethod = 'mpesa'; // 'mpesa' | 'bank'
@@ -47,6 +52,24 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
     _loadCode();
     _loadRates();
     _loadPayoutPreferences();
+    _loadOwnerCountry();
+  }
+
+  Future<void> _loadOwnerCountry() async {
+    if (widget.ownerType != 'vendor') return;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('vendors')
+          .doc(widget.ownerId)
+          .get();
+      if (mounted && doc.exists) {
+        setState(() {
+          _ownerCountry = (doc.data()?['country'] as String?) ?? 'KE';
+        });
+      }
+    } catch (_) {
+      // Keep the KE default rather than block the referral screen.
+    }
   }
 
   @override
@@ -230,17 +253,17 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                           children: [
                             _statCard(
                                 'Total earned',
-                                'KES ${totalEarned.toStringAsFixed(0)}',
+                                Currency.formatFor(_ownerCountry, totalEarned),
                                 AppColors.success),
                             const SizedBox(width: 12),
                             _statCard(
                                 'Pending payout',
-                                'KES ${pendingPayout.toStringAsFixed(0)}',
+                                Currency.formatFor(_ownerCountry, pendingPayout),
                                 AppColors.orange),
                             const SizedBox(width: 12),
                             _statCard(
                                 'Paid out',
-                                'KES ${totalPaid.toStringAsFixed(0)}',
+                                Currency.formatFor(_ownerCountry, totalPaid),
                                 AppColors.navy),
                           ],
                         ),
@@ -417,7 +440,7 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: AppColors.navy, fontWeight: FontWeight.w700)),
             const Spacer(),
-            Text('KES ${rewardEach.toStringAsFixed(0)} each',
+            Text('${Currency.formatFor(_ownerCountry, rewardEach)} each',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall

@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/config/currency.dart';
 
 /// ⚠️ FILL THESE IN before shipping — the paybill MobiGas collects
 /// platform fees on. Vendors pay to this paybill with their vendor ID
@@ -50,6 +51,7 @@ class VendorFeesBanner extends StatelessWidget {
         }
         final data = snap.data!.data() as Map<String, dynamic>;
         final feesOwed = (data['feesOwed'] ?? 0.0).toDouble();
+        final country = (data['country'] as String?) ?? 'KE';
         final isSuspended = data['isSuspended'] ?? false;
         final locked = isSuspended ||
             feesOwed >= MobiGasFees.vendorFeeLockThreshold;
@@ -69,6 +71,7 @@ class VendorFeesBanner extends StatelessWidget {
             builder: (_) => _FeeSheet(
               feesOwed: feesOwed,
               locked: locked,
+              country: country,
               vendorPhone: (data['phone'] ?? '').toString(),
             ),
           ),
@@ -98,7 +101,7 @@ class VendorFeesBanner extends StatelessWidget {
                       Text(
                         locked
                             ? 'Orders paused — platform fees due'
-                            : 'Platform fees: KES ${feesOwed.toStringAsFixed(0)} owed',
+                            : 'Platform fees: ${Currency.formatFor(country, feesOwed)} owed',
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -111,8 +114,8 @@ class VendorFeesBanner extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         locked
-                            ? 'Pay KES ${feesOwed.toStringAsFixed(0)} now to resume receiving orders. Tap for payment details.'
-                            : 'Customer-finder fee (1%) on your cash orders. Orders pause automatically at KES ${MobiGasFees.vendorFeeLockThreshold.toStringAsFixed(0)} — tap to pay now.',
+                            ? 'Pay ${Currency.formatFor(country, feesOwed)} now to resume receiving orders. Tap for payment details.'
+                            : 'Customer-finder fee (1%) on your cash orders. Orders pause automatically at ${Currency.formatFor(country, MobiGasFees.vendorFeeLockThreshold)} — tap to pay now.',
                         style:
                             Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: textColor,
@@ -142,11 +145,13 @@ class VendorFeesBanner extends StatelessWidget {
 class _FeeSheet extends StatefulWidget {
   final double feesOwed;
   final bool locked;
+  final String country;
   final String vendorPhone;
 
   const _FeeSheet({
     required this.feesOwed,
     required this.locked,
+    required this.country,
     required this.vendorPhone,
   });
 
@@ -342,7 +347,7 @@ class _FeeSheetState extends State<_FeeSheet> {
                           .textTheme
                           .bodySmall
                           ?.copyWith(color: AppColors.gray400)),
-                  Text('KES ${feesOwed.toStringAsFixed(0)}',
+                  Text(Currency.formatFor(widget.country, feesOwed),
                       style: Theme.of(context)
                           .textTheme
                           .displayLarge
@@ -402,7 +407,7 @@ class _FeeSheetState extends State<_FeeSheet> {
                         ? 'Waiting for M-Pesa PIN...'
                         : _phase == _PaymentPhase.failed
                             ? 'Try again'
-                            : 'Pay KES ${feesOwed.toStringAsFixed(0)} now'),
+                            : 'Pay ${Currency.formatFor(widget.country, feesOwed)} now'),
                 style: ElevatedButton.styleFrom(
                   minimumSize: const Size(double.infinity, 48),
                   backgroundColor: AppColors.success,
@@ -459,7 +464,7 @@ class _FeeSheetState extends State<_FeeSheet> {
               Text(
                 'MobiGas charges a 1% customer-finder fee on cash orders we bring you. '
                 'Credit orders are not charged this fee. '
-                'If unpaid fees reach KES ${MobiGasFees.vendorFeeLockThreshold.toStringAsFixed(0)}, '
+                'If unpaid fees reach ${Currency.formatFor(widget.country, MobiGasFees.vendorFeeLockThreshold)}, '
                 'your shop is hidden from customers until you pay. '
                 'It reappears automatically once your payment is recorded.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -492,7 +497,7 @@ class _FeeSheetState extends State<_FeeSheet> {
                             context, '2. Business number: $kFeePaybillNumber'),
                         _payLine(context, '3. Account: $kFeeAccountHint'),
                         _payLine(context,
-                            '4. Amount: KES ${feesOwed.toStringAsFixed(0)}'),
+                            '4. Amount: ${Currency.formatFor(widget.country, feesOwed)}'),
                       ],
                     ),
                   ),

@@ -6,6 +6,7 @@ import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/config/currency.dart';
 
 class OrderScreen extends StatefulWidget {
   const OrderScreen({super.key});
@@ -145,6 +146,10 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   double get _gasPrice => _selectedListing?.price ?? 0;
+
+  /// Currency follows the vendor being ordered from — set once at
+  /// vendor onboarding from GPS, not a customer preference.
+  String get _vendorCountry => _selectedVendor?.country ?? 'KE';
 
   String _typeDescription(GasProductType t) {
     switch (t) {
@@ -739,7 +744,7 @@ class _OrderScreenState extends State<OrderScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('KES ${listing.price.toStringAsFixed(0)}',
+                Text(Currency.formatFor(vendor.country, listing.price),
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           color: AppColors.orange,
                           fontWeight: FontWeight.w800,
@@ -785,11 +790,11 @@ class _OrderScreenState extends State<OrderScreen> {
               const SizedBox(height: 16),
               _feeRow(
                   '${_shortTypeLabel(_selectedListing?.productType ?? GasProductType.refill)} (${_selectedListing?.size})',
-                  'KES ${_gasPrice.toStringAsFixed(0)}'),
-              _feeRow('Extra fees', 'KES 0'),
+                  Currency.formatFor(_vendorCountry, _gasPrice)),
+              _feeRow('Extra fees', Currency.formatFor(_vendorCountry, 0)),
               const Divider(height: 20, color: Colors.white24),
               _feeRow('Total to pay vendor',
-                  'KES ${_gasPrice.toStringAsFixed(0)}',
+                  Currency.formatFor(_vendorCountry, _gasPrice),
                   isBold: true, valueColor: AppColors.orange),
             ],
           ),
@@ -929,7 +934,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     _summaryRow('Vendor', _selectedVendor?.businessName ?? ''),
                     const Divider(height: 24, color: AppColors.gray200),
                     _summaryRow('Pay vendor on delivery',
-                        'KES ${_gasPrice.toStringAsFixed(0)}',
+                        Currency.formatFor(_vendorCountry, _gasPrice),
                         isBold: true, valueColor: AppColors.orange),
                     const Divider(height: 24, color: AppColors.gray200),
                     _summaryRow('Delivery to',
@@ -946,7 +951,7 @@ class _OrderScreenState extends State<OrderScreen> {
         _infoCard(
           icon: Icons.payments_outlined,
           text:
-              'Have KES ${_gasPrice.toStringAsFixed(0)} ready (cash or M-Pesa to the vendor). Only share your delivery PIN after you receive and pay for your gas.',
+              'Have ${Currency.formatFor(_vendorCountry, _gasPrice)} ready (cash or M-Pesa to the vendor). Only share your delivery PIN after you receive and pay for your gas.',
         ),
         if (_isRefill) ...[
           const SizedBox(height: 16),
@@ -1060,7 +1065,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   ?.copyWith(color: AppColors.navy)),
           const SizedBox(height: 8),
           Text(
-              '${_selectedListing?.size} $typeLabel · KES ${_gasPrice.toStringAsFixed(0)} cash on delivery',
+              '${_selectedListing?.size} $typeLabel · ${Currency.formatFor(_vendorCountry, _gasPrice)} cash on delivery',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme

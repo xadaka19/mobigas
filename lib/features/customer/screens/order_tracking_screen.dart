@@ -10,6 +10,7 @@ import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/delivery_notification_service.dart';
 import 'package:mobigas/core/services/screen_security_service.dart';
+import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/features/shared/order_chat_screen.dart';
 
 class OrderTrackingScreen extends StatefulWidget {
@@ -145,8 +146,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
       DeliveryNotificationService.showDeliveryConfirmed(
         gasSize: _order?.listing.size ?? '',
         // Cash on delivery — customerTotal is the gas price, the same
-        // figure shown on the vendor card and the PIN panel.
-        amount: _order?.customerTotal.toStringAsFixed(0) ?? '',
+        // figure shown on the vendor card and the PIN panel. Already
+        // includes the currency symbol for the order's country.
+        amount: Currency.formatFor(_order?.country, _order?.customerTotal ?? 0),
       );
       if (mounted) context.go('/delivery-confirmed');
       return;
@@ -454,7 +456,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    'KES ${order.customerTotal.toStringAsFixed(0)}',
+                    Currency.formatFor(order.country, order.customerTotal),
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           color: AppColors.orange,
                           fontWeight: FontWeight.w700,
@@ -529,7 +531,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Pay the vendor KES ${order.customerTotal.toStringAsFixed(0)} first (cash or M-Pesa), then show this PIN',
+                  'Pay the vendor ${Currency.formatFor(order.country, order.customerTotal)} first (cash or M-Pesa), then show this PIN',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                         fontSize: 11,

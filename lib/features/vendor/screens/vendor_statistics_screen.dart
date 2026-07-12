@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/config/currency.dart';
 
 /// Detailed sales & fulfillment statistics for a vendor, with a
 /// month-on-month breakdown and a PDF export, so a vendor has a clear
@@ -342,8 +343,9 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
     required int cancelled,
     required double fulfillmentRate,
   }) {
+    final country = (widget.vendorData['country'] as String?) ?? 'KE';
     final cards = [
-      ('Total sales', 'KES ${totalSales.toStringAsFixed(0)}',
+      ('Total sales', Currency.formatFor(country, totalSales),
           Icons.account_balance_wallet_rounded, AppColors.success),
       ('Orders fulfilled', '$fulfilled',
           Icons.check_circle_rounded, AppColors.success),
@@ -496,7 +498,9 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
                     Expanded(
                         flex: 2,
                         child: Text(
-                            'KES ${m.totalSales.toStringAsFixed(0)}',
+                            Currency.formatFor(
+                                (widget.vendorData['country'] as String?) ?? 'KE',
+                                m.totalSales),
                             textAlign: TextAlign.end,
                             style: Theme.of(context)
                                 .textTheme
@@ -617,7 +621,10 @@ class _VendorStatisticsScreenState extends State<VendorStatisticsScreen> {
               },
               children: [
                 _pdfRow('Total sales (all time)',
-                    'KES ${totalSales.toStringAsFixed(0)}', bold: true),
+                    Currency.formatFor(
+                        (widget.vendorData['country'] as String?) ?? 'KE',
+                        totalSales),
+                    bold: true),
                 _pdfRow('Orders fulfilled', '$fulfilled'),
                 _pdfRow('Cancelled by customer', '$customerCancelled'),
                 _pdfRow('Declined by vendor', '$vendorDeclined'),

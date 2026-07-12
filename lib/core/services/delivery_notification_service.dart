@@ -121,7 +121,7 @@ class DeliveryNotificationService {
     await _plugin.show(
       id: 1002,
       title: 'Gas delivered! ✅',
-      body: '$gasSize delivered · Paid KES $amount — thank you!',
+      body: '$gasSize delivered · Paid $amount — thank you!',
       notificationDetails: details,
       payload: 'order_update',
     );

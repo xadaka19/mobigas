@@ -11,6 +11,7 @@ import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/location_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
+import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/features/shared/order_chat_screen.dart';
 
 class VendorOrderScreen extends StatefulWidget {
@@ -45,7 +46,10 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
 
   bool get _isRefill =>
       widget.order.listing.productType == GasProductType.refill;
-  String get _amount => widget.order.listing.price.toStringAsFixed(0);
+  // Already includes the currency symbol for the order's country —
+  // every use site below just interpolates $_amount directly.
+  String get _amount =>
+      Currency.formatFor(widget.order.country, widget.order.listing.price);
 
   @override
   void initState() {
@@ -255,7 +259,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
       ..writeln('Deliver to: ${widget.order.customerArea}')
       ..writeln('Item: $item')
       ..write(
-          'Payment: customer pays KES $_amount (cash or M-Pesa to the vendor). Confirm payment is received before taking the PIN.');
+          'Payment: customer pays $_amount (cash or M-Pesa to the vendor). Confirm payment is received before taking the PIN.');
     if (mapsLink != null) {
       body.writeln();
       body.write('Directions: $mapsLink');
@@ -548,7 +552,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              'KES $_amount 💵',
+              '$_amount 💵',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: AppColors.orange,
                     fontWeight: FontWeight.w700,
@@ -715,11 +719,11 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   : '${widget.order.listing.size} · ${widget.order.listing.productType.label}'),
           _divider(),
           _row(Icons.payments_rounded, 'You receive',
-              'KES $_amount from customer on delivery'),
+              '$_amount from customer on delivery'),
         ])),
         const SizedBox(height: 16),
         _infoBox(Icons.payments_rounded,
-            'Confirm payment of KES $_amount is received (cash or M-Pesa to you) before the customer shares the PIN — the PIN completes the delivery.'),
+            'Confirm payment of $_amount is received (cash or M-Pesa to you) before the customer shares the PIN — the PIN completes the delivery.'),
         const SizedBox(height: 20),
         // Rider assignment
         _card(child: Column(
@@ -922,7 +926,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   : widget.order.listing.size),
           _divider(),
           _row(Icons.payments_rounded, 'Payment',
-              'KES $_amount — confirm received before PIN'),
+              '$_amount — confirm received before PIN'),
           // BUG FIX: rider info was captured on the Prepare step and
           // then never shown again anywhere — the vendor had no way
           // to confirm who they'd actually assigned.
@@ -1031,7 +1035,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         ])),
         const SizedBox(height: 16),
         _infoBox(Icons.payments_rounded,
-            'Confirm payment of KES $_amount is received (cash or M-Pesa to you) FIRST — the customer\'s PIN completes the delivery.'),
+            'Confirm payment of $_amount is received (cash or M-Pesa to you) FIRST — the customer\'s PIN completes the delivery.'),
         if (_isRefill) ...[
           const SizedBox(height: 12),
           _infoBox(Icons.swap_horiz_rounded,
@@ -1089,7 +1093,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           ],
           const SizedBox(height: 12),
           _row(Icons.payments_rounded, 'You collected',
-              'KES $_amount from customer'),
+              '$_amount from customer'),
         ])),
       ],
     );
@@ -1133,7 +1137,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'KES $_amount',
+                    _amount,
                     style: Theme.of(context)
                         .textTheme
                         .titleLarge
