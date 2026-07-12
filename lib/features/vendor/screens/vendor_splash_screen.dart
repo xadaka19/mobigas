@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:geolocator/geolocator.dart';
+//import 'package:geolocator/geolocator.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/widgets/location_permission_dialog.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class VendorSplashScreen extends StatefulWidget {
   const VendorSplashScreen({super.key});
@@ -58,25 +60,31 @@ class _VendorSplashScreenState extends State<VendorSplashScreen>
     // logged-in vendor to the login screen. Waiting for the FIRST
     // real authStateChanges() event instead guarantees the correct
     // answer no matter how long Firebase actually takes.
-    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
-    final userFuture = FirebaseAuth.instance.authStateChanges().first;
-
-    final user = await userFuture;
-    await splashDelay;
+    // See customer splash: wait for the first real auth event, no fixed
+    // minimum splash time for a logged-in vendor.
+    final user = await FirebaseAuth.instance.authStateChanges().first;
     if (!mounted) return;
 
-    // Request location permission early
-    final permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      await Geolocator.requestPermission();
+    // Play-compliant location request before navigating; proceed
+    // regardless of outcome.
+    final prefs0 = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final askedLocation = prefs0.getBool('asked_location') ?? false;
+    if (!askedLocation) {
+      if (!context.mounted) return;
+      await LocationPermissionDialog.requestWithRationale(context);
+      await prefs0.setBool('asked_location', true);
+      if (!mounted) return;
     }
 
-    if (!mounted) return;
     if (user != null) {
       context.go('/vendor-home');
-    } else {
-      context.go('/vendor-login');
+      return;
     }
+
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+    context.go('/vendor-login');
   }
 
   @override

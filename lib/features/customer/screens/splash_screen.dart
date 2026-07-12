@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
+//import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/widgets/location_permission_dialog.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -65,33 +66,49 @@ class _SplashScreenState extends State<SplashScreen>
     // logged-in customer to onboarding/login instead of home.
     // Waiting for the FIRST real authStateChanges() event instead
     // guarantees the correct answer no matter how long Firebase takes.
-    final splashDelay = Future<void>.delayed(const Duration(milliseconds: 1800));
-    final userFuture = FirebaseAuth.instance.authStateChanges().first;
-
-    final user = await userFuture;
-    await splashDelay;
+    // Wait for the FIRST real auth event — correctly handles a session
+    // still restoring on cold start (currentUser can read null for a
+    // moment during SDK init + Play Services handshake). No fixed
+    // minimum splash time: a logged-in user should land on home the
+    // instant auth confirms them.
+    final user = await FirebaseAuth.instance.authStateChanges().first;
     if (!mounted) return;
 
-    // Request location permission
-    final permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      await Geolocator.requestPermission();
+    // Play-compliant location request BEFORE navigating anywhere: the
+    // rationale dialog shows first, then the system prompt — so we
+    // never bounce the user to a permission dialog after they've
+    // reached login or home. We proceed regardless of their choice; a
+    // denial is safe, because country defaults sensibly and is set
+    // definitively later from the map pin, and delivery address can be
+    // entered via the manual map picker.
+    final prefs0 = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final askedLocation = prefs0.getBool('asked_location') ?? false;
+    if (!askedLocation) {
+      if (!context.mounted) return;
+      await LocationPermissionDialog.requestWithRationale(context);
+      await prefs0.setBool('asked_location', true);
+      if (!mounted) return;
     }
-    if (!mounted) return;
 
     if (user != null) {
+      // Already signed in — straight to home, no artificial delay.
       context.go('/home');
+      return;
+    }
+
+    // Logged out: a brief branded beat, then login/onboarding.
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final seenOnboarding = prefs.getBool('seen_onboarding') ?? false;
+    if (!mounted) return;
+    if (seenOnboarding) {
+      context.go('/login');
     } else {
-      final prefs = await SharedPreferences.getInstance();
-      final seenOnboarding = prefs.getBool('seen_onboarding') ?? false;
+      await prefs.setBool('seen_onboarding', true);
       if (!mounted) return;
-      if (seenOnboarding) {
-        context.go('/login');
-      } else {
-        await prefs.setBool('seen_onboarding', true);
-        if (!mounted) return;
-        context.go('/onboarding');
-      }
+      context.go('/onboarding');
     }
   }
 
