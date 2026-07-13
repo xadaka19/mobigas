@@ -41,9 +41,23 @@ void main() async {
   // Cheap, synchronous — safe before the deferred block.
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-  // Notifications gate no reads, so they run after first paint and
-  // can never block or crash the UI.
-  unawaited(_initNotifications());
+  // BUG FIX: notification init (which prompts the notification
+  // permission dialog via _messaging.requestPermission()) used to
+  // fire immediately here, right after runApp(). But SplashScreen
+  // also requests its own permission (location) a couple seconds
+  // into its splash delay. Android only resolves one native
+  // permission-request callback at a time — firing two plugin
+  // permission requests (firebase_messaging here, geolocator in the
+  // splash) close together let one of them win the callback slot
+  // and silently starve the other, whose await then hung forever
+  // and froze the splash right after the user answered the first
+  // dialog. Splash now has a timeout guard as a backstop, but the
+  // real fix is not colliding in the first place: delay this call
+  // until comfortably after the splash's own permission request
+  // window has passed.
+  Future.delayed(const Duration(milliseconds: 2500), () {
+    unawaited(_initNotifications());
+  });
 }
 
 Future<void> _initNotifications() async {

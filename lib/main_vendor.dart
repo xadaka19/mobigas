@@ -34,7 +34,19 @@ void main() async {
   runApp(const MobiGasApp());
 
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  unawaited(_initNotifications());
+
+  // BUG FIX: see main_customer.dart. Notification init prompts the
+  // notification permission dialog; VendorSplashScreen prompts its
+  // own location permission dialog a couple seconds later. Android
+  // only resolves one native permission-request callback at a time,
+  // so firing both close together could starve one of its callback
+  // and hang that await forever — freezing the vendor splash right
+  // after the vendor answered the notification dialog. The splash
+  // now has a timeout guard as a backstop, but delaying this call
+  // avoids the collision in the first place.
+  Future.delayed(const Duration(milliseconds: 2500), () {
+    unawaited(_initNotifications());
+  });
 }
 
 Future<void> _initNotifications() async {

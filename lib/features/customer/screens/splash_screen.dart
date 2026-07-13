@@ -83,10 +83,33 @@ class _SplashScreenState extends State<SplashScreen>
     }
     await splashDelay;
     if (!mounted) return;
-    // Request location permission
-    final permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      await Geolocator.requestPermission();
+
+    // Request location permission.
+    //
+    // BUG FIX: this request has no timeout, and it turns out that's
+    // dangerous, not just slow. main.dart fires the FCM notification
+    // permission request (via NotificationService.initialize(), in a
+    // fire-and-forget Future right after runApp()) at almost the same
+    // moment this splash reaches its own Geolocator permission
+    // request. Android resolves only one native permission-request
+    // callback at a time; when two plugins (firebase_messaging and
+    // geolocator) request permission in close succession, the loser
+    // of that race can have its result callback silently dropped —
+    // no exception, no completion, the await just hangs forever. That
+    // froze the splash indefinitely right after the user tapped
+    // "Allow" on the notification dialog, since this Geolocator call
+    // never returned and context.go() below never ran. A timeout with
+    // a swallowed exception lets the splash proceed regardless; the
+    // user can grant location later from wherever it's actually used.
+    try {
+      final permission = await Geolocator.checkPermission()
+          .timeout(const Duration(seconds: 5));
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission()
+            .timeout(const Duration(seconds: 5));
+      }
+    } catch (_) {
+      // Timed out or errored — proceed without blocking navigation.
     }
     if (!mounted) return;
     if (user != null) {
