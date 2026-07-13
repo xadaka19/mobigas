@@ -18,6 +18,7 @@ import 'package:mobigas/features/shared/refer_earn_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
 import 'package:mobigas/core/widgets/promo_popup_mixin.dart';
+import 'package:mobigas/features/stock_boost/vendor_stock_boost.dart';
 
 /// Server-computed earnings. Reading every delivered order just to add
 /// up a number does not scale, and capping the read at N silently
@@ -1571,7 +1572,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                         ),
                   ),
                   const SizedBox(height: 8),
-                  Text('Today: ${_money(e?.today)}',
+                  Text('Today: ${_money(e?.total)}',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium
@@ -1579,6 +1580,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                 ],
               ),
             ),
+            // Stock boost — shows only for eligible vendors, else renders nothing
+            StockBoostCard(vendorId: _vendorId),
             Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
