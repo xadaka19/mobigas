@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:mobigas/core/models/app_models.dart';
@@ -26,12 +27,14 @@ class AuthProvider extends ChangeNotifier {
   CustomerModel? _customer;
   String? _error;
 
-  /// True while register()/signInWithGoogle() are creating the
-  /// Firestore profile for a brand-new account. Firebase fires
-  /// authStateChanges the instant the credential lands — before the
-  /// profile document exists — and the listener would race ahead,
-  /// find nothing, and sign the user straight back out. Suppress it
-  /// until the writing path has finished and set state itself.
+  /// True while register()/signInWithGoogle()/login() are running the
+  /// explicit load path. Firebase fires authStateChanges the instant a
+  /// credential lands, and the listener would race the explicit path —
+  /// on signup, finding no profile doc yet and signing the user back
+  /// out; on login, firing a SECOND redundant getUser() for the same
+  /// users/{uid} doc over the same cold connection we're trying to keep
+  /// fast. Suppressing the listener while an explicit path owns the
+  /// load fixes both.
   bool _bootstrapping = false;
 
   /// Session-only dismissal of the home profile banner.
@@ -64,7 +67,13 @@ class AuthProvider extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      await _loadCustomerWithRetry(user.uid);
+      // Silent session restore on cold start. This is the path that
+      // most often "takes forever" — the app reopens, Auth restores the
+      // uid, and the user stares at the splash while a server round trip
+      // fetches a profile that's already sitting in the local cache from
+      // last run. allowCache lets us show that cached profile instantly
+      // and refresh from the server in the background.
+      await _loadCustomerWithRetry(user.uid, allowCache: true);
     });
   }
 
@@ -116,8 +125,44 @@ class AuthProvider extends ChangeNotifier {
   /// failure-prone than normal — previously, a single transient
   /// failure here was treated identically to "this account was
   /// deleted, sign the user out".
-  Future<void> _loadCustomerWithRetry(String uid, {int attempt = 0}) async {
+  ///
+  /// When [allowCache] is set (cold-start session restore), the first
+  /// attempt reads from the local cache and, on a hit, authenticates
+  /// immediately and kicks off a background server refresh. On a fresh
+  /// install the cache is empty, that read throws, and we fall straight
+  /// through to the normal server-backed path — so it's never slower
+  /// than before, only faster when a cached profile exists.
+  Future<void> _loadCustomerWithRetry(String uid,
+      {int attempt = 0, bool allowCache = false}) async {
     const maxRetries = 3;
+
+    if (allowCache && attempt == 0) {
+      try {
+        final cached =
+            await FirestoreService.getUser(uid, source: Source.cache);
+        if (cached != null) {
+          // A cached users/{uid} doc only exists here because this
+          // account already passed the vendor guard at a previous
+          // login (a vendor can never be written into users/{uid} —
+          // the guards in login()/signInWithGoogle() reject that), so
+          // restoring it as an authenticated customer is safe without
+          // re-running the guard on every cold start.
+          _customer = cached;
+          _state = AuthState.authenticated;
+          _error = null;
+          notifyListeners();
+          unawaited(NotificationService.saveTokenForCurrentUser());
+          // Catch up to any server-side changes since last run,
+          // without making the user wait for it.
+          unawaited(_refreshCustomerFromServer(uid));
+          return;
+        }
+      } catch (_) {
+        // Cold cache (fresh install / evicted) or a read error — fall
+        // through to the server-backed load below.
+      }
+    }
+
     try {
       final customer = await FirestoreService.getUser(uid);
       if (customer != null) {
@@ -151,6 +196,22 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Background-only refresh used after a cache hit. Reads from the
+  /// server and updates the in-memory profile if it changed. Stays
+  /// silent on failure — if we're offline, the cached profile the user
+  /// is already looking at is the right thing to keep showing.
+  Future<void> _refreshCustomerFromServer(String uid) async {
+    try {
+      final fresh = await FirestoreService.getUser(uid, source: Source.server);
+      if (fresh != null && _state == AuthState.authenticated) {
+        _customer = fresh;
+        notifyListeners();
+      }
+    } catch (_) {
+      // Offline / transient — keep the cached profile on screen.
+    }
+  }
+
   // ---------------------------------------------------------------
   // Email / password
   // ---------------------------------------------------------------
@@ -158,6 +219,10 @@ class AuthProvider extends ChangeNotifier {
   Future<void> login(String email, String password) async {
     _state = AuthState.loading;
     _error = null;
+    // Own the load path so the authStateChanges listener doesn't fire a
+    // second, parallel getUser() for the same doc over the cold
+    // connection. Reset in finally.
+    _bootstrapping = true;
     notifyListeners();
 
     try {
@@ -167,29 +232,79 @@ class AuthProvider extends ChangeNotifier {
       );
       final uid = credential.user!.uid;
 
-      // SECURITY GUARD: this uid may belong to a vendor account
-      // (e.g. someone typed vendor credentials into the customer
-      // app, or the same email/password was reused across both
-      // flows). Nothing in the router or navigation code prevents a
-      // successfully authenticated user from reaching customer
-      // screens regardless of which account type they actually are
-      // — so the check has to happen right here, before the caller
-      // is ever treated as a customer.
-      final isVendor = await FirestoreService.isRegisteredVendor(uid);
+      // PARALLELISM: the vendor guard and the profile read are two
+      // independent single-doc reads. On a cold connection they used to
+      // be awaited one after the other — two full round trips stacked
+      // on top of the auth handshake. Start the profile read now so it
+      // runs DURING the vendor round trip. The vendor guard is still
+      // awaited on its own and stays authoritative: if it fails or says
+      // "vendor", we never look at the profile.
+      final profileFuture = FirestoreService.getUser(uid);
+
+      final bool isVendor;
+      try {
+        // SECURITY GUARD: this uid may belong to a vendor account
+        // (vendor credentials typed into the customer app, or an
+        // email/password reused across both flows). Nothing downstream
+        // stops an authenticated user from reaching customer screens
+        // regardless of account type — so the check happens here,
+        // before the caller is ever treated as a customer. On a read
+        // error we fail closed (never skip the guard) and let the user
+        // retry rather than risk letting a vendor through.
+        isVendor = await FirestoreService.isRegisteredVendor(uid);
+      } catch (_) {
+        unawaited(profileFuture.catchError((_) => null));
+        _error = 'No internet connection';
+        _state = AuthState.unauthenticated;
+        return;
+      }
+
       if (isVendor) {
+        unawaited(profileFuture.catchError((_) => null));
         await GoogleAuthService.signOut();
         _error = 'This account is registered as a MobiGas vendor. '
             'Please use the MobiGas Vendor app to sign in.';
         _state = AuthState.unauthenticated;
-        notifyListeners();
         return;
       }
 
-      // _loadCustomerWithRetry saves the FCM token on success.
-      await _loadCustomerWithRetry(uid);
+      CustomerModel? customer;
+      try {
+        customer = await profileFuture;
+      } catch (_) {
+        // The profile read specifically failed (offline / transient).
+        // Surface it fast instead of sitting through the long backoff —
+        // the user can just tap "Sign in" again.
+        _error = 'Could not load your profile. Check your connection.';
+        _state = AuthState.unauthenticated;
+        return;
+      }
+
+      if (customer == null) {
+        // Auth succeeded but the profile doc isn't visible yet — a rare
+        // propagation edge. One short retry, not the full backoff.
+        await Future.delayed(const Duration(milliseconds: 600));
+        try {
+          customer = await FirestoreService.getUser(uid);
+        } catch (_) {
+          // fall through to the null handling below
+        }
+      }
+
+      if (customer != null) {
+        _customer = customer;
+        _state = AuthState.authenticated;
+        _error = null;
+        unawaited(NotificationService.saveTokenForCurrentUser());
+      } else {
+        _error = 'Could not load your profile. Check your connection.';
+        _state = AuthState.unauthenticated;
+      }
     } on FirebaseAuthException catch (e) {
       _error = _authError(e.code);
       _state = AuthState.unauthenticated;
+    } finally {
+      _bootstrapping = false;
       notifyListeners();
     }
   }

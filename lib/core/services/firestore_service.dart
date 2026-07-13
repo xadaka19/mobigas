@@ -14,40 +14,54 @@ class FirestoreService {
     // Checked across BOTH users and vendors — previously this only
     // checked customers, so the same phone/ID could be reused to
     // create a vendor account with zero detection, and vice versa.
-    final phoneSnapUsers = await FirebaseService.users
-        .where('phone', isEqualTo: phone)
-        .limit(1)
-        .get();
-    final phoneSnapVendors = await FirebaseService.vendors
-        .where('phone', isEqualTo: phone)
-        .limit(1)
-        .get();
+    //
+    // These reads are all independent, so they run together instead of
+    // one-await-after-another (six sequential round trips was the old
+    // cost — felt worst on the profile banner's savePhone step). Empty
+    // values are skipped entirely: a blank phone/ID can never be
+    // "taken", and querying on '' would scan every incomplete profile
+    // for nothing.
+    final futures = <String, Future<QuerySnapshot>>{};
 
-    final idSnapUsers = await FirebaseService.users
-        .where('nationalId', isEqualTo: nationalId)
-        .limit(1)
-        .get();
-    final idSnapVendors = await FirebaseService.vendors
-        .where('nationalId', isEqualTo: nationalId)
-        .limit(1)
-        .get();
-
-    bool deviceFlagged = false;
-    if (deviceFingerprint != null) {
-      final deviceSnapUsers = await FirebaseService.users
-          .where("deviceFingerprint", isEqualTo: deviceFingerprint)
+    if (phone.isNotEmpty) {
+      futures['phoneUsers'] =
+          FirebaseService.users.where('phone', isEqualTo: phone).limit(1).get();
+      futures['phoneVendors'] = FirebaseService.vendors
+          .where('phone', isEqualTo: phone)
+          .limit(1)
           .get();
-      final deviceSnapVendors = await FirebaseService.vendors
-          .where("deviceFingerprint", isEqualTo: deviceFingerprint)
-          .get();
-      deviceFlagged =
-          deviceSnapUsers.docs.isNotEmpty || deviceSnapVendors.docs.isNotEmpty;
     }
+    if (nationalId.isNotEmpty) {
+      futures['idUsers'] = FirebaseService.users
+          .where('nationalId', isEqualTo: nationalId)
+          .limit(1)
+          .get();
+      futures['idVendors'] = FirebaseService.vendors
+          .where('nationalId', isEqualTo: nationalId)
+          .limit(1)
+          .get();
+    }
+    if (deviceFingerprint != null) {
+      futures['deviceUsers'] = FirebaseService.users
+          .where('deviceFingerprint', isEqualTo: deviceFingerprint)
+          .get();
+      futures['deviceVendors'] = FirebaseService.vendors
+          .where('deviceFingerprint', isEqualTo: deviceFingerprint)
+          .get();
+    }
+
+    final entries = futures.entries.toList();
+    final results = await Future.wait(entries.map((e) => e.value));
+    final byKey = <String, QuerySnapshot>{
+      for (var i = 0; i < entries.length; i++) entries[i].key: results[i],
+    };
+
+    bool hit(String k) => (byKey[k]?.docs.isNotEmpty) ?? false;
+
     return {
-      'phoneTaken':
-          phoneSnapUsers.docs.isNotEmpty || phoneSnapVendors.docs.isNotEmpty,
-      'idTaken': idSnapUsers.docs.isNotEmpty || idSnapVendors.docs.isNotEmpty,
-      'deviceFlagged': deviceFlagged,
+      'phoneTaken': hit('phoneUsers') || hit('phoneVendors'),
+      'idTaken': hit('idUsers') || hit('idVendors'),
+      'deviceFlagged': hit('deviceUsers') || hit('deviceVendors'),
     };
   }
 
@@ -95,8 +109,18 @@ class FirestoreService {
     });
   }
 
-  static Future<CustomerModel?> getUser(String uid) async {
-    final doc = await FirebaseService.users.doc(uid).get();
+  /// [source] defaults to serverAndCache, so every existing caller
+  /// behaves exactly as before. AuthProvider's cold-start session
+  /// restore passes Source.cache for an instant read from the local
+  /// cache (then refreshes with Source.server in the background) — the
+  /// difference between "home screen appears immediately on relaunch"
+  /// and "wait for a server round trip every time".
+  static Future<CustomerModel?> getUser(
+    String uid, {
+    Source source = Source.serverAndCache,
+  }) async {
+    final doc =
+        await FirebaseService.users.doc(uid).get(GetOptions(source: source));
     if (!doc.exists) return null;
     final data = doc.data() as Map<String, dynamic>;
     return _customerFromMap(uid, data);
