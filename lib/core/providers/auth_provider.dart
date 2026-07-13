@@ -12,6 +12,7 @@ import 'package:mobigas/core/services/geo_service.dart';
 import 'package:mobigas/core/services/google_auth_service.dart';
 import 'package:mobigas/core/services/notification_service.dart';
 import 'package:mobigas/core/services/storage_metadata.dart';
+import 'package:mobigas/flavors/flavor_config.dart';
 
 enum AuthState { unauthenticated, loading, authenticated }
 
@@ -42,6 +43,19 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _state == AuthState.authenticated;
 
   AuthProvider() {
+    // This provider manages the CUSTOMER profile (loads users/{uid}).
+    // It lives in the shared widget tree (app.dart), so it also
+    // instantiates in the VENDOR flavor — where it must stay inert. A
+    // vendor has no users/{uid} document, so letting the listener run
+    // there sends _loadCustomerWithRetry into ~4s of doomed Firestore
+    // retries on every cold start, stalling vendor startup (the splash
+    // hang). Vendor auth/data is handled by VendorProvider and the
+    // vendor home screen, so bailing out here is safe.
+    if (FlavorConfig.instance.flavor == FlavorType.vendor) {
+      _state = AuthState.unauthenticated;
+      return;
+    }
+
     FirebaseService.auth.authStateChanges().listen((user) async {
       if (_bootstrapping) return;
       if (user == null) {
