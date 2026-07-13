@@ -77,6 +77,7 @@ class FirestoreService {
       'county': customer.county,
       'area': customer.area,
       'estate': customer.estate,
+      'country': customer.country,
       'latitude': customer.latitude,
       'longitude': customer.longitude,
       'bankStatus': customer.bankStatus.name,
@@ -123,6 +124,18 @@ class FirestoreService {
     });
   }
 
+  /// Sets the customer's country once a delivery pin is captured
+  /// (ProfileCompletionSheet's location step, or the Google sign-up
+  /// completion flow). Mirrors how VendorModel.country is written in
+  /// vendor_setup_screen.dart's _save() — same GeoService detection,
+  /// same "decided once from the pin, not re-derived later" contract.
+  static Future<void> updateUserCountry(String uid, String country) async {
+    await FirebaseService.users.doc(uid).update({
+      'country': country,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   static CustomerModel _customerFromMap(
       String uid, Map<String, dynamic> data) {
     return CustomerModel(
@@ -136,6 +149,7 @@ class FirestoreService {
       county: data['county'] ?? '',
       area: data['area'] ?? '',
       estate: data['estate'] ?? '',
+      country: data['country'] ?? 'KE',
       latitude: (data['latitude'] ?? 0.0).toDouble(),
       longitude: (data['longitude'] ?? 0.0).toDouble(),
       bankApprovedLimit: data['bankApprovedLimit']?.toDouble(),

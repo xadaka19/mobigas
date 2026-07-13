@@ -13,6 +13,7 @@ import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/profile_completion_banner.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
+import 'package:mobigas/core/widgets/promo_popup_mixin.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,10 +22,11 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
   int _currentTab = 0;
 
   bool _ordersWatched = false;
+  bool _promoChecked = false;
   double? _loadedLat;
   double? _loadedLng;
 
@@ -75,6 +77,15 @@ class _HomeScreenState extends State<HomeScreen> {
   void _initForCustomer() {
     final customer = context.read<AuthProvider>().customer;
     if (customer == null) return;
+
+    if (!_promoChecked) {                     // ← add this block
+    _promoChecked = true;
+    checkForPromo(
+      audience: 'customer',
+      country: customer.country,
+      userId: customer.id,
+    );
+  }
 
     if (!_ordersWatched) {
       _ordersWatched = true;

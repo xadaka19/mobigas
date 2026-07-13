@@ -8,6 +8,7 @@ import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
+import 'package:mobigas/core/services/geo_service.dart';
 import 'package:mobigas/core/services/google_auth_service.dart';
 import 'package:mobigas/core/services/notification_service.dart';
 import 'package:mobigas/core/services/storage_metadata.dart';
@@ -239,6 +240,15 @@ class AuthProvider extends ChangeNotifier {
       );
       final uid = credential.user!.uid;
 
+      // register() almost never receives real coordinates — location
+      // collection moved to the home profile banner (saveLocation
+      // below) — so this only fires on the rare caller that already
+      // has a pin. GeoService falls back gracefully to 'KE' via the
+      // CustomerModel default when latitude/longitude are still 0.
+      final detectedCountry = (latitude != 0 || longitude != 0)
+          ? (GeoService.countryFromLatLng(latitude, longitude) ?? 'KE')
+          : 'KE';
+
       final customer = CustomerModel(
         id: uid,
         name: name.trim(),
@@ -250,6 +260,7 @@ class AuthProvider extends ChangeNotifier {
         county: county,
         area: area,
         estate: estate,
+        country: detectedCountry,
         latitude: latitude,
         longitude: longitude,
         bankApprovedLimit: null,
@@ -374,6 +385,10 @@ class AuthProvider extends ChangeNotifier {
         county: '',
         area: '',
         estate: '',
+        // No pin yet — Google sign-up's CompleteProfileScreen (or the
+        // home banner) collects location afterward, same as
+        // saveLocation() does for password accounts. Country stays
+        // at the CustomerModel default ('KE') until then.
         latitude: 0,
         longitude: 0,
         bankApprovedLimit: null,
@@ -446,6 +461,13 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Called from ProfileCompletionSheet's location step. This is the
+  /// FIRST time most customers ever have a real GPS pin, so it's also
+  /// where country gets decided — same GeoService detection
+  /// vendor_setup_screen.dart uses at vendor onboarding, applied here
+  /// for the customer side. Falls back to whatever the customer
+  /// already had (or 'KE') if the pin falls outside every supported
+  /// market, rather than leaving country unset.
   Future<String?> saveLocation({
     required String area,
     required double latitude,
@@ -459,12 +481,20 @@ class AuthProvider extends ChangeNotifier {
     }
 
     try {
+      final detectedCountry = GeoService.countryFromLatLng(
+            latitude,
+            longitude,
+          ) ??
+          _customer?.country ??
+          'KE';
+
       await FirebaseService.users.doc(uid).update({
         'county': area.trim(),
         'area': area.trim(),
         'estate': area.trim(),
         'latitude': latitude,
         'longitude': longitude,
+        'country': detectedCountry,
       });
       await refreshCustomer();
       return null;

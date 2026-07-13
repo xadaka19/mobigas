@@ -32,8 +32,9 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
   bool _isLoadingCode = true;
   double _customerRate = 0;
   double _vendorRate = 0;
-  // Only vendors carry a country today (set at onboarding from GPS).
-  // Customers don't yet — defaults to KE until that's added.
+  // Defaults to KE until the owner's country doc field loads — both
+  // CustomerModel and VendorModel now carry 'country', set once from
+  // the GPS pin at onboarding (see GeoService.countryFromLatLng).
   String _ownerCountry = 'KE';
 
   // Payout preferences
@@ -56,10 +57,10 @@ class _ReferEarnScreenState extends State<ReferEarnScreen> {
   }
 
   Future<void> _loadOwnerCountry() async {
-    if (widget.ownerType != 'vendor') return;
     try {
+      final collection = widget.ownerType == 'vendor' ? 'vendors' : 'users';
       final doc = await FirebaseFirestore.instance
-          .collection('vendors')
+          .collection(collection)
           .doc(widget.ownerId)
           .get();
       if (mounted && doc.exists) {

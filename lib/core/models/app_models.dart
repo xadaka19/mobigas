@@ -364,6 +364,13 @@ class CustomerModel {
   final String county;
   final String area;
   final String estate;
+  /// 'KE' | 'TZ' | 'UG' — set once when the customer's delivery pin
+  /// is first captured (ProfileCompletionSheet's location step, or the
+  /// Google sign-up completion flow), the same way VendorModel.country
+  /// is set from the vendor's onboarding pin. Defaults to 'KE' for
+  /// legacy accounts created before this field existed, and for any
+  /// customer who hasn't pinned a location yet.
+  final String country;
   final double latitude;
   final double longitude;
   final double? bankApprovedLimit;
@@ -391,6 +398,7 @@ class CustomerModel {
     required this.county,
     required this.area,
     required this.estate,
+    this.country = 'KE',
     required this.latitude,
     required this.longitude,
     this.bankApprovedLimit,

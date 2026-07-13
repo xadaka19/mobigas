@@ -17,6 +17,7 @@ import 'package:mobigas/features/vendor/screens/vendor_statistics_screen.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
 import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
+import 'package:mobigas/core/widgets/promo_popup_mixin.dart';
 
 /// Server-computed earnings. Reading every delivered order just to add
 /// up a number does not scale, and capping the read at N silently
@@ -40,11 +41,12 @@ class VendorHomeScreen extends StatefulWidget {
   State<VendorHomeScreen> createState() => _VendorHomeScreenState();
 }
 
-class _VendorHomeScreenState extends State<VendorHomeScreen> {
+class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixin {
   int _currentTab = 0;
   bool _isOnline = false;
   Map<String, dynamic>? _vendorData;
   bool _isLoadingVendor = true;
+  bool _promoChecked = false;
   StreamSubscription<User?>? _authSub;
 
   _VendorEarnings? _earnings;
@@ -101,6 +103,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           _isOnline = _vendorData?['isOnline'] ?? false;
           _isLoadingVendor = false;
         });
+        if (!_promoChecked) {                     // ← add this block
+    _promoChecked = true;
+    checkForPromo(
+      audience: 'vendor',
+      country: (_vendorData?['country'] as String?) ?? 'KE',
+      userId: _vendorId,
+    );
+  }
       } else {
         // New vendor — no profile yet, show setup banner
         setState(() {

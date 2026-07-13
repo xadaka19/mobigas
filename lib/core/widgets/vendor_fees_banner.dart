@@ -4,22 +4,26 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/config/currency.dart';
+import 'package:mobigas/core/config/mobile_money.dart';
 
 /// ⚠️ FILL THESE IN before shipping — the paybill MobiGas collects
-/// platform fees on. Vendors pay to this paybill with their vendor ID
-/// (their auth UID / phone) as the account number so admin can match
-/// payments during settlement.
+/// platform fees on IN KENYA (manual fallback alongside STK Push).
+/// Vendors pay to this paybill with their vendor ID (their auth UID /
+/// phone) as the account number so admin can match payments during
+/// settlement. Uganda/Tanzania don't use this — they pay through
+/// Pesapal's hosted checkout instead.
 const String kFeePaybillNumber = '4160599';
 const String kFeeAccountHint = 'your phone number';
 
-/// How long we wait for stkCallback to settle the transaction before
-/// giving up and telling the vendor to check manually. Generous
-/// because Safaricom's own callback can occasionally lag well past
-/// the point the vendor already saw a success/failure screen on
-/// their own phone.
+/// How long we wait for the payment to settle before giving up and
+/// telling the vendor to check manually. Generous because both
+/// Safaricom's stkCallback and Pesapal's IPN can occasionally lag
+/// well past the point the vendor already saw a result on their own
+/// screen.
 const Duration kStkResultTimeout = Duration(seconds: 90);
 
 /// Shows the vendor their accrued platform fees (1% customer-finder
@@ -72,6 +76,7 @@ class VendorFeesBanner extends StatelessWidget {
               feesOwed: feesOwed,
               locked: locked,
               country: country,
+              vendorId: uid,
               vendorPhone: (data['phone'] ?? '').toString(),
             ),
           ),
@@ -146,12 +151,14 @@ class _FeeSheet extends StatefulWidget {
   final double feesOwed;
   final bool locked;
   final String country;
+  final String vendorId;
   final String vendorPhone;
 
   const _FeeSheet({
     required this.feesOwed,
     required this.locked,
     required this.country,
+    required this.vendorId,
     required this.vendorPhone,
   });
 
@@ -167,6 +174,9 @@ class _FeeSheetState extends State<_FeeSheet> {
   String? _statusMessage;
   StreamSubscription<DocumentSnapshot>? _txnSub;
   Timer? _timeoutTimer;
+
+  PlatformFeeProvider get _provider => MobileMoney.feeProviderFor(widget.country);
+  bool get _isPesapal => _provider == PlatformFeeProvider.pesapal;
 
   @override
   void initState() {
@@ -187,7 +197,7 @@ class _FeeSheetState extends State<_FeeSheet> {
       _phase == _PaymentPhase.sendingPrompt ||
       _phase == _PaymentPhase.waitingForPin;
 
-  Future<void> _payNow() async {
+  Future<void> _payWithMpesa() async {
     final phone = _phoneController.text.trim();
     if (phone.length < 9) {
       setState(() {
@@ -237,45 +247,10 @@ class _FeeSheetState extends State<_FeeSheet> {
           .collection('stk_transactions')
           .doc(checkoutRequestId)
           .snapshots()
-          .listen((doc) {
-        if (!mounted || !doc.exists) return;
-        final data = doc.data() as Map<String, dynamic>;
-        final status = data['status'] as String?;
-
-        if (status == 'completed') {
-          _timeoutTimer?.cancel();
-          setState(() {
-            _phase = _PaymentPhase.success;
-            _statusMessage = 'Payment received — thank you!';
-          });
-          // Give the vendor a moment to actually see the success
-          // message before the sheet closes itself.
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) Navigator.of(context).pop();
-          });
-        } else if (status == 'failed') {
-          _timeoutTimer?.cancel();
-          final resultDesc = data['resultDesc'] as String?;
-          setState(() {
-            _phase = _PaymentPhase.failed;
-            _statusMessage = resultDesc != null
-                ? 'Payment not completed: $resultDesc'
-                : 'Payment was not completed. You can try again.';
-          });
-        }
-        // status == 'pending' -> keep waiting, no UI change needed.
-      });
+          .listen(_handleTransactionUpdate);
 
       // Don't wait forever — Safaricom's callback occasionally lags.
-      _timeoutTimer = Timer(kStkResultTimeout, () {
-        if (!mounted || _phase != _PaymentPhase.waitingForPin) return;
-        setState(() {
-          _statusMessage =
-              'Still confirming your payment — this can take a moment. '
-              'You can close this and check back; it will update '
-              'automatically once confirmed.';
-        });
-      });
+      _timeoutTimer = Timer(kStkResultTimeout, _handleTimeout);
     } on FirebaseFunctionsException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -290,6 +265,133 @@ class _FeeSheetState extends State<_FeeSheet> {
         _statusMessage = 'Something went wrong. Try again.';
       });
     }
+  }
+
+  Future<void> _payWithPesapal() async {
+    final phone = _phoneController.text.trim();
+    if (phone.length < 9) {
+      setState(() {
+        _phase = _PaymentPhase.idle;
+        _statusMessage = 'Enter a valid phone number.';
+      });
+      return;
+    }
+
+    _txnSub?.cancel();
+    _timeoutTimer?.cancel();
+
+    setState(() {
+      _phase = _PaymentPhase.sendingPrompt;
+      _statusMessage = null;
+    });
+
+    try {
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('initiatePesapalPayment');
+      final result = await callable.call({
+        'vendorId': widget.vendorId,
+        'amount': widget.feesOwed,
+        'country': widget.country,
+        'phone': phone,
+      });
+      final redirectUrl = result.data['redirectUrl'] as String?;
+      final orderTrackingId = result.data['orderTrackingId'] as String?;
+
+      if (!mounted) return;
+
+      if (redirectUrl == null || orderTrackingId == null) {
+        setState(() {
+          _phase = _PaymentPhase.failed;
+          _statusMessage = 'Could not start the Pesapal payment. Try again.';
+        });
+        return;
+      }
+
+      final launched = await launchUrl(
+        Uri.parse(redirectUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        if (!mounted) return;
+        setState(() {
+          _phase = _PaymentPhase.failed;
+          _statusMessage = 'Could not open the payment page. Try again.';
+        });
+        return;
+      }
+
+      setState(() {
+        _phase = _PaymentPhase.waitingForPin;
+        _statusMessage =
+            'Complete your payment in the browser, then come back here — '
+            'this updates automatically once confirmed.';
+      });
+
+      // Listen for the IPN-driven status update on this transaction.
+      _txnSub = FirebaseFirestore.instance
+          .collection('pesapal_transactions')
+          .doc(orderTrackingId)
+          .snapshots()
+          .listen(_handleTransactionUpdate);
+
+      // Pesapal's IPN can lag too — same generous timeout as M-Pesa.
+      _timeoutTimer = Timer(kStkResultTimeout, _handleTimeout);
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _PaymentPhase.failed;
+        _statusMessage =
+            e.message ?? 'Could not start the Pesapal payment. Try again.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _PaymentPhase.failed;
+        _statusMessage = 'Something went wrong. Try again.';
+      });
+    }
+  }
+
+  /// Shared by both the M-Pesa (stk_transactions) and Pesapal
+  /// (pesapal_transactions) listeners — both collections use the
+  /// same status/resultDesc shape.
+  void _handleTransactionUpdate(DocumentSnapshot doc) {
+    if (!mounted || !doc.exists) return;
+    final data = doc.data() as Map<String, dynamic>;
+    final status = data['status'] as String?;
+
+    if (status == 'completed') {
+      _timeoutTimer?.cancel();
+      setState(() {
+        _phase = _PaymentPhase.success;
+        _statusMessage = 'Payment received — thank you!';
+      });
+      // Give the vendor a moment to actually see the success
+      // message before the sheet closes itself.
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) Navigator.of(context).pop();
+      });
+    } else if (status == 'failed') {
+      _timeoutTimer?.cancel();
+      final resultDesc = data['resultDesc'] as String?;
+      setState(() {
+        _phase = _PaymentPhase.failed;
+        _statusMessage = resultDesc != null
+            ? 'Payment not completed: $resultDesc'
+            : 'Payment was not completed. You can try again.';
+      });
+    }
+    // status == 'pending' -> keep waiting, no UI change needed.
+  }
+
+  void _handleTimeout() {
+    if (!mounted || _phase != _PaymentPhase.waitingForPin) return;
+    setState(() {
+      _statusMessage =
+          'Still confirming your payment — this can take a moment. '
+          'You can close this and check back; it will update '
+          'automatically once confirmed.';
+    });
   }
 
   @override
@@ -361,7 +463,7 @@ class _FeeSheetState extends State<_FeeSheet> {
             ),
             const SizedBox(height: 20),
             if (!isSuccess) ...[
-              Text('Pay with M-Pesa',
+              Text(_isPesapal ? 'Pay with Pesapal' : 'Pay with M-Pesa',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontSize: 14,
                         color: AppColors.navy,
@@ -373,7 +475,7 @@ class _FeeSheetState extends State<_FeeSheet> {
                 enabled: !_isBusy,
                 keyboardType: TextInputType.phone,
                 decoration: InputDecoration(
-                  hintText: '07XX XXX XXX',
+                  hintText: _isPesapal ? 'e.g. 0712 345 678' : '07XX XXX XXX',
                   prefixIcon: const Icon(Icons.phone_android_rounded,
                       color: AppColors.gray400),
                   enabledBorder: OutlineInputBorder(
@@ -388,7 +490,9 @@ class _FeeSheetState extends State<_FeeSheet> {
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                onPressed: _isBusy ? null : _payNow,
+                onPressed: _isBusy
+                    ? null
+                    : (_isPesapal ? _payWithPesapal : _payWithMpesa),
                 icon: _isBusy
                     ? const SizedBox(
                         width: 18,
@@ -399,12 +503,16 @@ class _FeeSheetState extends State<_FeeSheet> {
                     : Icon(
                         _phase == _PaymentPhase.failed
                             ? Icons.refresh_rounded
-                            : Icons.phone_iphone_rounded,
+                            : _isPesapal
+                                ? Icons.open_in_new_rounded
+                                : Icons.phone_iphone_rounded,
                         size: 18),
                 label: Text(_phase == _PaymentPhase.sendingPrompt
-                    ? 'Sending prompt...'
+                    ? (_isPesapal ? 'Opening Pesapal...' : 'Sending prompt...')
                     : _phase == _PaymentPhase.waitingForPin
-                        ? 'Waiting for M-Pesa PIN...'
+                        ? (_isPesapal
+                            ? 'Waiting for payment...'
+                            : 'Waiting for M-Pesa PIN...')
                         : _phase == _PaymentPhase.failed
                             ? 'Try again'
                             : 'Pay ${Currency.formatFor(widget.country, feesOwed)} now'),
@@ -472,49 +580,56 @@ class _FeeSheetState extends State<_FeeSheet> {
                       height: 1.5,
                     ),
               ),
-              const SizedBox(height: 16),
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text('Or pay manually via paybill',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.gray600,
-                        fontWeight: FontWeight.w600)),
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppColors.orangeLight,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: AppColors.orange.withValues(alpha: 0.3)),
+              // Manual paybill fallback only applies to Kenya's M-Pesa
+              // flow. Pesapal's own hosted checkout already offers
+              // mobile money, card, and bank options for UG/TZ vendors,
+              // so there's nothing separate to show here for them.
+              if (!_isPesapal) ...[
+                const SizedBox(height: 16),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: Text('Or pay manually via paybill',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.gray600,
+                          fontWeight: FontWeight.w600)),
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.orangeLight,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: AppColors.orange.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _payLine(context, '1. Lipa na M-Pesa → Pay Bill'),
+                          _payLine(context,
+                              '2. Business number: $kFeePaybillNumber'),
+                          _payLine(context, '3. Account: $kFeeAccountHint'),
+                          _payLine(context,
+                              '4. Amount: ${Currency.formatFor(widget.country, feesOwed)}'),
+                        ],
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _payLine(context, '1. Lipa na M-Pesa → Pay Bill'),
-                        _payLine(
-                            context, '2. Business number: $kFeePaybillNumber'),
-                        _payLine(context, '3. Account: $kFeeAccountHint'),
-                        _payLine(context,
-                            '4. Amount: ${Currency.formatFor(widget.country, feesOwed)}'),
-                      ],
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: () {
+                        Clipboard.setData(
+                            const ClipboardData(text: kFeePaybillNumber));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Paybill number copied')),
+                        );
+                      },
+                      icon: const Icon(Icons.copy_rounded, size: 16),
+                      label: const Text('Copy paybill number'),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: () {
-                      Clipboard.setData(
-                          const ClipboardData(text: kFeePaybillNumber));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Paybill number copied')),
-                      );
-                    },
-                    icon: const Icon(Icons.copy_rounded, size: 16),
-                    label: const Text('Copy paybill number'),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ],
             const SizedBox(height: 8),
             Center(
