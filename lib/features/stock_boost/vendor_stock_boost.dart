@@ -18,16 +18,6 @@ import 'package:flutter/material.dart';
 const _navy = Color(0xFF0D1B40);
 const _orange = Color(0xFFF97316);
 
-String _kes(num v) {
-  final s = v.round().toString();
-  final b = StringBuffer();
-  for (int i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
-    b.write(s[i]);
-  }
-  return 'KES ${b.toString()}';
-}
-
 // ---------------------------------------------------------------------------
 // Streams
 // ---------------------------------------------------------------------------
@@ -99,14 +89,14 @@ class StockBoostCard extends StatelessWidget {
                         ? 'Request sent. Our finance partner will contact you directly to set you up.'
                         : 'Because you sell steadily on MobiGas, we can connect you with our '
                           'finance partner to boost your stock. They\'ll reach out to you directly.',
-                    style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13, height: 1.4),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, height: 1.4),
                   ),
                   const SizedBox(height: 16),
                   if (isOpen)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.12),
+                        color: Colors.white.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
@@ -114,7 +104,7 @@ class StockBoostCard extends StatelessWidget {
                           const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
                           const SizedBox(width: 8),
                           Text('Requested — partner will be in touch',
-                              style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                              style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13)),
                         ],
                       ),
                     )
