@@ -1,7 +1,31 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
+
+/// BUG FIX: nothing in this file had a timeout — checkDuplicates was
+/// already parallelized with Future.wait, but a stuck call inside it
+/// (or any single-doc get() elsewhere) could still hang the calling
+/// screen forever. On a fresh install specifically, the first
+/// Firestore call has to wait on App Check's first-ever Play Integrity
+/// attestation for that device, which is uncached and can take
+/// anywhere from seconds to well over a minute. `.bounded()` gives
+/// every login/signup-critical call a ceiling: past it, the future
+/// throws TimeoutException instead of hanging, so AuthProvider's
+/// existing catch blocks can put the user back in control instead of
+/// leaving them on an unbounded spinner.
+extension _Bounded<T> on Future<T> {
+  Future<T> bounded([Duration timeout = const Duration(seconds: 15)]) {
+    return this.timeout(
+      timeout,
+      onTimeout: () => throw TimeoutException(
+        'Request timed out. Check your connection and try again.',
+      ),
+    );
+  }
+}
 
 class FirestoreService {
   // ── USERS ─────────────────────────────────────────────────────────
@@ -24,30 +48,38 @@ class FirestoreService {
     final futures = <String, Future<QuerySnapshot>>{};
 
     if (phone.isNotEmpty) {
-      futures['phoneUsers'] =
-          FirebaseService.users.where('phone', isEqualTo: phone).limit(1).get();
+      futures['phoneUsers'] = FirebaseService.users
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get()
+          .bounded();
       futures['phoneVendors'] = FirebaseService.vendors
           .where('phone', isEqualTo: phone)
           .limit(1)
-          .get();
+          .get()
+          .bounded();
     }
     if (nationalId.isNotEmpty) {
       futures['idUsers'] = FirebaseService.users
           .where('nationalId', isEqualTo: nationalId)
           .limit(1)
-          .get();
+          .get()
+          .bounded();
       futures['idVendors'] = FirebaseService.vendors
           .where('nationalId', isEqualTo: nationalId)
           .limit(1)
-          .get();
+          .get()
+          .bounded();
     }
     if (deviceFingerprint != null) {
       futures['deviceUsers'] = FirebaseService.users
           .where('deviceFingerprint', isEqualTo: deviceFingerprint)
-          .get();
+          .get()
+          .bounded();
       futures['deviceVendors'] = FirebaseService.vendors
           .where('deviceFingerprint', isEqualTo: deviceFingerprint)
-          .get();
+          .get()
+          .bounded();
     }
 
     final entries = futures.entries.toList();
@@ -80,6 +112,7 @@ class FirestoreService {
     CustomerModel customer, {
     String? authMethod,
   }) async {
+    // BUG FIX: unbounded write — see the bounded() extension above.
     await FirebaseService.users.doc(customer.id).set({
       'id': customer.id,
       'name': customer.name,
@@ -106,7 +139,7 @@ class FirestoreService {
       'authMethod': ?authMethod,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    }).bounded();
   }
 
   /// [source] defaults to serverAndCache, so every existing caller
@@ -119,8 +152,13 @@ class FirestoreService {
     String uid, {
     Source source = Source.serverAndCache,
   }) async {
-    final doc =
-        await FirebaseService.users.doc(uid).get(GetOptions(source: source));
+    // BUG FIX: this was the specific unbounded call most likely to
+    // turn a slow first-ever App Check attestation (fresh install) or
+    // a flaky connection into a spinner with no ceiling.
+    final doc = await FirebaseService.users
+        .doc(uid)
+        .get(GetOptions(source: source))
+        .bounded();
     if (!doc.exists) return null;
     final data = doc.data() as Map<String, dynamic>;
     return _customerFromMap(uid, data);
@@ -203,7 +241,10 @@ class FirestoreService {
   /// by uid (see vendor_setup_screen.dart's _vendorId), so a direct
   /// doc lookup is correct here — no query needed.
   static Future<bool> isRegisteredVendor(String uid) async {
-    final doc = await FirebaseService.vendors.doc(uid).get();
+    // BUG FIX: unbounded — this runs on every customer-app login
+    // before the vendor guard can pass or fail, so it's one of the
+    // two calls most likely to be the thing holding the spinner open.
+    final doc = await FirebaseService.vendors.doc(uid).get().bounded();
     return doc.exists;
   }
 
@@ -211,7 +252,7 @@ class FirestoreService {
   /// isRegisteredVendor, used by the vendor login screen to reject a
   /// customer's Google account.
   static Future<bool> isRegisteredCustomer(String uid) async {
-    final doc = await FirebaseService.users.doc(uid).get();
+    final doc = await FirebaseService.users.doc(uid).get().bounded();
     return doc.exists;
   }
 

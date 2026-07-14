@@ -26,6 +26,24 @@ void main() async {
     await FirebaseAppCheck.instance.activate(
       providerAndroid: const AndroidPlayIntegrityProvider(),
     );
+    // BUG FIX (first-sign-in-after-install is slow): activate() does
+    // NOT necessarily fetch a token — Play Integrity's attestation
+    // was previously requested lazily, on whatever Firestore call
+    // happened to be first after the user submitted the login/signup
+    // form. On a fresh install that's the FIRST attestation this
+    // device has ever made, uncached, and it can take anywhere from
+    // seconds to well over a minute — landing squarely on the user's
+    // first post-login Firestore read. Kicking it off here,
+    // fire-and-forget, lets that slow first attestation run during
+    // the splash delay / permission dialogs instead, so by the time
+    // the user reaches the login screen and submits, the token is
+    // very likely already cached. This does not make the underlying
+    // Play Integrity call itself faster — it only moves the wait to
+    // a moment the user isn't actively watching a spinner for.
+    unawaited(FirebaseAppCheck.instance.getToken().catchError((e) {
+      debugPrint('AppCheck token pre-warm failed (non-fatal): $e');
+      return null;
+    }));
   } catch (e) {
     debugPrint('AppCheck activate failed (non-fatal): $e');
   }

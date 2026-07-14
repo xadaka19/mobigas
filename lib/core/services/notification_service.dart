@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/services/delivery_notification_service.dart';
 import 'package:mobigas/core/services/notification_router.dart';
+import 'package:mobigas/core/services/permission_sequencer.dart';
 
 // MUST be top-level function for background messages
 @pragma('vm:entry-point')
@@ -88,11 +89,21 @@ class NotificationService {
   static Future<void> initialize() async {
     try {
       // Request permission
-      await _messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
+      //
+      // BUG FIX: routed through PermissionSequencer instead of called
+      // directly. This is the actual notification permission dialog
+      // (POST_NOTIFICATIONS on Android 13+) — if it fires while the
+      // splash screen's own Geolocator.requestPermission() is also
+      // in flight, Android may drop this call's callback or skip
+      // showing its dialog entirely. The sequencer guarantees this
+      // waits its turn instead of racing.
+      await PermissionSequencer.run(
+        () => _messaging.requestPermission(
+          alert: true,
+          badge: true,
+          sound: true,
+          provisional: false,
+        ),
       );
 
       // Set background handler

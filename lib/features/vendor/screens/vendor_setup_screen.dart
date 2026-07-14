@@ -17,6 +17,7 @@ import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/widgets/location_picker_widget.dart';
 import 'package:mobigas/core/services/geo_service.dart';
 import 'package:mobigas/core/config/currency.dart';
+import 'package:mobigas/core/config/mobile_money.dart';
 import 'package:mobigas/features/vendor/widgets/regulator_text.dart';
 import 'package:mobigas/features/vendor/widgets/vendor_requirements.dart';
 //import 'package:mobigas/features/vendor/widgets/country_confirmation.dart';
@@ -92,7 +93,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late TextEditingController _phoneController;
   late TextEditingController _deliveryTimeController;
   late TextEditingController _referralCodeController;
-  String _paymentMethod = 'mpesa'; // mpesa, till, paybill
+  String _paymentMethod = 'mpesa'; // mpesa, till, paybill, mtn, airtel, tigo
   late TextEditingController _tillController;
   late TextEditingController _paybillController;
   late TextEditingController _paybillAccountController;
@@ -246,7 +247,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _paybillAccountController = TextEditingController(
       text: d['paybillAccount'] ?? '',
     );
-    _paymentMethod = d['paymentMethod'] ?? 'mpesa';
+    // Default to the country's primary provider (KE -> M-Pesa, UG ->
+    // MTN Mobile Money, TZ -> M-Pesa) rather than hardcoding 'mpesa'
+    // — Uganda has no 'mpesa' option at all.
+    _paymentMethod = d['paymentMethod'] ??
+        MobileMoney.providersFor(_detectedCountry).first.code;
 
     // Brands must load BEFORE listings — legacy listings saved before
     // brand-aware pricing existed have no 'brand' field at all, and
@@ -369,30 +374,52 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     if (_idOrBrnController.text.trim().isEmpty) {
       return false;
     }
-    if (_paymentMethod == 'mpesa' && _phoneController.text.trim().length < 9) {
-      return false;
-    }
-    if (_paymentMethod == 'till' && _tillController.text.trim().isEmpty) {
-      return false;
-    }
-    if (_paymentMethod == 'paybill' &&
-        (_paybillController.text.trim().isEmpty ||
-            _paybillAccountController.text.trim().isEmpty)) {
-      return false;
-    }
     return true;
+  }
+
+  /// Payment method can only be validated once the vendor's country
+  /// is known (Step 1, location) — different countries offer
+  /// different providers (KE: M-Pesa/Till/Paybill, UG: MTN/Airtel,
+  /// TZ: M-Pesa/Tigo/Airtel), so this can't live in _step0Valid.
+  bool get _paymentMethodValid {
+    if (_detectedCountry == null) return false;
+    final provider =
+        MobileMoney.providerByCode(_detectedCountry, _paymentMethod);
+    switch (provider.code) {
+      case 'till':
+        return _tillController.text.trim().isNotEmpty;
+      case 'paybill':
+        return _paybillController.text.trim().isNotEmpty &&
+            _paybillAccountController.text.trim().isNotEmpty;
+      default:
+        return _phoneController.text.trim().length >= 9;
+    }
   }
 
   bool get _step1Valid =>
       _selectedAddress.isNotEmpty &&
       _selectedLat != 0.0 &&
-      _detectedCountry != null;
+      _detectedCountry != null &&
+      _paymentMethodValid;
 
   bool get _step2Valid =>
       _selectedBrands.isNotEmpty &&
       _priceControllers.entries.any(
         (e) => _sizeAvailable[e.key] == true && e.value.text.isNotEmpty,
       );
+
+  /// Called whenever _detectedCountry changes (location picked or
+  /// edited) — if the vendor's current payment method isn't offered
+  /// in the new country (e.g. they had 'till' selected and their pin
+  /// moved from Kenya to Uganda), reset to that country's primary
+  /// provider rather than leaving a stale, invalid selection.
+  void _ensurePaymentMethodValidForCountry() {
+    final validCodes =
+        MobileMoney.providersFor(_detectedCountry).map((p) => p.code).toSet();
+    if (!validCodes.contains(_paymentMethod)) {
+      _paymentMethod = MobileMoney.providersFor(_detectedCountry).first.code;
+    }
+  }
 
   /// Parses the numeric kg value out of a size string like "3kg",
   /// "13kg", or "22.5kg" — replaces a hardcoded 3-way ternary that
@@ -804,7 +831,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 }
                 if (widget.mode == VendorEditMode.locationOnly &&
                     !_step1Valid) {
-                  _showFocusedError('Please set your business location');
+                  _showFocusedError(
+                    'Please set your business location and payment details',
+                  );
                   return;
                 }
                 if (widget.mode == VendorEditMode.pricesOnly && !_step2Valid) {
@@ -986,8 +1015,6 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         const SizedBox(height: 16),
         _buildCertificateUpload(),
         const SizedBox(height: 16),
-        _buildPaymentMethodSelector(),
-        const SizedBox(height: 16),
         _field(
           'Delivery time',
           _deliveryTimeController,
@@ -1061,6 +1088,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               side: const BorderSide(color: AppColors.orange),
             ),
           ),
+          if (_detectedCountry != null) ...[
+            const SizedBox(height: 20),
+            _buildPaymentMethodSelector(),
+          ],
         ],
       );
     }
@@ -1141,6 +1172,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               _selectedLat = lat;
               _selectedLng = lng;
               _detectedCountry = GeoService.countryFromLatLng(lat, lng);
+              _ensurePaymentMethodValidForCountry();
             });
           },
         ),
@@ -1190,6 +1222,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             ),
           ),
         ],
+        if (_detectedCountry != null) ...[
+          const SizedBox(height: 20),
+          _buildPaymentMethodSelector(),
+        ],
       ],
     );
   }
@@ -1232,6 +1268,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         _selectedLng = pos.longitude;
         _detectedCountry =
             GeoService.countryFromLatLng(pos.latitude, pos.longitude);
+        _ensurePaymentMethodValidForCountry();
       });
     } catch (e) {
       if (mounted) {
@@ -2108,7 +2145,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 if (_step == 1 && !_step1Valid) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Please fill in your location details'),
+                      content: Text(
+                        'Please set your location and payment details',
+                      ),
                       backgroundColor: AppColors.error,
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -2368,6 +2407,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   }
 
   Widget _buildPaymentMethodSelector() {
+    final providers = MobileMoney.providersFor(_detectedCountry);
+    final selectedProvider =
+        MobileMoney.providerByCode(_detectedCountry, _paymentMethod);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2380,31 +2423,22 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
         ),
         const SizedBox(height: 10),
-        // Payment method tabs
+        // Payment method tabs — options depend on the vendor's
+        // country (KE: M-Pesa/Till/Paybill, UG: MTN/Airtel, TZ:
+        // M-Pesa/Tigo/Airtel).
         Row(
           children: [
-            _paymentTab('mpesa', Icons.phone_android_rounded, 'M-Pesa'),
-            const SizedBox(width: 8),
-            _paymentTab('till', Icons.store_rounded, 'Till No.'),
-            const SizedBox(width: 8),
-            _paymentTab('paybill', Icons.account_balance_outlined, 'Paybill'),
+            for (var i = 0; i < providers.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              _paymentTab(providers[i]),
+            ],
           ],
         ),
         const SizedBox(height: 14),
-        // Fields based on selection
-        if (_paymentMethod == 'mpesa') ...[
-          _field(
-            'M-Pesa phone number',
-            _phoneController,
-            Icons.phone_outlined,
-            hint: '0712 345 678',
-            keyboardType: TextInputType.phone,
-          ),
-          const SizedBox(height: 8),
-          _paymentNote(
-            'Customers pay directly to this M-Pesa number on delivery.',
-          ),
-        ] else if (_paymentMethod == 'till') ...[
+        // Fields based on selection — till/paybill are Kenya-specific
+        // two-field setups; every other provider (M-Pesa, MTN,
+        // Airtel, Tigo Pesa) is a single phone-number field.
+        if (selectedProvider.code == 'till') ...[
           _field(
             'Till number',
             _tillController,
@@ -2413,10 +2447,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             keyboardType: TextInputType.number,
           ),
           const SizedBox(height: 8),
-          _paymentNote(
-            'Customers pay to your M-Pesa till (Buy Goods) number.',
-          ),
-        ] else ...[
+          _paymentNote(selectedProvider.hint),
+        ] else if (selectedProvider.code == 'paybill') ...[
           _field(
             'Paybill number',
             _paybillController,
@@ -2432,19 +2464,32 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             hint: 'Your account/business number',
           ),
           const SizedBox(height: 8),
-          _paymentNote(
-            'Customers pay to your paybill. Use this if your business has a dedicated M-Pesa paybill.',
+          _paymentNote(selectedProvider.hint),
+        ] else ...[
+          _field(
+            '${selectedProvider.label} phone number',
+            _phoneController,
+            Icons.phone_outlined,
+            hint: '0712 345 678',
+            keyboardType: TextInputType.phone,
           ),
+          const SizedBox(height: 8),
+          _paymentNote(selectedProvider.hint),
         ],
       ],
     );
   }
 
-  Widget _paymentTab(String method, IconData icon, String label) {
-    final selected = _paymentMethod == method;
+  Widget _paymentTab(MobileMoneyProvider provider) {
+    final selected = _paymentMethod == provider.code;
+    final icon = switch (provider.code) {
+      'till' => Icons.store_rounded,
+      'paybill' => Icons.account_balance_outlined,
+      _ => Icons.phone_android_rounded,
+    };
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _paymentMethod = method),
+        onTap: () => setState(() => _paymentMethod = provider.code),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 10),
@@ -2468,7 +2513,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                label,
+                provider.code == 'till' ? 'Till No.' : provider.label,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: selected ? AppColors.white : AppColors.gray400,
                   fontSize: 11,

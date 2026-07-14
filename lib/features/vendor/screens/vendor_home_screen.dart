@@ -1572,7 +1572,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                         ),
                   ),
                   const SizedBox(height: 8),
-                  Text('Today: ${_money(e?.total)}',
+                  Text('Today: ${_money(e?.today)}',
                       style: Theme.of(context)
                           .textTheme
                           .bodyMedium

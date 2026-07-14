@@ -21,6 +21,15 @@ void main() async {
     await FirebaseAppCheck.instance.activate(
       providerAndroid: const AndroidPlayIntegrityProvider(),
     );
+    // BUG FIX: see main_customer.dart — pre-warm the token so the
+    // slow first-ever Play Integrity attestation on a fresh install
+    // runs during the splash delay / location-permission dialog
+    // instead of blocking the vendor's first post-login Firestore
+    // read.
+    unawaited(FirebaseAppCheck.instance.getToken().catchError((e) {
+      debugPrint('AppCheck token pre-warm failed (non-fatal): $e');
+      return null;
+    }));
   } catch (e) {
     debugPrint('AppCheck activate failed (non-fatal): $e');
   }

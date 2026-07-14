@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
+import 'package:mobigas/core/services/permission_sequencer.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -105,8 +106,14 @@ class _SplashScreenState extends State<SplashScreen>
       final permission = await Geolocator.checkPermission()
           .timeout(const Duration(seconds: 5));
       if (permission == LocationPermission.denied) {
-        await Geolocator.requestPermission()
-            .timeout(const Duration(seconds: 5));
+        // BUG FIX: routed through PermissionSequencer instead of
+        // called directly, so this can never collide with
+        // NotificationService's own permission dialog regardless of
+        // exact timing — see permission_sequencer.dart.
+        await PermissionSequencer.run(
+          () => Geolocator.requestPermission()
+              .timeout(const Duration(seconds: 5)),
+        );
       }
     } catch (_) {
       // Timed out or errored — proceed without blocking navigation.
