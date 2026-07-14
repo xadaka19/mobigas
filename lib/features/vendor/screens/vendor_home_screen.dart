@@ -21,6 +21,22 @@ import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
 import 'package:mobigas/core/widgets/promo_popup_mixin.dart';
 import 'package:mobigas/features/stock_boost/vendor_stock_boost.dart';
 
+/// BUG FIX: this is the specific unbounded call behind "vendor reopen
+/// is slow" — FirebaseService.vendors.doc(_vendorId).get() below had
+/// no timeout, so a slow connection or App Check attestation could
+/// leave this screen's spinner running indefinitely. .bounded() makes
+/// it fail within a fixed ceiling instead, so the screen can recover.
+extension _Bounded<T> on Future<T> {
+  Future<T> bounded([Duration timeout = const Duration(seconds: 15)]) {
+    return this.timeout(
+      timeout,
+      onTimeout: () => throw TimeoutException(
+        'Request timed out. Check your connection and try again.',
+      ),
+    );
+  }
+}
+
 /// Server-computed earnings. Reading every delivered order just to add
 /// up a number does not scale, and capping the read at N silently
 /// caps the number too — a vendor with 50 deliveries would watch their
@@ -48,8 +64,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
   bool _isOnline = false;
   Map<String, dynamic>? _vendorData;
   bool _isLoadingVendor = true;
+  // BUG FIX: previously, a timed-out/errored load just cleared
+  // _isLoadingVendor with _vendorData still null — indistinguishable
+  // from "genuinely no profile yet", so the vendor saw "Complete your
+  // business setup" instead of a retry prompt after a connectivity
+  // hiccup, even though they'd already set up their account.
+  bool _vendorLoadFailed = false;
   bool _promoChecked = false;
   StreamSubscription<User?>? _authSub;
+  Timer? _authBackstop;
 
   _VendorEarnings? _earnings;
   bool _earningsFailed = false;
@@ -77,11 +100,24 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     // Also try immediately, in case auth is already resolved (the
     // normal case for anyone who didn't just reinstall).
     _refreshAll();
+    // BUG FIX: the splash screen already confirmed a signed-in user
+    // before ever navigating here, so _vendorId should virtually
+    // always be populated by the time this screen mounts. This timer
+    // exists only as a backstop for the rare edge case where it
+    // genuinely isn't (auth still mid-restore) — without it, a vendor
+    // stuck in that edge case would spin on this screen forever with
+    // no error and no way out.
+    _authBackstop = Timer(const Duration(seconds: 10), () {
+      if (mounted && _isLoadingVendor) {
+        setState(() => _isLoadingVendor = false);
+      }
+    });
   }
 
   @override
   void dispose() {
     _authSub?.cancel();
+    _authBackstop?.cancel();
     super.dispose();
   }
 
@@ -91,19 +127,39 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
 
   Future<void> _loadVendorData() async {
     if (_vendorId.isEmpty) {
-      // Don't give up permanently — authStateChanges will call this
-      // again once a user actually becomes available.
-      if (mounted) setState(() => _isLoadingVendor = false);
+      // BUG FIX: this used to set _isLoadingVendor = false here, on
+      // the very first call — which usually runs BEFORE auth has
+      // resolved on a fresh install (that's exactly the case the
+      // comment above already flags). Because build() only shows the
+      // spinner while _isLoadingVendor is true, and it never gets set
+      // back to true afterward, that early false-clear made the
+      // screen render immediately with _vendorData still null — i.e.
+      // the "Complete your business setup" banner — for an existing,
+      // already-set-up vendor. Seconds later, when authStateChanges
+      // actually fired and the real load finished, the correct data
+      // would pop in — but the vendor had already seen what looked
+      // like a broken/reset account in the meantime. Just returning
+      // here (leaving _isLoadingVendor untouched) keeps the spinner
+      // up until the real, uid-backed load below actually resolves.
+      // The 10s Timer in initState is the backstop in case auth
+      // somehow never resolves at all.
       return;
     }
     try {
-      final doc = await FirebaseService.vendors.doc(_vendorId).get();
+      // BUG FIX: unbounded — this was the specific call behind
+      // "vendor reopen is slow". A stuck connection or a slow App
+      // Check attestation could leave this hanging with no ceiling,
+      // and because _isLoadingVendor was never true on this path
+      // before (see above), the vendor had no visible spinner and no
+      // way to know anything was even loading.
+      final doc = await FirebaseService.vendors.doc(_vendorId).get().bounded();
       if (!mounted) return;
       if (doc.exists) {
         setState(() {
           _vendorData = doc.data() as Map<String, dynamic>;
           _isOnline = _vendorData?['isOnline'] ?? false;
           _isLoadingVendor = false;
+          _vendorLoadFailed = false;
         });
         if (!_promoChecked) {                     // ← add this block
     _promoChecked = true;
@@ -118,10 +174,22 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
         setState(() {
           _vendorData = null;
           _isLoadingVendor = false;
+          _vendorLoadFailed = false;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingVendor = false);
+      // BUG FIX: previously left _vendorData exactly as it was (null,
+      // on the common path) with no distinction from "no profile
+      // exists yet" — so a timeout/connectivity error showed the same
+      // "Complete your business setup" banner to an existing vendor.
+      // _vendorLoadFailed lets the UI tell the two apart and offer a
+      // retry instead of implying the account needs re-setup.
+      if (mounted) {
+        setState(() {
+          _isLoadingVendor = false;
+          _vendorLoadFailed = true;
+        });
+      }
     }
   }
 
@@ -146,12 +214,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     final startOfToday = DateTime(now.year, now.month, now.day);
 
     try {
-      final allSnap = await base.aggregate(sum('gasPrice'), count()).get();
+      final allSnap =
+          await base.aggregate(sum('gasPrice'), count()).get().bounded();
       final todaySnap = await base
           .where('createdAt',
               isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
           .aggregate(sum('gasPrice'))
-          .get();
+          .get()
+          .bounded();
 
       if (!mounted) return;
       setState(() {
@@ -440,7 +510,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
             _buildVendorHeader(),
             // Platform fees (cash-order finder fees) banner
             const VendorFeesBanner(),
-            if (_vendorData == null || _businessName.isEmpty)
+            if (_vendorLoadFailed)
+              _loadFailedBanner()
+            else if (_vendorData == null || _businessName.isEmpty)
               _setupBanner()
             else if (!_documentsSubmitted)
               _documentsBanner()
@@ -460,6 +532,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _loadFailedBanner() {
+    return GestureDetector(
+      onTap: _refreshAll,
+      child: _banner(
+        icon: Icons.wifi_off_rounded,
+        color: AppColors.error,
+        title: 'Could not load your profile',
+        body: 'Check your connection and tap to retry.',
+        showChevron: true,
       ),
     );
   }

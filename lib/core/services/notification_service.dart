@@ -238,6 +238,13 @@ class NotificationService {
     await DeliveryNotificationService.initialize();
     await _recordNotification(message);
 
+    // If the message carries a notification block, the OS/FCM SDK
+    // surfaces it (this happens in the foreground on MIUI and some
+    // other OEMs, contrary to the "foreground never auto-displays"
+    // assumption). Showing our own on top produced duplicate alerts.
+    // Record it for the bell (above) but don't display a second one.
+    if (message.notification != null) return;
+
     // In the foreground Android does NOT auto-display FCM notification
     // payloads, so we show one ourselves — using the message's own
     // title/body, whether it arrived as a notification block or data.
