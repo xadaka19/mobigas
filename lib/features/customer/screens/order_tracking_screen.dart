@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../../core/config/mobile_money.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -531,7 +532,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Pay the vendor ${Currency.formatFor(order.country, order.customerTotal)} first (cash or M-Pesa), then show this PIN',
+                  'Pay the vendor ${Currency.formatFor(order.country, order.customerTotal)} first (cash or ${MobileMoney.primaryLabelFor(order.country)}), then show this PIN',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                         fontSize: 11,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/config/mobile_money.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
@@ -401,7 +402,7 @@ class _OrderScreenState extends State<OrderScreen> {
         _infoCard(
           icon: Icons.payments_outlined,
           text:
-              'You\'ll pay cash or M-Pesa on delivery — directly to the vendor when your gas arrives. No prepayment needed.',
+              'You\'ll pay cash or ${MobileMoney.primaryLabelFor(_vendorCountry)} on delivery — directly to the vendor when your gas arrives. No prepayment needed.',
         ),
 
         // Loading / empty
@@ -824,7 +825,7 @@ class _OrderScreenState extends State<OrderScreen> {
               ),
               const SizedBox(height: 10),
               _explainerRow(
-                  'Pay the vendor when your gas is delivered — cash or M-Pesa to the vendor'),
+                  'Pay the vendor when your gas is delivered — cash or ${MobileMoney.primaryLabelFor(_vendorCountry)} to the vendor'),
               _explainerRow('No prepayment, no extra charges for you'),
               _explainerRow(
                   'Confirm delivery with your PIN only after you receive your gas'),
@@ -923,7 +924,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    _summaryRow('Payment', 'Cash / M-Pesa on delivery'),
+                    _summaryRow('Payment', 'Cash / ${MobileMoney.primaryLabelFor(_vendorCountry)} on delivery'),
                     _summaryRow(
                         'Product',
                         _shortTypeLabel(_selectedListing?.productType ??
@@ -951,7 +952,7 @@ class _OrderScreenState extends State<OrderScreen> {
         _infoCard(
           icon: Icons.payments_outlined,
           text:
-              'Have ${Currency.formatFor(_vendorCountry, _gasPrice)} ready (cash or M-Pesa to the vendor). Only share your delivery PIN after you receive and pay for your gas.',
+              'Have ${Currency.formatFor(_vendorCountry, _gasPrice)} ready (cash or ${MobileMoney.primaryLabelFor(_vendorCountry)} to the vendor). Only share your delivery PIN after you receive and pay for your gas.',
         ),
         if (_isRefill) ...[
           const SizedBox(height: 16),

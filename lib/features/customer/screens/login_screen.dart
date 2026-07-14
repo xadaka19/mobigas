@@ -353,7 +353,7 @@ class _LoginScreenState extends State<LoginScreen> {
           const SizedBox(height: 10),
           _infoRow('Order cooking gas — delivered to your door'),
           _infoRow('Compare prices from verified vendors near you'),
-          _infoRow('Pay cash or M-Pesa on delivery'),
+          _infoRow('Pay cash or mobile money on delivery'),
           _infoRow('Confirm with your delivery PIN when it arrives'),
         ],
       ),

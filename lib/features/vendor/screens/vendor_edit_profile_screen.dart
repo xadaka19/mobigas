@@ -301,7 +301,7 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
                     _buildField('Owner name', _ownerNameController,
                         Icons.person_outline_rounded),
                     const SizedBox(height: 16),
-                    _buildField('M-Pesa number', _phoneController,
+                    _buildField('Mobile money number', _phoneController,
                         Icons.phone_outlined,
                         keyboardType: TextInputType.phone),
                     const SizedBox(height: 16),

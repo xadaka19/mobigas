@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../../core/config/mobile_money.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:go_router/go_router.dart';
@@ -1353,7 +1354,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery (cash or M-Pesa to you).',
+                    'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery (cash or ${MobileMoney.primaryLabelFor(order.country)} to you).',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.navy,
                           fontSize: 11,
@@ -1617,9 +1618,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     child: Column(
                       children: [
                         _earningsRow('How you get paid',
-                            'Customer pays you directly on delivery — cash or M-Pesa'),
+                            'Customer pays you directly on delivery — cash or mobile money'),
                         _earningsRow(
-                            'Your M-Pesa', _vendorData?['phone'] ?? ''),
+                            'Your ${MobileMoney.primaryLabelFor(_vendorData?["country"])}', _vendorData?['phone'] ?? ''),
                       ],
                     ),
                   ),
@@ -1840,7 +1841,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
               children: [
                 _profileTile(Icons.store_outlined, 'Business name',
                     _businessName.isEmpty ? 'Not set' : _businessName),
-                _profileTile(Icons.phone_outlined, 'M-Pesa number',
+                _profileTile(Icons.phone_outlined, '${MobileMoney.primaryLabelFor(_vendorData?["country"])} number',
                     (_vendorData?['phone'] ?? '').toString()),
                 _profileTile(
                     Icons.location_on_outlined,

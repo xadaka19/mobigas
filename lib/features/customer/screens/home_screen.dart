@@ -346,7 +346,7 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                           )),
                   const SizedBox(height: 2),
                   Text(
-                    'Refills, full kits & accessories — pay cash or M-Pesa on delivery',
+                    'Refills, full kits & accessories — pay cash or mobile money on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.gray400,
                           fontSize: 11,
@@ -373,7 +373,7 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
       _HowStep(
           Icons.pin_outlined, 'PIN', 'Confirm delivery', AppColors.success),
       _HowStep(
-          Icons.payment_outlined, 'Pay', 'Cash or M-Pesa', AppColors.warning),
+          Icons.payment_outlined, 'Pay', 'Cash or mobile money', AppColors.warning),
     ];
 
     return Column(
@@ -1719,7 +1719,7 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'MobiGas connects you with trusted local gas vendors for fast delivery — compare prices, order in seconds, and pay cash or M-Pesa when your gas arrives.',
+                  'MobiGas connects you with trusted local gas vendors for fast delivery — compare prices, order in seconds, and pay cash or mobile money when your gas arrives.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme

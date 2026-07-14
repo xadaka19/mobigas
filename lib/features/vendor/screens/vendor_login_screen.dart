@@ -266,7 +266,7 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
                 const SizedBox(height: 32),
                 // Value props
                 _valueProp(Icons.payments_rounded,
-                    'Get paid on every delivery — cash or M-Pesa, direct to you'),
+                    'Get paid on every delivery — cash or mobile money, direct to you'),
                 const SizedBox(height: 12),
                 _valueProp(Icons.people_outline_rounded,
                     'New customers delivered to you'),

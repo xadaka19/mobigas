@@ -24,7 +24,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       icon: Icons.storefront_rounded,
       title: 'Compare prices, save money',
       subtitle:
-          'See live prices from verified vendors in your area and always pick the best deal — pay cash or M-Pesa on delivery.',
+          'See live prices from verified vendors in your area and always pick the best deal — pay cash or mobile money on delivery.',
     ),
     _OnboardPage(
       icon: Icons.verified_user_rounded,

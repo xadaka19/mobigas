@@ -259,7 +259,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
       ..writeln('Deliver to: ${widget.order.customerArea}')
       ..writeln('Item: $item')
       ..write(
-          'Payment: customer pays $_amount (cash or M-Pesa to the vendor). Confirm payment is received before taking the PIN.');
+          'Payment: customer pays $_amount (cash or mobile money to the vendor). Confirm payment is received before taking the PIN.');
     if (mapsLink != null) {
       body.writeln();
       body.write('Directions: $mapsLink');
@@ -723,7 +723,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         ])),
         const SizedBox(height: 16),
         _infoBox(Icons.payments_rounded,
-            'Confirm payment of $_amount is received (cash or M-Pesa to you) before the customer shares the PIN — the PIN completes the delivery.'),
+            'Confirm payment of $_amount is received (cash or mobile money to you) before the customer shares the PIN — the PIN completes the delivery.'),
         const SizedBox(height: 20),
         // Rider assignment
         _card(child: Column(
@@ -1035,7 +1035,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         ])),
         const SizedBox(height: 16),
         _infoBox(Icons.payments_rounded,
-            'Confirm payment of $_amount is received (cash or M-Pesa to you) FIRST — the customer\'s PIN completes the delivery.'),
+            'Confirm payment of $_amount is received (cash or mobile money to you) FIRST — the customer\'s PIN completes the delivery.'),
         if (_isRefill) ...[
           const SizedBox(height: 12),
           _infoBox(Icons.swap_horiz_rounded,
