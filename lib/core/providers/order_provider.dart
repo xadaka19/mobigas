@@ -2,8 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
-import 'package:mobigas/core/services/firebase_service.dart';
-import 'package:mobigas/core/config/currency.dart';
+
 
 class OrderProvider extends ChangeNotifier {
   final List<OrderModel> _orders = [];
@@ -126,37 +125,13 @@ class OrderProvider extends ChangeNotifier {
         partnerBankName: '',
       );
 
-      // Get vendor FCM token for backend to send push notification
-      String? vendorFcmToken;
-      try {
-        final vendorDoc = await FirebaseService.vendors.doc(vendor.id).get();
-        if (vendorDoc.exists) {
-          final vData = vendorDoc.data() as Map<String, dynamic>;
-          vendorFcmToken = vData['fcmToken'] as String?;
-        }
-      } catch (_) {}
-
-      // Save to Firestore
+      // Save to Firestore. The onOrderCreated Cloud Function handles
+      // notifying the vendor server-side (reads their fcmToken and
+      // sends the push), so the client no longer writes FCM tokens or
+      // notification fields onto the order — that update was being
+      // rejected by the orders security rules and failing the whole
+      // placeOrder even though the order itself was created.
       await FirestoreService.createOrder(order);
-
-      // Write vendorFcmToken to order so backend can trigger FCM
-      if (vendorFcmToken != null) {
-        await FirebaseService.orders
-            .where('orderId', isEqualTo: order.orderId)
-            .get()
-            .then((snap) {
-          if (snap.docs.isNotEmpty) {
-            snap.docs.first.reference.update({
-              'vendorFcmToken': vendorFcmToken,
-              'customerFcmToken': customer.fcmToken ?? '',
-              'notificationTitle': 'New order received!',
-              'notificationBody':
-                  '${customer.name} ordered ${listing.size} ${_typeLabel(listing.productType)} · ${Currency.formatFor(vendor.country, listing.price)} · CASH on delivery',
-              'notificationType': 'new_order',
-            });
-          }
-        });
-      }
 
       _activeOrder = order;
       _orders.insert(0, order);
@@ -212,22 +187,7 @@ class OrderProvider extends ChangeNotifier {
     return '$e, $a';
   }
 
-  String _typeLabel(GasProductType t) {
-    switch (t) {
-      case GasProductType.refill:
-        return 'refill';
-      case GasProductType.fullKit:
-        return 'gas + cylinder';
-      case GasProductType.grillKit:
-        return 'gas + cylinder + grill';
-      case GasProductType.burner:
-        return 'burner';
-      case GasProductType.regulator:
-        return 'regulator';
-      case GasProductType.mekoCooker:
-        return 'meko + cooker';
-    }
-  }
+  
 
   String _generatePin() {
     final now = DateTime.now();
