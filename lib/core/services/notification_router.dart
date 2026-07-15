@@ -28,6 +28,16 @@ class NotificationRouter {
         router.go(FlavorConfig.isCustomer ? '/home' : '/vendor-home');
         break;
 
+      // The vendor couldn't fulfil the customer's order. Land them on
+      // home rather than the dead order — home already lists the
+      // online vendors near them, so the next tap is a new order
+      // instead of a dead end. Sent as type 'order_cancelled' by
+      // notifyOrderStatusChange only when the VENDOR cancelled; a
+      // customer cancelling their own order gets no push.
+      case 'order_cancelled':
+        router.go(FlavorConfig.isCustomer ? '/home' : '/vendor-home');
+        break;
+
       // Support chat reply
       case 'support':
         router.push(

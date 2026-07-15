@@ -593,7 +593,6 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     final uid = _customer?.id;
     if (uid == null) return 'You are not signed in.';
-    if (area.trim().isEmpty) return 'Tell us your area, estate or landmark.';
     if (latitude == 0 || longitude == 0) {
       return 'Pin your exact location on the map.';
     }

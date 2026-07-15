@@ -201,6 +201,7 @@ class ProfileCompletionSheet extends StatefulWidget {
 class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
   late int _step = widget.initialStep;
   bool _saving = false;
+  String? _errorText;
 
   final _phoneController = TextEditingController();
   final _areaController = TextEditingController();
@@ -228,15 +229,18 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
     super.dispose();
   }
 
+  /// BUG FIX: this used to call ScaffoldMessenger.showSnackBar. A
+  /// floating snackbar renders at the bottom of the HOME screen's
+  /// Scaffold — underneath this modal sheet, which covers up to 90%
+  /// of the screen (see maxHeight in build()). So every validation
+  /// failure ("Tell us your area, estate or landmark.", "Pin your
+  /// exact location on the map.") was painted behind the sheet and
+  /// never seen: the button spun, stopped, and the step didn't
+  /// advance — indistinguishable from a save that silently did
+  /// nothing. Rendering inline, just above the button, puts the
+  /// message where the user is already looking.
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    setState(() => _errorText = msg);
   }
 
   Future<void> _captureSelfie() async {
@@ -259,7 +263,10 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
   }
 
   Future<void> _saveCurrentStep() async {
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _errorText = null;
+    });
     final auth = context.read<AuthProvider>();
     String? problem;
 
@@ -298,7 +305,10 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
 
   void _advance() {
     if (_step < 2) {
-      setState(() => _step++);
+      setState(() {
+        _step++;
+        _errorText = null;
+      });
     } else {
       Navigator.of(context).pop();
     }
@@ -355,6 +365,38 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
               if (_step == 0) _buildPhoneStep(),
               if (_step == 1) _buildLocationStep(),
               if (_step == 2) _buildVerificationStep(),
+              if (_errorText != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: AppColors.error.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.error_outline_rounded,
+                          color: AppColors.error, size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _errorText!,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.error,
+                                    height: 1.5,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _saving ? null : _saveCurrentStep,
@@ -376,7 +418,10 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
                       ? null
                       : () {
                           if (_step < 2) {
-                            setState(() => _step++);
+                            setState(() {
+                              _step++;
+                              _errorText = null;
+                            });
                           } else {
                             Navigator.of(context).pop();
                           }
@@ -468,18 +513,6 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _label('Area, estate or landmark'),
-        TextFormField(
-          controller: _areaController,
-          textCapitalization: TextCapitalization.words,
-          style: _fieldStyle(),
-          decoration: const InputDecoration(
-            hintText: 'e.g. Kilimani, near Yaya Centre',
-            prefixIcon: Icon(Icons.signpost_outlined,
-                color: AppColors.gray400, size: 20),
-          ),
-        ),
-        const SizedBox(height: 20),
         _label('Pin your exact location'),
         MapLocationPickerWidget(
           initialLat: _latitude,
@@ -496,6 +529,18 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
           icon: Icons.location_on_rounded,
           text: 'Drag the pin to your building or gate so the rider '
               'finds you first time.',
+        ),
+        const SizedBox(height: 20),
+        _label('Landmark for the rider (optional)'),
+        TextFormField(
+          controller: _areaController,
+          textCapitalization: TextCapitalization.words,
+          style: _fieldStyle(),
+          decoration: const InputDecoration(
+            hintText: 'e.g. blue gate opposite Mzuzi Park',
+            prefixIcon: Icon(Icons.signpost_outlined,
+                color: AppColors.gray400, size: 20),
+          ),
         ),
       ],
     );
