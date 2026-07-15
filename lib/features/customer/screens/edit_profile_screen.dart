@@ -56,6 +56,29 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _selectedAddress = customer?.estate ?? '';
     _selectedLat = customer?.latitude ?? 0;
     _selectedLng = customer?.longitude ?? 0;
+    if (Platform.isAndroid) _retrieveLostPhoto();
+  }
+
+  /// BUG FIX: pickImage(source: camera) launches the camera as a
+  /// SEPARATE Android activity. On a low-memory device Android
+  /// destroys this activity while it's backgrounded — so on return
+  /// the screen is recreated from scratch (looks like "the app
+  /// restarted"), _newSelfie is null again, and the await inside
+  /// _takeSelfie never resolves. The photo is gone with no error.
+  /// Android caches it and image_picker exposes it here exactly once;
+  /// without this call it is silently dropped every time.
+  Future<void> _retrieveLostPhoto() async {
+    try {
+      final response = await ImagePicker().retrieveLostData();
+      if (response.isEmpty) return;
+      final file = response.file;
+      if (file != null && mounted) {
+        setState(() => _newSelfie = File(file.path));
+        _error('Photo recovered — tap "Save changes" to keep it.');
+      }
+    } catch (e) {
+      debugPrint('retrieveLostData failed: $e');
+    }
   }
 
   @override

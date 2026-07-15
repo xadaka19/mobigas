@@ -974,7 +974,13 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
     // avatar". A Google customer's selfieUrl is just their Google photo.
     final isIdVerified = customer.nationalId.trim().isNotEmpty;
 
-    final location = _dedupeJoin(customer.estate, customer.county);
+    final landmark = _dedupeJoin(customer.estate, customer.county);
+    final hasPin = customer.latitude != 0 && customer.longitude != 0;
+    final location = landmark.isNotEmpty
+        ? landmark
+        : hasPin
+            ? 'Pinned on map'
+            : 'Not set';
     final initial =
         customer.name.trim().isEmpty ? '?' : customer.name[0].toUpperCase();
 
@@ -1092,8 +1098,8 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                 if (customer.nationalId.trim().isNotEmpty)
                   _profileTile(Icons.badge_outlined, 'National ID',
                       customer.nationalId),
-                _profileTile(Icons.location_on_outlined, 'Location',
-                    location.isEmpty ? 'Not set' : location),
+                _profileTile(
+                    Icons.location_on_outlined, 'Location', location),
                 const SizedBox(height: 8),
                 if (!isGoogleAccount)
                   _profileAction(Icons.lock_outline_rounded, 'Change password',
