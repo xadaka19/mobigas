@@ -11,26 +11,34 @@ class PromoService {
     required String audience,
     required String country,
   }) async {
-    final snapshot = await _firestore
-        .collection('promo_popups')
-        .where('isActive', isEqualTo: true)
-        .orderBy('priority')
-        .get();
+    try {
+      final snapshot = await _firestore
+          .collection('promo_popups')
+          .where('isActive', isEqualTo: true)
+          .orderBy('priority')
+          .get();
 
-    final candidates = snapshot.docs
-        .map((doc) => PromoModel.fromFirestore(doc))
-        .where((promo) =>
-            (promo.targetAudience == audience || promo.targetAudience == 'all') &&
-            (promo.targetCountry == country || promo.targetCountry == 'all') &&
-            promo.isWithinDateRange)
-        .toList();
+      final candidates = snapshot.docs
+          .map((doc) => PromoModel.fromFirestore(doc))
+          .where((promo) =>
+              (promo.targetAudience == audience || promo.targetAudience == 'all') &&
+              (promo.targetCountry == country || promo.targetCountry == 'all') &&
+              promo.isWithinDateRange)
+          .toList();
 
-    for (final promo in candidates) {
-      if (await _shouldShow(promo)) {
-        return promo;
+      for (final promo in candidates) {
+        if (await _shouldShow(promo)) {
+          return promo;
+        }
       }
+      return null;
+    } catch (e) {
+      // A promo failing to load (missing index, offline, rules, etc.)
+      // should never crash or block the home screen — just show no popup.
+      // ignore: avoid_print
+      print('Failed to load promo: $e');
+      return null;
     }
-    return null;
   }
 
   Future<bool> _shouldShow(PromoModel promo) async {
@@ -61,10 +69,6 @@ class PromoService {
     }
   }
 
-  /// Call this the moment the popup is actually displayed to the user
-  /// (e.g. inside showDialog's builder, or in a post-frame callback).
-  /// Increments the aggregate counter on the promo doc and writes a
-  /// lightweight event for later time-series analysis.
   Future<void> logImpression({
     required String promoId,
     required String audience,
@@ -92,13 +96,11 @@ class PromoService {
     try {
       await batch.commit();
     } catch (e) {
-      // Analytics failures should never block the UI; just log and move on.
       // ignore: avoid_print
       print('Failed to log promo impression: $e');
     }
   }
 
-  /// Call this when the user taps the CTA button (e.g. "Order Now").
   Future<void> logClick({
     required String promoId,
     required String audience,

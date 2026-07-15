@@ -35,66 +35,36 @@ class FirestoreService {
     required String nationalId,
     String? deviceFingerprint,
   }) async {
-    // Checked across BOTH users and vendors — previously this only
-    // checked customers, so the same phone/ID could be reused to
-    // create a vendor account with zero detection, and vice versa.
-    //
-    // These reads are all independent, so they run together instead of
-    // one-await-after-another (six sequential round trips was the old
-    // cost — felt worst on the profile banner's savePhone step). Empty
-    // values are skipped entirely: a blank phone/ID can never be
-    // "taken", and querying on '' would scan every incomplete profile
-    // for nothing.
-    final futures = <String, Future<QuerySnapshot>>{};
+    // Moved server-side. The old version queried `users` and `vendors`
+    // filtered by phone/nationalId/deviceFingerprint — a shape the
+    // Firestore rules engine can never prove safe, so it was rejected
+    // with permission-denied for every customer. The checkDuplicates
+    // Cloud Function runs the same six-way parallel check with the
+    // Admin SDK and returns only booleans, so no other user's PII is
+    // ever readable from a client.
+    try {
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('checkDuplicates');
+      final result = await callable.call({
+        'phone': phone,
+        'nationalId': nationalId,
+        'deviceFingerprint': ?deviceFingerprint,
+      }).timeout(const Duration(seconds: 15));
 
-    if (phone.isNotEmpty) {
-      futures['phoneUsers'] = FirebaseService.users
-          .where('phone', isEqualTo: phone)
-          .limit(1)
-          .get()
-          .bounded();
-      futures['phoneVendors'] = FirebaseService.vendors
-          .where('phone', isEqualTo: phone)
-          .limit(1)
-          .get()
-          .bounded();
+      final data = Map<String, dynamic>.from(result.data as Map);
+      return {
+        'phoneTaken': data['phoneTaken'] == true,
+        'idTaken': data['idTaken'] == true,
+        'deviceFlagged': data['deviceFlagged'] == true,
+      };
+    } catch (_) {
+      // Fail OPEN — the same posture the client-side version had by
+      // accident, now a deliberate choice. A missed duplicate is
+      // recoverable (support can flag it later); a customer blocked
+      // from finishing signup by a transient Cloud Function or network
+      // hiccup is not an acceptable tradeoff.
+      return {'phoneTaken': false, 'idTaken': false, 'deviceFlagged': false};
     }
-    if (nationalId.isNotEmpty) {
-      futures['idUsers'] = FirebaseService.users
-          .where('nationalId', isEqualTo: nationalId)
-          .limit(1)
-          .get()
-          .bounded();
-      futures['idVendors'] = FirebaseService.vendors
-          .where('nationalId', isEqualTo: nationalId)
-          .limit(1)
-          .get()
-          .bounded();
-    }
-    if (deviceFingerprint != null) {
-      futures['deviceUsers'] = FirebaseService.users
-          .where('deviceFingerprint', isEqualTo: deviceFingerprint)
-          .get()
-          .bounded();
-      futures['deviceVendors'] = FirebaseService.vendors
-          .where('deviceFingerprint', isEqualTo: deviceFingerprint)
-          .get()
-          .bounded();
-    }
-
-    final entries = futures.entries.toList();
-    final results = await Future.wait(entries.map((e) => e.value));
-    final byKey = <String, QuerySnapshot>{
-      for (var i = 0; i < entries.length; i++) entries[i].key: results[i],
-    };
-
-    bool hit(String k) => (byKey[k]?.docs.isNotEmpty) ?? false;
-
-    return {
-      'phoneTaken': hit('phoneUsers') || hit('phoneVendors'),
-      'idTaken': hit('idUsers') || hit('idVendors'),
-      'deviceFlagged': hit('deviceUsers') || hit('deviceVendors'),
-    };
   }
 
   // Load full customer data from Firestore
