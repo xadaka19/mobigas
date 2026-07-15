@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import '../../../core/config/mobile_money.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -80,6 +81,50 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
   String get _vendorId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   String get _businessName => (_vendorData?['businessName'] ?? '').toString();
+
+  double get _vendorLatitude => (_vendorData?['latitude'] ?? 0.0).toDouble();
+  double get _vendorLongitude => (_vendorData?['longitude'] ?? 0.0).toDouble();
+
+  /// Same Haversine calculation VendorProvider (customer app) already
+  /// uses to show "X km away" when a customer is browsing vendors —
+  /// mirrored here so a vendor sees the same distance for an incoming
+  /// order, computed from the vendor's own saved location instead of
+  /// a customer's live GPS.
+  static double _distanceKm(
+      double lat1, double lng1, double lat2, double lng2) {
+    const r = 6371.0; // Earth radius in km
+    final dLat = (lat2 - lat1) * pi / 180;
+    final dLng = (lng2 - lng1) * pi / 180;
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(lat1 * pi / 180) *
+            cos(lat2 * pi / 180) *
+            sin(dLng / 2) *
+            sin(dLng / 2);
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return r * c;
+  }
+
+  static String _formatDistanceKm(double km) {
+    if (km < 1) return '${(km * 1000).toInt()}m away';
+    return '${km.toStringAsFixed(1)}km away';
+  }
+
+  /// Null when either side's coordinates aren't available yet (vendor
+  /// hasn't pinned a location during setup, or — for an older order —
+  /// the customer coordinates weren't captured). Returning null lets
+  /// the UI omit the distance rather than show a misleading "0km".
+  String? _distanceToOrder(OrderModel order) {
+    if (_vendorLatitude == 0 && _vendorLongitude == 0) return null;
+    if (order.customerLatitude == 0 && order.customerLongitude == 0) {
+      return null;
+    }
+    return _formatDistanceKm(_distanceKm(
+      _vendorLatitude,
+      _vendorLongitude,
+      order.customerLatitude,
+      order.customerLongitude,
+    ));
+  }
 
   @override
   void initState() {
@@ -1219,6 +1264,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     final isPending = order.status == OrderStatus.pending;
     final isAccepted = order.status == OrderStatus.accepted;
     final isOutForDelivery = order.status == OrderStatus.outForDelivery;
+    final distance = _distanceToOrder(order);
 
     Color statusColor = isPending
         ? AppColors.warning
@@ -1310,7 +1356,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                                     color: AppColors.navy,
                                     fontWeight: FontWeight.w700,
                                   )),
-                          Text(order.customerArea,
+                          Text(
+                              distance == null
+                                  ? order.customerArea
+                                  : '${order.customerArea} · $distance',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -1572,6 +1621,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
   Widget _completedOrderTile(OrderModel order) {
     final dateStr =
         '${order.createdAt.day}/${order.createdAt.month}/${order.createdAt.year}';
+    final distance = _distanceToOrder(order);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -1602,7 +1652,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                         .textTheme
                         .titleMedium
                         ?.copyWith(fontSize: 14, color: AppColors.navy)),
-                Text('${order.listing.size} · $dateStr',
+                Text(
+                    distance == null
+                        ? '${order.listing.size} · $dateStr'
+                        : '${order.listing.size} · $dateStr · $distance',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
