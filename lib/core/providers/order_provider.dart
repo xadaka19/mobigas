@@ -81,9 +81,14 @@ class OrderProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Places a cash-on-delivery order. paymentMethod is retained in the
-  /// signature (and always PaymentMethod.cash in this release) so the
-  /// model and Firestore schema stay unchanged.
+  /// Places an order. The customer pays the vendor directly on
+  /// delivery — cash or mobile money straight to them. MobiGas never
+  /// touches the money and never extends credit.
+  ///
+  /// paymentMethod is retained in the signature (and can only be
+  /// PaymentMethod.cash) so existing callers compile unchanged and the
+  /// Firestore schema keeps carrying the field — confirmDelivery reads
+  /// it when deciding the finder fee is chargeable.
   Future<void> placeOrder({
     required CustomerModel customer,
     required VendorModel vendor,
@@ -117,12 +122,9 @@ class OrderProvider extends ChangeNotifier {
         // Vendor-side customer-finder fee (1%), accrued on delivery.
         // Never shown to the customer anywhere in the app.
         finderFee: listing.cashFinderFee,
-        bankDisbursementAmount: 0.0,
-        originationFeeToMobigas: 0.0,
         pin: _generatePin(),
         status: OrderStatus.pending,
         createdAt: DateTime.now(),
-        partnerBankName: '',
       );
 
       // Save to Firestore. The onOrderCreated Cloud Function handles

@@ -97,7 +97,7 @@ class FirestoreService {
     };
   }
 
-  // Load full customer data including guarantors from Firestore
+  // Load full customer data from Firestore
   static Future<CustomerModel?> getUserByPhone(String phone) async {
     final snap = await FirebaseService.users
         .where('phone', isEqualTo: phone)
@@ -127,13 +127,6 @@ class FirestoreService {
       'country': customer.country,
       'latitude': customer.latitude,
       'longitude': customer.longitude,
-      'bankStatus': customer.bankStatus.name,
-      'bankApprovedLimit': customer.bankApprovedLimit,
-      'bankCreditUsed': customer.bankCreditUsed,
-      'partnerBankName': customer.partnerBankName,
-      'guarantors': customer.guarantors
-          .map((g) => {'name': g.name, 'phone': g.phone})
-          .toList(),
       // Folded in so email/password signup no longer needs a second
       // write just to set this. Written only when supplied.
       'authMethod': ?authMethod,
@@ -164,28 +157,6 @@ class FirestoreService {
     return _customerFromMap(uid, data);
   }
 
-  static Future<void> updateUserBankStatus({
-    required String uid,
-    required BankApprovalStatus status,
-    double? approvedLimit,
-    String? bankName,
-  }) async {
-    final data = <String, dynamic>{
-      'bankStatus': status.name,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (approvedLimit != null) data['bankApprovedLimit'] = approvedLimit;
-    if (bankName != null) data['partnerBankName'] = bankName;
-    await FirebaseService.users.doc(uid).update(data);
-  }
-
-  static Future<void> updateCreditUsed(String uid, double amount) async {
-    await FirebaseService.users.doc(uid).update({
-      'bankCreditUsed': FieldValue.increment(amount),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-  }
-
   /// Sets the customer's country once a delivery pin is captured
   /// (ProfileCompletionSheet's location step, or the Google sign-up
   /// completion flow). Mirrors how VendorModel.country is written in
@@ -214,19 +185,6 @@ class FirestoreService {
       country: data['country'] ?? 'KE',
       latitude: (data['latitude'] ?? 0.0).toDouble(),
       longitude: (data['longitude'] ?? 0.0).toDouble(),
-      bankApprovedLimit: data['bankApprovedLimit']?.toDouble(),
-      bankCreditUsed: (data['bankCreditUsed'] ?? 0.0).toDouble(),
-      bankStatus: BankApprovalStatus.values.firstWhere(
-        (e) => e.name == data['bankStatus'],
-        orElse: () => BankApprovalStatus.pending,
-      ),
-      partnerBankName: data['partnerBankName'] ?? '',
-      guarantors: (data['guarantors'] as List? ?? [])
-          .map((g) => GuarantorModel(
-                name: g['name'] ?? '',
-                phone: g['phone'] ?? '',
-              ))
-          .toList(),
       selfieUrl: data['selfieUrl'],
       fcmToken: data['fcmToken'],
       referralCode: data['referralCode'] ?? '',
@@ -339,6 +297,10 @@ class FirestoreService {
       'customerLongitude': order.customerLongitude,
       'gasSize': order.listing.size,
       'gasKg': order.listing.kg,
+      // The one money field on an order. confirmDelivery accrues the
+      // finder fee from it, onOrderStatusChange sums it into
+      // vendor_stats_alltime, and the vendor's earnings screen
+      // aggregates it. Do not add a second one.
       'gasPrice': order.listing.price,
       'gasProductType': order.listing.productType.name,
       'gasBrand': order.listing.brand,
@@ -346,18 +308,11 @@ class FirestoreService {
       'paymentMethod': order.paymentMethod.name,
       'finderFee': order.finderFee,
       'finderFeeAccrued': false,
-      'bankDisbursementAmount': order.bankDisbursementAmount,
-      'originationFeeToMobigas': order.originationFeeToMobigas,
       'pin': order.pin,
       'status': order.status.name,
-      'partnerBankName': order.partnerBankName,
       'riderName': order.riderName,
       'riderPhone': order.riderPhone,
       'createdAt': FieldValue.serverTimestamp(),
-      // bankRepaymentDueDate is a BNPL field. Nothing sets
-      // paymentMethod to credit in v1, so the ternary always produced
-      // null — and the orders rules now reject a create that carries
-      // an unexpected status anyway. It comes back with the BNPL branch.
     });
     return ref.id;
   }
@@ -479,17 +434,12 @@ class FirestoreService {
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
       cancelledBy: data['cancelledBy'],
-      bankDisbursementAmount:
-          (data['bankDisbursementAmount'] ?? 0).toDouble(),
-      originationFeeToMobigas:
-          (data['originationFeeToMobigas'] ?? 0).toDouble(),
       pin: data['pin'] ?? '',
       status: OrderStatus.values.firstWhere(
         (e) => e.name == data['status'],
         orElse: () => OrderStatus.pending,
       ),
       createdAt: (data['createdAt'] as dynamic)?.toDate() ?? DateTime.now(),
-      partnerBankName: data['partnerBankName'] ?? '',
       riderName: data['riderName'],
       riderPhone: data['riderPhone'],
     );
@@ -611,8 +561,6 @@ class FirestoreService {
     };
   }
 
-  /// Normalizes a Kenyan phone number so "0712345678", "+254712345678",
-  /// and "254712345678" are all recognized as the SAME identity.
   /// Records a referral signup — moved server-side (Cloud Function)
   /// so a modified/rooted client can never skip or spoof the identity
   /// fraud guard (the function reads phone/National ID/email from
@@ -719,9 +667,9 @@ class FirestoreService {
 
   // ── NOTIFICATIONS INBOX ───────────────────────────────────────────
   // Persistent record of every push notification actually received,
-  // written by notification_service.dart at the moment it arrives.
-  // Independent of the OS-level push itself, which the user may have
-  // already dismissed.
+  // written by notification_service.dart at the moment it arrives, and
+  // by the onNotificationQueued Cloud Function for server-originated
+  // messages.
 
   static Stream<List<Map<String, dynamic>>> watchNotifications(
       String userId) {
@@ -869,62 +817,5 @@ class FirestoreService {
       batch.update(doc.reference, {'read': true});
     }
     await batch.commit();
-  }
-
-  // ── BANK APPLICATIONS ─────────────────────────────────────────────
-  // This is where we pass customer KYC to partner bank
-  static Future<void> submitBankApplication({
-    required String customerId,
-    required String name,
-    required String phone,
-    required String nationalId,
-    required String county,
-    required String area,
-    required List<Map<String, String>> guarantors,
-  }) async {
-    await FirebaseService.bankApplications.add({
-      'customerId': customerId,
-      'name': name,
-      'phone': phone,
-      'nationalId': nationalId,
-      'county': county,
-      'area': area,
-      'guarantors': guarantors,
-      'status': 'pending',
-      // Bank reads this collection via webhook/API
-      // Bank updates status + approvedLimit when done
-      'submittedAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  // ── REPAYMENTS ────────────────────────────────────────────────────
-  static Future<void> recordRepayment({
-    required String orderId,
-    required String customerId,
-    required double amount,
-    required String mpesaRef,
-  }) async {
-    await FirebaseService.repayments.add({
-      'orderId': orderId,
-      'customerId': customerId,
-      'amount': amount,
-      'mpesaRef': mpesaRef,
-      'status': 'paid',
-      'paidAt': FieldValue.serverTimestamp(),
-    });
-
-    // Reduce credit used
-    await updateCreditUsed(customerId, -amount);
-  }
-
-  static Stream<List<Map<String, dynamic>>> watchCustomerRepayments(
-      String customerId) {
-    return FirebaseService.repayments
-        .where('customerId', isEqualTo: customerId)
-        .orderBy('paidAt', descending: true)
-        .snapshots()
-        .map((snap) => snap.docs
-            .map((doc) => doc.data() as Map<String, dynamic>)
-            .toList());
   }
 }

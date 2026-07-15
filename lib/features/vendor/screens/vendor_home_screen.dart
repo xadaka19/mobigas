@@ -418,16 +418,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
       cancelledBy: data['cancelledBy'],
-      bankDisbursementAmount: (data['bankDisbursementAmount'] ?? 0).toDouble(),
-      originationFeeToMobigas:
-          (data['originationFeeToMobigas'] ?? 0).toDouble(),
       pin: data['pin'] ?? '',
       status: OrderStatus.values.firstWhere(
         (e) => e.name == data['status'],
         orElse: () => OrderStatus.pending,
       ),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      partnerBankName: data['partnerBankName'] ?? '',
+
       riderName: data['riderName'],
       riderPhone: data['riderPhone'],
     );
@@ -1720,7 +1717,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
               ),
             ),
             // Stock boost — shows only for eligible vendors, else renders nothing
-            StockBoostCard(vendorId: _vendorId),
+            StockBoostCard(vendorId: _vendorId, vendorData: _vendorData),
             Padding(
               padding: const EdgeInsets.all(20),
               child: Column(

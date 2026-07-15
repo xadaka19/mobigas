@@ -14,9 +14,4 @@ class FirebaseService {
   static CollectionReference get users => db.collection('users');
   static CollectionReference get vendors => db.collection('vendors');
   static CollectionReference get orders => db.collection('orders');
-  static CollectionReference get repayments => db.collection('repayments');
-  static CollectionReference get disbursements =>
-      db.collection('disbursements');
-  static CollectionReference get bankApplications =>
-      db.collection('bank_applications');
 }

@@ -28,14 +28,6 @@ class NotificationRouter {
         router.go(FlavorConfig.isCustomer ? '/home' : '/vendor-home');
         break;
 
-      // Customer: credit application decisions / info requests
-      case 'credit_update':
-      case 'credit_application':
-        if (FlavorConfig.isCustomer) {
-          router.push('/credit-application');
-        }
-        break;
-
       // Support chat reply
       case 'support':
         router.push(

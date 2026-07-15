@@ -67,19 +67,29 @@ extension GasProductTypeExt on GasProductType {
       this == GasProductType.mekoCooker;
 }
 
-// How the customer pays for an order
+// How the customer pays for an order.
+//
+// Only one way, deliberately. MobiGas does not extend credit and does
+// not intermediate payment — the customer pays the vendor directly on
+// delivery (cash or mobile money straight to the vendor). The old
+// `credit` value (bank pays vendor, customer repays bank) was a BNPL
+// design that never shipped: no order was ever created with it, and
+// the functions behind it were never deployed. Removed rather than
+// left dormant, so no screen can ever render "MobiGas Credit" and no
+// reader has to wonder whether we lend.
+//
+// Parsers use `orElse: () => PaymentMethod.cash`, so any legacy
+// Firestore doc carrying paymentMethod:'credit' degrades to cash
+// rather than throwing. There are none.
 enum PaymentMethod {
-  credit, // Bank pays vendor, customer repays bank within 30 days
-  cash,   // Customer pays vendor cash on delivery
+  cash, // Customer pays the vendor on delivery — cash or mobile money
 }
 
 extension PaymentMethodExt on PaymentMethod {
   String get label {
     switch (this) {
-      case PaymentMethod.credit:
-        return 'MobiGas Credit';
       case PaymentMethod.cash:
-        return 'Cash on delivery';
+        return 'Pay on delivery';
     }
   }
 }
@@ -109,25 +119,13 @@ class KenyanGasBrands {
 }
 
 class MobiGasFees {
-  // MobiGas earns 1% of disbursement from bank per credit order
-  static const double bankCommissionRate = 0.01;
-  // Bank charges customer (bank sets — we show for transparency)
-  static const double bankInterestRate = 0.08;
-  // Vendor pays MobiGas 1% customer-finder fee on cash orders,
-  // accrued when the order is confirmed delivered, settled weekly.
+  // Vendor pays MobiGas 1% customer-finder fee on every order,
+  // accrued server-side in confirmDelivery when the order is confirmed
+  // delivered, settled weekly. This is MobiGas's only order revenue.
   static const double cashFinderFeeRate = 0.01;
   // When a vendor's unpaid fees reach this amount (KES), they are
   // automatically hidden from customers until they settle.
   static const double vendorFeeLockThreshold = 500;
-}
-
-/// Eligibility thresholds for the Stock Boost Loan — a vendor needs
-/// BOTH conditions met, not either. Single source of truth so the
-/// numbers shown in the vendor app's progress bars always match the
-/// numbers actually enforced in the eligibility check.
-class StockLoanRequirements {
-  static const int minMonthsOnPlatform = 3;
-  static const int minDeliveries = 100;
 }
 
 /// Referral reward rates are NOT hardcoded here — they live in
@@ -201,16 +199,7 @@ class GasListing {
     this.brand = '',
   });
 
-  // Bank interest (8%) — bank charges customer (credit orders only)
-  double get bankInterest => price * MobiGasFees.bankInterestRate;
-
-  // What customer repays to bank (credit orders only)
-  double get customerRepayment => price + bankInterest;
-
-  // MobiGas earns from bank (1%) — never shown to customer
-  double get mobigasCommission => price * MobiGasFees.bankCommissionRate;
-
-  // Vendor owes MobiGas on a cash order (1%) — never shown to customer
+  // Vendor owes MobiGas 1% on every order — never shown to customer.
   double get cashFinderFee => price * MobiGasFees.cashFinderFeeRate;
 }
 
@@ -235,11 +224,11 @@ class VendorModel {
   final String distance;
   final String deliveryTime;
 
-  /// Accumulated unpaid customer-finder fees from cash orders (KES).
+  /// Accumulated unpaid customer-finder fees (KES).
   final double feesOwed;
 
   /// Suspended by admin for unpaid platform fees — receives NO orders
-  /// (credit or cash) until cleared.
+  /// until cleared.
   final bool isSuspended;
 
   // ── Verification documents ──────────────────────────────────────
@@ -351,8 +340,6 @@ class VendorModel {
   bool get canReceiveOrders => !isSuspended && !isLockedForFees;
 }
 
-enum BankApprovalStatus { pending, approved, rejected }
-
 class CustomerModel {
   final String id;
   final String name;
@@ -360,6 +347,9 @@ class CustomerModel {
   final String phone;
   final String? deviceFingerprint;
   final bool deviceFlagged;
+  /// Kept for the referral fraud guard (recordReferralSignup reads the
+  /// customer's own doc rather than trusting call parameters), NOT for
+  /// credit underwriting.
   final String nationalId;
   final String county;
   final String area;
@@ -373,11 +363,6 @@ class CustomerModel {
   final String country;
   final double latitude;
   final double longitude;
-  final double? bankApprovedLimit;
-  final double bankCreditUsed;
-  final BankApprovalStatus bankStatus;
-  final String partnerBankName;
-  final List<GuarantorModel> guarantors;
   final String? selfieUrl;
   final String? fcmToken;
 
@@ -401,32 +386,11 @@ class CustomerModel {
     this.country = 'KE',
     required this.latitude,
     required this.longitude,
-    this.bankApprovedLimit,
-    required this.bankCreditUsed,
-    required this.bankStatus,
-    required this.partnerBankName,
-    required this.guarantors,
     this.selfieUrl,
     this.fcmToken,
     this.referralCode = '',
     this.referredByCode,
   });
-
-  double get bankCreditAvailable =>
-      (bankApprovedLimit ?? 0) - bankCreditUsed;
-
-  bool get isBankApproved =>
-      bankStatus == BankApprovalStatus.approved &&
-      bankApprovedLimit != null;
-
-  bool canAfford(GasListing listing) =>
-      bankCreditAvailable >= listing.price;
-}
-
-class GuarantorModel {
-  final String name;
-  final String phone;
-  const GuarantorModel({required this.name, required this.phone});
 }
 
 class OrderModel {
@@ -444,21 +408,20 @@ class OrderModel {
   /// 'KE' | 'TZ' | 'UG' — copied from the vendor at order-creation
   /// time and frozen, same pattern as finderFee.
   final String country;
-  final double bankDisbursementAmount;
-  final double originationFeeToMobigas;
   final String pin;
   final OrderStatus status;
   final DateTime createdAt;
-  final DateTime? bankRepaymentDueDate;
   final String? riderName;
   final String? riderPhone;
-  final String partnerBankName;
 
-  /// How the customer pays: credit (bank pays vendor) or cash on delivery.
+  /// How the customer pays. Only one value exists — kept as a field
+  /// rather than dropped entirely because every order document in
+  /// Firestore carries it, and confirmDelivery still reads it when
+  /// deciding whether the finder fee is chargeable.
   final PaymentMethod paymentMethod;
 
   /// Customer-finder fee the vendor owes MobiGas for this order
-  /// (cash orders only, 1% of gas price). Frozen at order time.
+  /// (1% of gas price). Frozen at order time.
   final double finderFee;
 
   /// 'customer' | 'vendor' | null — who cancelled this order. Both
@@ -481,106 +444,38 @@ class OrderModel {
     this.customerLongitude = 0.0,
     required this.listing,
     this.country = 'KE',
-    required this.bankDisbursementAmount,
-    required this.originationFeeToMobigas,
     required this.pin,
     required this.status,
     required this.createdAt,
-    this.bankRepaymentDueDate,
     this.riderName,
     this.riderPhone,
-    required this.partnerBankName,
     this.paymentMethod = PaymentMethod.cash,
     this.finderFee = 0.0,
     this.cancelledBy,
   });
 
-  /// What the customer actually pays in total:
-  /// cash → gas price handed to the vendor;
-  /// credit → gas price + bank interest repaid to the bank.
-  double get customerTotal => paymentMethod == PaymentMethod.cash
-      ? listing.price
-      : listing.customerRepayment;
+  /// What the customer pays in total: the gas price, handed to the
+  /// vendor on delivery. Nothing is added — no interest, no fee.
+  double get customerTotal => listing.price;
 }
 
 enum OrderStatus {
   pending,
-  bankApprovalPending,
   accepted,
   outForDelivery,
   delivered,
-  repaying,
-  completed,
-  defaulted,
   cancelled,
-}
-
-class PartnerBank {
-  final String id;
-  final String name;
-  final String type;
-  final double interestRate;
-  final int maxRepaymentDays;
-  final double minLoanAmount;
-  final double maxLoanAmount;
-
-  const PartnerBank({
-    required this.id,
-    required this.name,
-    required this.type,
-    required this.interestRate,
-    required this.maxRepaymentDays,
-    required this.minLoanAmount,
-    required this.maxLoanAmount,
-  });
-}
-
-// ── STOCK BOOST LOAN ──────────────────────────────────────────────────────
-enum StockLoanStatus {
-  pending,          // Vendor submitted application
-  submittedToBank,  // MobiGas sent to bank API
-  bankApproved,     // Bank approved loan amount
-  bankRejected,     // Bank rejected
-  disbursed,        // Bank sent funds to vendor M-Pesa
-  repaying,         // Vendor repaying
-  repaid,           // Fully repaid
-}
-
-class StockLoanApplication {
-  final String id;
-  final String vendorId;
-  final String vendorName;
-  final double requestedAmount;
-  final double approvedAmount;
-  final StockLoanStatus status;
-  final DateTime appliedAt;
-  final String partnerBankName;
-  final int monthsOnPlatform;
-  final int totalDeliveries;
-  final double averageMonthlyRevenue;
-
-  const StockLoanApplication({
-    required this.id,
-    required this.vendorId,
-    required this.vendorName,
-    required this.requestedAmount,
-    required this.approvedAmount,
-    required this.status,
-    required this.appliedAt,
-    required this.partnerBankName,
-    required this.monthsOnPlatform,
-    required this.totalDeliveries,
-    required this.averageMonthlyRevenue,
-  });
 }
 
 // ── FEATURE FLAGS ─────────────────────────────────────────────────────────
 // Flip to true to activate features
 class FeatureFlags {
-  static const bool stockBoostLoan = true;      // Vendor stock loans
+  // Vendor stock boost — a REFERRAL to a finance partner, not a loan
+  // from MobiGas. Gates nothing in code today; the real gate is
+  // stockBoostEligibility, written by the nightly server sweep.
+  static const bool stockBoostReferral = true;
   static const bool mpesaStkPush = false;         // In-app M-Pesa repayment
   static const bool vehicleLeasing = false;       // Vehicle leasing marketplace
   static const bool cargoInsurance = false;       // Cargo insurance
-  static const bool embeddedFinance = false;      // Full embedded finance suite
-  static const bool cashOrders = true;            // Cash-on-delivery orders
+  static const bool cashOrders = true;            // Pay-on-delivery orders
 }

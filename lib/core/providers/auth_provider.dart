@@ -325,7 +325,6 @@ class AuthProvider extends ChangeNotifier {
     String estate = '',
     double latitude = 0,
     double longitude = 0,
-    List<GuarantorModel> guarantors = const [],
     String? referralCode,
   }) async {
     _state = AuthState.loading;
@@ -392,11 +391,6 @@ class AuthProvider extends ChangeNotifier {
         country: detectedCountry,
         latitude: latitude,
         longitude: longitude,
-        bankApprovedLimit: null,
-        bankCreditUsed: 0,
-        bankStatus: BankApprovalStatus.pending,
-        partnerBankName: '',
-        guarantors: guarantors,
       );
 
       final selfieUploadFuture = selfieFile == null
@@ -520,11 +514,6 @@ class AuthProvider extends ChangeNotifier {
         // at the CustomerModel default ('KE') until then.
         latitude: 0,
         longitude: 0,
-        bankApprovedLimit: null,
-        bankCreditUsed: 0,
-        bankStatus: BankApprovalStatus.pending,
-        partnerBankName: '',
-        guarantors: const [],
       );
 
       // authMethod + optional photo are google-specific; the photo is
