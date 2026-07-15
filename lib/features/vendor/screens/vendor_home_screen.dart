@@ -632,9 +632,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
       child: _banner(
         icon: Icons.fact_check_outlined,
         color: AppColors.orange,
-        title: 'Get your verified badge',
+        title: 'Get verified to start selling',
         body:
-            'Upload your EPRA certificate, business permit, fire certificate and the rest — customers only see verified vendors',
+            'Upload your verification documents to go online and receive '
+            'orders. The app lists exactly which licences and certificates '
+            'your country requires.',
         showChevron: true,
       ),
     );
