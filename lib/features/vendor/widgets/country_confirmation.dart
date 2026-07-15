@@ -115,9 +115,9 @@ class _ConfirmedCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: accent.withOpacity(0.06),
+        color: accent.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: accent.withOpacity(0.30)),
+        border: Border.all(color: accent.withValues(alpha: 0.30)),
       ),
       child: Row(
         children: [
@@ -343,7 +343,7 @@ class _CountryTile extends StatelessWidget {
                       padding:
                           const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: accent.withOpacity(0.12),
+                        color: accent.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(

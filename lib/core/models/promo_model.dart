@@ -5,6 +5,9 @@ class PromoModel {
   final String title;
   final String highlightText;
   final String discountText;
+  /// Body copy for the 'info' layout — a short paragraph, not a badge.
+  /// Ignored by 'discount' and 'banner' layouts.
+  final String bodyText;
   final String imageUrl;
   final String ctaText;
   final String targetAudience; // customer | vendor | all
@@ -23,12 +26,21 @@ class PromoModel {
   final String advertiserLogoUrl;
   final String campaignId;
   final String disclosureText;
+  /// 'discount' = MobiGas-style card (title + highlight badge + CTA).
+  /// 'banner' = advertiser's own image fills the whole card edge-to-
+  /// edge, tappable, no forced text/CTA overlay. See PromoPopup.
+  final String layoutType;
+  /// Width/height ratio for the banner layout (1 = square, 1.91 =
+  /// landscape ad-standard, 0.8 = 4:5 portrait). Ignored for the
+  /// 'discount' layout.
+  final double bannerAspectRatio;
 
   PromoModel({
     required this.id,
     required this.title,
     required this.highlightText,
     required this.discountText,
+    this.bodyText = '',
     required this.imageUrl,
     required this.ctaText,
     required this.targetAudience,
@@ -45,6 +57,8 @@ class PromoModel {
     this.advertiserLogoUrl = '',
     this.campaignId = '',
     this.disclosureText = 'Ads by MobiGas',
+    this.layoutType = 'discount',
+    this.bannerAspectRatio = 1.0,
   });
 
   factory PromoModel.fromFirestore(DocumentSnapshot doc) {
@@ -54,6 +68,7 @@ class PromoModel {
       title: data['title'] ?? '',
       highlightText: data['highlightText'] ?? '',
       discountText: data['discountText'] ?? '',
+      bodyText: data['bodyText'] ?? '',
       imageUrl: data['imageUrl'] ?? '',
       ctaText: data['ctaText'] ?? 'Order Now',
       targetAudience: data['targetAudience'] ?? 'all',
@@ -70,6 +85,14 @@ class PromoModel {
       advertiserLogoUrl: data['advertiserLogoUrl'] ?? '',
       campaignId: data['campaignId'] ?? '',
       disclosureText: data['disclosureText'] ?? 'Ads by MobiGas',
+      layoutType: const ['discount', 'banner', 'info']
+              .contains(data['layoutType'])
+          ? data['layoutType'] as String
+          : 'discount',
+      bannerAspectRatio: (data['bannerAspectRatio'] as num?)?.toDouble() != null &&
+              (data['bannerAspectRatio'] as num).toDouble() > 0
+          ? (data['bannerAspectRatio'] as num).toDouble()
+          : 1.0,
     );
   }
 
