@@ -60,7 +60,8 @@ class VendorHomeScreen extends StatefulWidget {
   State<VendorHomeScreen> createState() => _VendorHomeScreenState();
 }
 
-class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixin {
+class _VendorHomeScreenState extends State<VendorHomeScreen>
+    with PromoPopupMixin {
   int _currentTab = 0;
   bool _isOnline = false;
   Map<String, dynamic>? _vendorData;
@@ -91,11 +92,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
   /// order, computed from the vendor's own saved location instead of
   /// a customer's live GPS.
   static double _distanceKm(
-      double lat1, double lng1, double lat2, double lng2) {
+    double lat1,
+    double lng1,
+    double lat2,
+    double lng2,
+  ) {
     const r = 6371.0; // Earth radius in km
     final dLat = (lat2 - lat1) * pi / 180;
     final dLng = (lng2 - lng1) * pi / 180;
-    final a = sin(dLat / 2) * sin(dLat / 2) +
+    final a =
+        sin(dLat / 2) * sin(dLat / 2) +
         cos(lat1 * pi / 180) *
             cos(lat2 * pi / 180) *
             sin(dLng / 2) *
@@ -118,12 +124,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     if (order.customerLatitude == 0 && order.customerLongitude == 0) {
       return null;
     }
-    return _formatDistanceKm(_distanceKm(
-      _vendorLatitude,
-      _vendorLongitude,
-      order.customerLatitude,
-      order.customerLongitude,
-    ));
+    return _formatDistanceKm(
+      _distanceKm(
+        _vendorLatitude,
+        _vendorLongitude,
+        order.customerLatitude,
+        order.customerLongitude,
+      ),
+    );
   }
 
   @override
@@ -206,14 +214,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
           _isLoadingVendor = false;
           _vendorLoadFailed = false;
         });
-        if (!_promoChecked) {                     // ← add this block
-    _promoChecked = true;
-    checkForPromo(
-      audience: 'vendor',
-      country: (_vendorData?['country'] as String?) ?? 'KE',
-      userId: _vendorId,
-    );
-  }
+        if (!_promoChecked) {
+          // ← add this block
+          _promoChecked = true;
+          checkForPromo(
+            audience: 'vendor',
+            country: (_vendorData?['country'] as String?) ?? 'KE',
+            userId: _vendorId,
+          );
+        }
       } else {
         // New vendor — no profile yet, show setup banner
         setState(() {
@@ -259,11 +268,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     final startOfToday = DateTime(now.year, now.month, now.day);
 
     try {
-      final allSnap =
-          await base.aggregate(sum('gasPrice'), count()).get().bounded();
+      final allSnap = await base
+          .aggregate(sum('gasPrice'), count())
+          .get()
+          .bounded();
       final todaySnap = await base
-          .where('createdAt',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+          .where(
+            'createdAt',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday),
+          )
           .aggregate(sum('gasPrice'))
           .get()
           .bounded();
@@ -290,11 +303,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
   /// directly rather than through the model. Update both together.
   bool get _documentsSubmitted {
     String s(String key) => (_vendorData?[key] ?? '').toString();
-    final hasEpraProof = s('epraCertificateUrl').isNotEmpty ||
+    final hasEpraProof =
+        s('epraCertificateUrl').isNotEmpty ||
         s('subDealerAuthorizationUrl').isNotEmpty;
-    final hasScaleProof = s('weighingScaleCertUrl').isNotEmpty ||
+    final hasScaleProof =
+        s('weighingScaleCertUrl').isNotEmpty ||
         s('weighingScalePhotoUrl').isNotEmpty;
-    final hasBrandProof = s('brandAuthorizationUrl').isNotEmpty ||
+    final hasBrandProof =
+        s('brandAuthorizationUrl').isNotEmpty ||
         s('dealerAssociationLetterUrl').isNotEmpty;
     final isSole = (_vendorData?['businessType'] ?? 'sole') == 'sole';
     final hasBusinessReg = !isSole || s('businessRegistrationUrl').isNotEmpty;
@@ -316,13 +332,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
       final docsIn = _documentsSubmitted;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(docsIn
-              ? 'Your documents are under review. You can go online as soon as MobiGas approves your account.'
-              : 'Upload your verification documents before going online.'),
+          content: Text(
+            docsIn
+                ? 'Your documents are under review. You can go online as soon as MobiGas approves your account.'
+                : 'Upload your verification documents before going online.',
+          ),
           backgroundColor: AppColors.warning,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       );
       return;
@@ -344,7 +363,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(
-              'Could not update your status. Check your connection.'),
+            'Could not update your status. Check your connection.',
+          ),
           backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
         ),
@@ -355,17 +375,22 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
   Stream<List<OrderModel>> get _pendingOrdersStream {
     return FirebaseService.orders
         .where('vendorId', isEqualTo: _vendorId)
-        .where('status', whereIn: [
-          OrderStatus.pending.name,
-          OrderStatus.accepted.name,
-          OrderStatus.outForDelivery.name,
-        ])
+        .where(
+          'status',
+          whereIn: [
+            OrderStatus.pending.name,
+            OrderStatus.accepted.name,
+            OrderStatus.outForDelivery.name,
+          ],
+        )
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              return _orderFromMap(doc.id, data);
-            }).toList());
+        .map(
+          (snap) => snap.docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return _orderFromMap(doc.id, data);
+          }).toList(),
+        );
   }
 
   /// The 20 most recent completed orders, for the Orders tab list.
@@ -378,10 +403,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
         .orderBy('createdAt', descending: true)
         .limit(20)
         .snapshots()
-        .map((snap) => snap.docs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              return _orderFromMap(doc.id, data);
-            }).toList());
+        .map(
+          (snap) => snap.docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return _orderFromMap(doc.id, data);
+          }).toList(),
+        );
   }
 
   OrderModel _orderFromMap(String docId, Map<String, dynamic> data) {
@@ -449,9 +476,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(current == OrderStatus.cancelled.name
-                ? 'This order was cancelled by the customer.'
-                : 'This order is no longer pending.'),
+            content: Text(
+              current == OrderStatus.cancelled.name
+                  ? 'This order was cancelled by the customer.'
+                  : 'This order is no longer pending.',
+            ),
             backgroundColor: AppColors.warning,
             behavior: SnackBarBehavior.floating,
           ),
@@ -479,8 +508,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     // Goes through the service so declines are handled consistently
     // (status update + customer notification).
     await FirestoreService.updateOrderStatus(
-        order.orderId, OrderStatus.cancelled,
-        cancelledBy: 'vendor');
+      order.orderId,
+      OrderStatus.cancelled,
+      cancelledBy: 'vendor',
+    );
   }
 
   /// launchUrl RETURNS false on failure — it does not throw. The old
@@ -623,8 +654,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
           context,
           MaterialPageRoute(
             builder: (_) => VendorSetupScreen(
-                existingData: _vendorData,
-                mode: VendorEditMode.documentsOnly),
+              existingData: _vendorData,
+              mode: VendorEditMode.documentsOnly,
+            ),
           ),
         );
         if (done == true) _refreshAll();
@@ -679,19 +711,23 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: color,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        )),
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(body,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: color,
-                          height: 1.4,
-                          fontSize: 11,
-                        )),
+                Text(
+                  body,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: color,
+                    height: 1.4,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
           ),
@@ -735,24 +771,24 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     Text(
                       'Welcome back 👋',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: AppColors.gray400,
-                          ),
+                        color: AppColors.gray400,
+                      ),
                     ),
                     Text(
                       _businessName.isEmpty ? 'Vendor' : _businessName,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                            color: AppColors.white,
-                            fontSize: 20,
-                          ),
+                      style: Theme.of(context).textTheme.displayMedium
+                          ?.copyWith(color: AppColors.white, fontSize: 20),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 12),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: _isOnline
                       ? AppColors.success.withValues(alpha: 0.2)
@@ -773,10 +809,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     Text(
                       _isOnline ? 'Online' : 'Offline',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color:
-                                _isOnline ? AppColors.success : AppColors.error,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        color: _isOnline ? AppColors.success : AppColors.error,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -788,12 +823,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
           const SizedBox(height: 16),
           Text(
             _dedupeJoin(
-                (_vendorData?['address'] ?? _vendorData?['estate'] ?? '')
-                    .toString(),
-                (_vendorData?['county'] ?? '').toString()),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.gray400,
-                ),
+              (_vendorData?['address'] ?? _vendorData?['estate'] ?? '')
+                  .toString(),
+              (_vendorData?['county'] ?? '').toString(),
+            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: AppColors.gray400),
           ),
         ],
       ),
@@ -809,8 +845,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: FirestoreService.watchNotifications(_vendorId),
       builder: (context, snap) {
-        final unreadCount =
-            (snap.data ?? []).where((n) => n['read'] != true).length;
+        final unreadCount = (snap.data ?? [])
+            .where((n) => n['read'] != true)
+            .length;
         return GestureDetector(
           onTap: () => _showNotifications(context, _vendorId),
           child: Stack(
@@ -823,8 +860,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                   color: AppColors.orange.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.notifications_outlined,
-                    color: AppColors.orange, size: 22),
+                child: const Icon(
+                  Icons.notifications_outlined,
+                  color: AppColors.orange,
+                  size: 22,
+                ),
               ),
               if (unreadCount > 0)
                 Positioned(
@@ -832,9 +872,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                   right: -2,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 1),
-                    constraints:
-                        const BoxConstraints(minWidth: 18, minHeight: 18),
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 18,
+                      minHeight: 18,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.error,
                       borderRadius: BorderRadius.circular(9),
@@ -844,9 +888,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                       unreadCount > 9 ? '9+' : '$unreadCount',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                          color: AppColors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700),
+                        color: AppColors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
@@ -877,23 +922,27 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
               children: [
                 Row(
                   children: [
-                    Text('Notifications',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(color: AppColors.navy)),
+                    Text(
+                      'Notifications',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleLarge?.copyWith(color: AppColors.navy),
+                    ),
                     const Spacer(),
                     TextButton(
                       onPressed: () =>
                           FirestoreService.markAllNotificationsRead(userId),
-                      child: Text('Mark all read',
-                          style: TextStyle(
-                              color: AppColors.orange, fontSize: 13)),
+                      child: Text(
+                        'Mark all read',
+                        style: TextStyle(color: AppColors.orange, fontSize: 13),
+                      ),
                     ),
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: Text('Close',
-                          style: TextStyle(color: AppColors.orange)),
+                      child: Text(
+                        'Close',
+                        style: TextStyle(color: AppColors.orange),
+                      ),
                     ),
                   ],
                 ),
@@ -904,8 +953,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     builder: (context, snap) {
                       if (!snap.hasData) {
                         return const Center(
-                            child: CircularProgressIndicator(
-                                color: AppColors.orange));
+                          child: CircularProgressIndicator(
+                            color: AppColors.orange,
+                          ),
+                        );
                       }
                       final notifications = snap.data!;
                       if (notifications.isEmpty) {
@@ -913,21 +964,22 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.notifications_none_rounded,
-                                  size: 64, color: AppColors.gray400),
+                              const Icon(
+                                Icons.notifications_none_rounded,
+                                size: 64,
+                                color: AppColors.gray400,
+                              ),
                               const SizedBox(height: 12),
-                              Text('No notifications yet',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(color: AppColors.gray600)),
+                              Text(
+                                'No notifications yet',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(color: AppColors.gray600),
+                              ),
                               const SizedBox(height: 8),
                               Text(
                                 'Order and delivery updates\nwill appear here',
                                 textAlign: TextAlign.center,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
+                                style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(color: AppColors.gray400),
                               ),
                             ],
@@ -946,23 +998,28 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                             direction: DismissDirection.endToStart,
                             onDismissed: (_) =>
                                 FirestoreService.deleteNotification(
-                                    n['id'] as String),
+                                  n['id'] as String,
+                                ),
                             background: Container(
                               alignment: Alignment.centerRight,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppColors.error,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.delete_outline_rounded,
-                                  color: AppColors.white),
+                              child: const Icon(
+                                Icons.delete_outline_rounded,
+                                color: AppColors.white,
+                              ),
                             ),
                             child: GestureDetector(
                               onTap: () {
                                 if (!isRead) {
                                   FirestoreService.markNotificationRead(
-                                      n['id'] as String);
+                                    n['id'] as String,
+                                  );
                                 }
                               },
                               child: Container(
@@ -970,18 +1027,20 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                                 decoration: BoxDecoration(
                                   color: isRead
                                       ? AppColors.white
-                                      : AppColors.orange
-                                          .withValues(alpha: 0.06),
+                                      : AppColors.orange.withValues(
+                                          alpha: 0.06,
+                                        ),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                      color: isRead
-                                          ? AppColors.gray200
-                                          : AppColors.orange
-                                              .withValues(alpha: 0.3)),
+                                    color: isRead
+                                        ? AppColors.gray200
+                                        : AppColors.orange.withValues(
+                                            alpha: 0.3,
+                                          ),
+                                  ),
                                 ),
                                 child: Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     if (!isRead)
                                       Container(
@@ -1007,30 +1066,35 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                                                 .textTheme
                                                 .bodyMedium
                                                 ?.copyWith(
-                                                    color: AppColors.navy,
-                                                    fontWeight: isRead
-                                                        ? FontWeight.w500
-                                                        : FontWeight.w700),
+                                                  color: AppColors.navy,
+                                                  fontWeight: isRead
+                                                      ? FontWeight.w500
+                                                      : FontWeight.w700,
+                                                ),
                                           ),
                                           const SizedBox(height: 2),
-                                          Text(n['body'] as String,
+                                          Text(
+                                            n['body'] as String,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color: AppColors.gray600,
+                                                  height: 1.4,
+                                                ),
+                                          ),
+                                          if (createdAt != null) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              '${createdAt.day}/${createdAt.month}/${createdAt.year} · ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
                                               style: Theme.of(context)
                                                   .textTheme
                                                   .bodySmall
                                                   ?.copyWith(
-                                                      color: AppColors.gray600,
-                                                      height: 1.4)),
-                                          if (createdAt != null) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                                '${createdAt.day}/${createdAt.month}/${createdAt.year} · ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}',
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodySmall
-                                                    ?.copyWith(
-                                                        color:
-                                                            AppColors.gray400,
-                                                        fontSize: 10)),
+                                                    color: AppColors.gray400,
+                                                    fontSize: 10,
+                                                  ),
+                                            ),
                                           ],
                                         ],
                                       ),
@@ -1038,11 +1102,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                                     GestureDetector(
                                       onTap: () =>
                                           FirestoreService.deleteNotification(
-                                              n['id'] as String),
+                                            n['id'] as String,
+                                          ),
                                       child: const Padding(
                                         padding: EdgeInsets.all(4),
-                                        child: Icon(Icons.close_rounded,
-                                            size: 16, color: AppColors.gray400),
+                                        child: Icon(
+                                          Icons.close_rounded,
+                                          size: 16,
+                                          color: AppColors.gray400,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -1075,8 +1143,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
           color: !isVerified
               ? AppColors.gray400.withValues(alpha: 0.5)
               : _isOnline
-                  ? AppColors.success
-                  : AppColors.gray400,
+              ? AppColors.success
+              : AppColors.gray400,
           borderRadius: BorderRadius.circular(20),
           boxShadow: _isOnline && isVerified
               ? [
@@ -1101,8 +1169,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                 !isVerified
                     ? Icons.lock_outline_rounded
                     : _isOnline
-                        ? Icons.wifi_rounded
-                        : Icons.wifi_off_rounded,
+                    ? Icons.wifi_rounded
+                    : Icons.wifi_off_rounded,
                 color: AppColors.white,
                 size: 28,
               ),
@@ -1116,23 +1184,23 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     !isVerified
                         ? 'Locked until verified'
                         : _isOnline
-                            ? 'You are online'
-                            : 'You are offline',
+                        ? 'You are online'
+                        : 'You are offline',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 18,
-                        ),
+                      color: AppColors.white,
+                      fontSize: 18,
+                    ),
                   ),
                   Text(
                     !isVerified
                         ? 'Complete verification above to unlock'
                         : _isOnline
-                            ? 'Receiving new orders · Tap to go offline'
-                            : 'Not receiving orders · Tap to go online',
+                        ? 'Receiving new orders · Tap to go offline'
+                        : 'Not receiving orders · Tap to go online',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.white.withValues(alpha: 0.8),
-                          fontSize: 12,
-                        ),
+                      color: AppColors.white.withValues(alpha: 0.8),
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -1151,14 +1219,26 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     final e = _earnings;
     return Row(
       children: [
-        _statCard('Today', _money(e?.today), Icons.today_rounded,
-            AppColors.orange),
+        _statCard(
+          'Today',
+          _money(e?.today),
+          Icons.today_rounded,
+          AppColors.orange,
+        ),
         const SizedBox(width: 12),
-        _statCard('Total earnings', _money(e?.total),
-            Icons.account_balance_wallet_rounded, AppColors.success),
+        _statCard(
+          'Total earnings',
+          _money(e?.total),
+          Icons.account_balance_wallet_rounded,
+          AppColors.success,
+        ),
         const SizedBox(width: 12),
-        _statCard('Deliveries', e == null ? '—' : '${e.deliveries}',
-            Icons.two_wheeler_rounded, AppColors.navy),
+        _statCard(
+          'Deliveries',
+          e == null ? '—' : '${e.deliveries}',
+          Icons.two_wheeler_rounded,
+          AppColors.navy,
+        ),
       ],
     );
   }
@@ -1177,17 +1257,21 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
           children: [
             Icon(icon, color: color, size: 20),
             const SizedBox(height: 8),
-            Text(value,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.navy,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                    )),
-            Text(label,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.gray400,
-                      fontSize: 10,
-                    )),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.gray400,
+                fontSize: 10,
+              ),
+            ),
           ],
         ),
       ),
@@ -1198,26 +1282,27 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Incoming orders',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.navy,
-                  fontWeight: FontWeight.w700,
-                )),
+        Text(
+          'Incoming orders',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            color: AppColors.navy,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         const SizedBox(height: 12),
         StreamBuilder<List<OrderModel>>(
           stream: _pendingOrdersStream,
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(
-                  child: CircularProgressIndicator(color: AppColors.orange));
+                child: CircularProgressIndicator(color: AppColors.orange),
+              );
             }
             final orders = snap.data ?? [];
             if (orders.isEmpty) {
               return _buildNoOrders();
             }
-            return Column(
-              children: orders.map((o) => _orderCard(o)).toList(),
-            );
+            return Column(children: orders.map((o) => _orderCard(o)).toList());
           },
         ),
       ],
@@ -1239,9 +1324,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
           const SizedBox(height: 12),
           Text(
             _isOnline ? 'No orders yet' : 'You are offline',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.gray600,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: AppColors.gray600),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1249,10 +1334,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                 ? 'New orders will appear here in real-time'
                 : 'Go online to start receiving orders',
             textAlign: TextAlign.center,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: AppColors.gray400),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: AppColors.gray400),
           ),
         ],
       ),
@@ -1268,13 +1352,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     Color statusColor = isPending
         ? AppColors.warning
         : isAccepted
-            ? AppColors.orange
-            : AppColors.success;
+        ? AppColors.orange
+        : AppColors.success;
     String statusLabel = isPending
         ? 'New order'
         : isAccepted
-            ? 'Accepted'
-            : 'Out for delivery';
+        ? 'Accepted'
+        : 'Out for delivery';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1292,8 +1376,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: statusColor.withValues(alpha: 0.1),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(14)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(14),
+              ),
             ),
             child: Row(
               children: [
@@ -1306,15 +1391,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(statusLabel,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: statusColor,
-                          fontWeight: FontWeight.w600,
-                        )),
+                Text(
+                  statusLabel,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(width: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.navy,
                     borderRadius: BorderRadius.circular(10),
@@ -1322,18 +1411,20 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                   child: Text(
                     'Pay on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      color: AppColors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 const Spacer(),
-                Text(order.orderId,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.gray400,
-                          fontSize: 10,
-                        )),
+                Text(
+                  order.orderId,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400,
+                    fontSize: 10,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1347,22 +1438,21 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(order.customerName,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(
-                                    color: AppColors.navy,
-                                    fontWeight: FontWeight.w700,
-                                  )),
                           Text(
-                              distance == null
-                                  ? order.customerArea
-                                  : '${order.customerArea} · $distance',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: AppColors.gray400)),
+                            order.customerName,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: AppColors.navy,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          Text(
+                            distance == null
+                                ? order.customerArea
+                                : '${order.customerArea} · $distance',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: AppColors.gray400),
+                          ),
                         ],
                       ),
                     ),
@@ -1370,19 +1460,22 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          Currency.formatFor(order.country, order.listing.price),
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    color: AppColors.navy,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 20,
-                                  ),
+                          Currency.formatFor(
+                            order.country,
+                            order.listing.price,
+                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                color: AppColors.navy,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 20,
+                              ),
                         ),
-                        Text(order.listing.size,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: AppColors.orange)),
+                        Text(
+                          order.listing.size,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: AppColors.orange),
+                        ),
                       ],
                     ),
                   ],
@@ -1394,8 +1487,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                 // actually stock what's being asked for, and no
                 // phone number to call the customer.
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.gray100,
                     borderRadius: BorderRadius.circular(10),
@@ -1418,13 +1513,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                               order.listing.brand.isNotEmpty
                                   ? '${order.listing.brand} · ${order.listing.productType.label}'
                                   : order.listing.productType.label,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
-                                      color: AppColors.navy,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12),
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
                             ),
                           ),
                         ],
@@ -1433,22 +1527,29 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                         const SizedBox(height: 6),
                         Row(
                           children: [
-                            const Icon(Icons.phone_outlined,
-                                size: 15, color: AppColors.gray600),
+                            const Icon(
+                              Icons.phone_outlined,
+                              size: 15,
+                              color: AppColors.gray600,
+                            ),
                             const SizedBox(width: 6),
                             Expanded(
-                              child: Text(order.customerPhone,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(
-                                          color: AppColors.navy, fontSize: 12)),
+                              child: Text(
+                                order.customerPhone,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: AppColors.navy,
+                                      fontSize: 12,
+                                    ),
+                              ),
                             ),
                             GestureDetector(
                               onTap: () => _callCustomer(order.customerPhone),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
                                   color: AppColors.success,
                                   borderRadius: BorderRadius.circular(8),
@@ -1456,17 +1557,23 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.call_rounded,
-                                        size: 12, color: AppColors.white),
+                                    const Icon(
+                                      Icons.call_rounded,
+                                      size: 12,
+                                      color: AppColors.white,
+                                    ),
                                     const SizedBox(width: 4),
-                                    Text('Call',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                                color: AppColors.white,
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w700)),
+                                    Text(
+                                      'Call',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: AppColors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1480,8 +1587,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                 const SizedBox(height: 10),
                 Container(
                   width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.navy.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(10),
@@ -1489,10 +1598,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                   child: Text(
                     'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery (cash or ${MobileMoney.primaryLabelFor(order.country)} to you).',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.navy,
-                          fontSize: 11,
-                          height: 1.4,
-                        ),
+                      color: AppColors.navy,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -1506,7 +1615,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                             foregroundColor: AppColors.error,
                             side: const BorderSide(color: AppColors.error),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 4, vertical: 12),
+                              horizontal: 4,
+                              vertical: 12,
+                            ),
                           ),
                           child: const FittedBox(
                             fit: BoxFit.scaleDown,
@@ -1537,7 +1648,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                       _loadEarnings();
                     },
                     child: Text(
-                        isAccepted ? 'Start delivery' : 'Continue delivery'),
+                      isAccepted ? 'Start delivery' : 'Continue delivery',
+                    ),
                   ),
                 ],
               ],
@@ -1555,12 +1667,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
         Container(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
           color: AppColors.navy,
-          child: Row(children: [
-            Text('Recent orders',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.white,
-                    )),
-          ]),
+          child: Row(
+            children: [
+              Text(
+                'Recent orders',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(color: AppColors.white),
+              ),
+            ],
+          ),
         ),
         Expanded(
           child: StreamBuilder<List<OrderModel>>(
@@ -1572,14 +1688,17 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.receipt_long_outlined,
-                          size: 64, color: AppColors.gray400),
+                      const Icon(
+                        Icons.receipt_long_outlined,
+                        size: 64,
+                        color: AppColors.gray400,
+                      ),
                       const SizedBox(height: 16),
-                      Text('No completed orders yet',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(color: AppColors.gray600)),
+                      Text(
+                        'No completed orders yet',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(color: AppColors.gray600),
+                      ),
                     ],
                   ),
                 );
@@ -1598,12 +1717,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                         orders.length < 20
                             ? ''
                             : 'Showing your 20 most recent deliveries. '
-                                'Full history is in Statistics & Reports.',
+                                  'Full history is in Statistics & Reports.',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: AppColors.gray400, fontSize: 11),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.gray400,
+                          fontSize: 11,
+                        ),
                       ),
                     );
                   }
@@ -1638,36 +1757,43 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
               color: AppColors.success.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.check_circle_rounded,
-                color: AppColors.success, size: 22),
+            child: const Icon(
+              Icons.check_circle_rounded,
+              color: AppColors.success,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(order.customerName,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontSize: 14, color: AppColors.navy)),
                 Text(
-                    distance == null
-                        ? '${order.listing.size} · $dateStr'
-                        : '${order.listing.size} · $dateStr · $distance',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: AppColors.gray400)),
+                  order.customerName,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 14,
+                    color: AppColors.navy,
+                  ),
+                ),
+                Text(
+                  distance == null
+                      ? '${order.listing.size} · $dateStr'
+                      : '${order.listing.size} · $dateStr · $distance',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: AppColors.gray400),
+                ),
               ],
             ),
           ),
-          Text(Currency.formatFor(order.country, order.listing.price),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontSize: 14,
-                    color: AppColors.success,
-                    fontWeight: FontWeight.w700,
-                  )),
+          Text(
+            Currency.formatFor(order.country, order.listing.price),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontSize: 14,
+              color: AppColors.success,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );
@@ -1690,31 +1816,34 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
               decoration: const BoxDecoration(
                 color: AppColors.navy,
-                borderRadius:
-                    BorderRadius.vertical(bottom: Radius.circular(28)),
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(28),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Total earnings',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: AppColors.gray400)),
+                  Text(
+                    'Total earnings',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: AppColors.gray400),
+                  ),
                   Text(
                     _money(e?.total),
                     style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                          color: AppColors.white,
-                          fontSize: 40,
-                          fontWeight: FontWeight.w800,
-                        ),
+                      color: AppColors.white,
+                      fontSize: 40,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 8),
-                  Text('Today: ${_money(e?.today)}',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: AppColors.orange)),
+                  Text(
+                    'Today: ${_money(e?.today)}',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: AppColors.orange),
+                  ),
                 ],
               ),
             ),
@@ -1730,20 +1859,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Text(
                         'Could not load your totals. Pull down to retry.',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: AppColors.error),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: AppColors.error),
                       ),
                     ),
                   Text(
-                      e == null
-                          ? 'Loading deliveries…'
-                          : '${e.deliveries} deliveries completed',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(color: AppColors.navy)),
+                    e == null
+                        ? 'Loading deliveries…'
+                        : '${e.deliveries} deliveries completed',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(color: AppColors.navy),
+                  ),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -1754,10 +1882,33 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     ),
                     child: Column(
                       children: [
-                        _earningsRow('How you get paid',
-                            'Customer pays you directly on delivery — cash or mobile money'),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'How you get paid',
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: AppColors.gray600),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Customer pays you directly on delivery — cash or mobile money',
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: AppColors.navy,
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.4,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
                         _earningsRow(
-                            'Your ${MobileMoney.primaryLabelFor(_vendorData?["country"])}', _vendorData?['phone'] ?? ''),
+                          'Your ${MobileMoney.primaryLabelFor(_vendorData?["country"])}',
+                          _vendorData?['phone'] ?? '',
+                        ),
                       ],
                     ),
                   ),
@@ -1767,7 +1918,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                       context,
                       MaterialPageRoute(
                         builder: (_) => VendorStatisticsScreen(
-                            vendorData: _vendorData ?? {}),
+                          vendorData: _vendorData ?? {},
+                        ),
                       ),
                     ),
                     child: Container(
@@ -1786,36 +1938,43 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                               color: AppColors.orange.withValues(alpha: 0.2),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.bar_chart_rounded,
-                                color: AppColors.orange, size: 22),
+                            child: const Icon(
+                              Icons.bar_chart_rounded,
+                              color: AppColors.orange,
+                              size: 22,
+                            ),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Statistics & Reports',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                            color: AppColors.white,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w700)),
+                                Text(
+                                  'Statistics & Reports',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(
+                                        color: AppColors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
                                 const SizedBox(height: 2),
                                 Text(
-                                    'Month-on-month sales, fulfillment rate, PDF export',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                            color: AppColors.gray400,
-                                            fontSize: 11)),
+                                  'Month-on-month sales, fulfillment rate, PDF export',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: AppColors.gray400,
+                                        fontSize: 11,
+                                      ),
+                                ),
                               ],
                             ),
                           ),
-                          const Icon(Icons.arrow_forward_ios_rounded,
-                              color: AppColors.orange, size: 14),
+                          const Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            color: AppColors.orange,
+                            size: 14,
+                          ),
                         ],
                       ),
                     ),
@@ -1835,18 +1994,22 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.gray600,
-                  )),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.gray600),
+          ),
           const Spacer(),
           Flexible(
-            child: Text(value,
-                textAlign: TextAlign.right,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.navy,
-                      fontWeight: FontWeight.w600,
-                    )),
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -1856,15 +2019,16 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
   // ── PROFILE TAB ───────────────────────────────────────────────────
   Widget _buildProfileTab() {
     final user = FirebaseAuth.instance.currentUser;
-    final photoUrl =
-        (_vendorData?['photoUrl'] as String?) ?? user?.photoURL;
+    final photoUrl = (_vendorData?['photoUrl'] as String?) ?? user?.photoURL;
 
     // BUG FIX: `(_vendorData?['businessName'] ?? 'V')[0]` — `??` only
     // catches null, and a vendor who hasn't run setup has an EMPTY
     // businessName, which is exactly the condition the setup banner
     // tests for. ''[0] throws RangeError, so every brand-new vendor
     // crashed the moment they opened this tab.
-    final initial = _businessName.isEmpty ? 'V' : _businessName[0].toUpperCase();
+    final initial = _businessName.isEmpty
+        ? 'V'
+        : _businessName[0].toUpperCase();
 
     return SingleChildScrollView(
       child: Column(
@@ -1899,10 +2063,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                 Text(
                   _businessName.isEmpty ? 'Your business' : _businessName,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(color: AppColors.white),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(color: AppColors.white),
                 ),
                 const SizedBox(height: 8),
                 GestureDetector(
@@ -1911,14 +2074,17 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                       context,
                       MaterialPageRoute(
                         builder: (_) => VendorEditProfileScreen(
-                            vendorData: _vendorData ?? {}),
+                          vendorData: _vendorData ?? {},
+                        ),
                       ),
                     );
                     if (updated == true) _refreshAll();
                   },
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.orange.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -1926,15 +2092,20 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.edit_rounded,
-                            color: AppColors.orange, size: 14),
+                        const Icon(
+                          Icons.edit_rounded,
+                          color: AppColors.orange,
+                          size: 14,
+                        ),
                         const SizedBox(width: 6),
-                        Text('Edit profile',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.orange,
-                                      fontWeight: FontWeight.w600,
-                                    )),
+                        Text(
+                          'Edit profile',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: AppColors.orange,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
                       ],
                     ),
                   ),
@@ -1942,32 +2113,35 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                 const SizedBox(height: 4),
                 Text(
                   user?.email ?? '',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: AppColors.gray400),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: AppColors.gray400),
                 ),
                 const SizedBox(height: 12),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
-                    color: (_vendorData?['isVerified'] == true
-                            ? AppColors.success
-                            : AppColors.warning)
-                        .withValues(alpha: 0.2),
+                    color:
+                        (_vendorData?['isVerified'] == true
+                                ? AppColors.success
+                                : AppColors.warning)
+                            .withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                      _vendorData?['isVerified'] == true
-                          ? 'Verified vendor ✓'
-                          : 'Pending verification ⏳',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: _vendorData?['isVerified'] == true
-                                ? AppColors.success
-                                : AppColors.warning,
-                            fontWeight: FontWeight.w600,
-                          )),
+                    _vendorData?['isVerified'] == true
+                        ? 'Verified vendor ✓'
+                        : 'Pending verification ⏳',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: _vendorData?['isVerified'] == true
+                          ? AppColors.success
+                          : AppColors.warning,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1976,17 +2150,27 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                _profileTile(Icons.store_outlined, 'Business name',
-                    _businessName.isEmpty ? 'Not set' : _businessName),
-                _profileTile(Icons.phone_outlined, '${MobileMoney.primaryLabelFor(_vendorData?["country"])} number',
-                    (_vendorData?['phone'] ?? '').toString()),
                 _profileTile(
-                    Icons.location_on_outlined,
-                    'Location',
-                    (_vendorData?['address'] ?? _vendorData?['estate'] ?? '')
-                        .toString()),
-                _profileTile(Icons.local_gas_station_outlined, 'Brands',
-                    (_vendorData?['brands'] as List?)?.join(', ') ?? ''),
+                  Icons.store_outlined,
+                  'Business name',
+                  _businessName.isEmpty ? 'Not set' : _businessName,
+                ),
+                _profileTile(
+                  Icons.phone_outlined,
+                  '${MobileMoney.primaryLabelFor(_vendorData?["country"])} number',
+                  (_vendorData?['phone'] ?? '').toString(),
+                ),
+                _profileTile(
+                  Icons.location_on_outlined,
+                  'Location',
+                  (_vendorData?['address'] ?? _vendorData?['estate'] ?? '')
+                      .toString(),
+                ),
+                _profileTile(
+                  Icons.local_gas_station_outlined,
+                  'Brands',
+                  (_vendorData?['brands'] as List?)?.join(', ') ?? '',
+                ),
                 const SizedBox(height: 8),
                 _editEntryButton(
                   icon: Icons.store_outlined,
@@ -2107,10 +2291,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
             children: [
               Icon(icon, color: AppColors.orange, size: 20),
               const SizedBox(width: 12),
-              Text(label,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.gray600,
-                      )),
+              Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppColors.gray600),
+              ),
             ],
           ),
           const SizedBox(height: 6),
@@ -2120,11 +2306,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
           // mid-digit whenever it didn't fit.
           Padding(
             padding: const EdgeInsets.only(left: 32),
-            child: Text(value.isEmpty ? '—' : value,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.navy,
-                      fontWeight: FontWeight.w600,
-                    )),
+            child: Text(
+              value.isEmpty ? '—' : value,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -2136,9 +2324,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
     final items = [
       _NavItem(Icons.home_outlined, Icons.home_rounded, 'Home'),
       _NavItem(
-          Icons.receipt_long_outlined, Icons.receipt_long_rounded, 'Orders'),
-      _NavItem(Icons.account_balance_wallet_outlined,
-          Icons.account_balance_wallet_rounded, 'Earnings'),
+        Icons.receipt_long_outlined,
+        Icons.receipt_long_rounded,
+        'Orders',
+      ),
+      _NavItem(
+        Icons.account_balance_wallet_outlined,
+        Icons.account_balance_wallet_rounded,
+        'Earnings',
+      ),
       _NavItem(Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
     ];
 
@@ -2180,19 +2374,18 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> with PromoPopupMixi
                         size: 24,
                       ),
                       const SizedBox(height: 4),
-                      Text(item.label,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: isActive
-                                    ? AppColors.orange
-                                    : AppColors.gray400,
-                                fontSize: 10,
-                                fontWeight: isActive
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                              )),
+                      Text(
+                        item.label,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: isActive
+                              ? AppColors.orange
+                              : AppColors.gray400,
+                          fontSize: 10,
+                          fontWeight: isActive
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
                     ],
                   ),
                 ),

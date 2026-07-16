@@ -2,20 +2,26 @@
 //
 // MobiGas vendor app — "Stock boost" as a REFERRAL surface.
 //
-// MobiGas decides NOTHING here. There is no eligibility threshold, no
-// qualifying amount, no gate — the card shows the vendor a fact (their
-// sales through the platform) and, when the program is active, a
-// request button. The finance partner sees the trading snapshot and
-// makes every decision themselves. MobiGas introduces; it does not
-// pre-screen, underwrite, advise, disburse, or collect.
+// MobiGas decides NOTHING here. No eligibility threshold, no qualifying
+// amount, no gate — the finance partner sees the trading snapshot and
+// makes every decision. MobiGas introduces; it does not pre-screen,
+// underwrite, advise, disburse, or collect.
 //
-// Two switches control what renders, both remote (no app release):
+// LAYOUT NOTE: this card renders on the Earnings tab, directly under the
+// big "Total earnings" figure — which derives from the SAME gasPrice sum
+// as the trading record. The card therefore deliberately shows NO number
+// of its own (it would duplicate the header pixel-for-pixel, and any
+// one-delivery lag between the live aggregate and vendor_stats_alltime
+// would read as a bug). The concrete numbers appear exactly once beyond
+// the header: inside the request sheet, as a preview of the payload the
+// partner receives — which is what informed consent should look like.
+//
+// Remote switch (no app release needed):
 //   platform_settings/stock_boost { active: bool, countries: [..] }
-//     active=false → sales figure only, no button, no partner claim
-//     active=true  → sales figure + "Request stock boost"
+//     active=false → reframe copy only, no button, no partner claim
+//     active=true  → request CTA; sheet shows the record to be shared
 //
-// Reads:  vendor_stats_alltime/{vendorId}   (live sales — same aggregate
-//                                            the earnings screen derives from)
+// Reads:  vendor_stats_alltime/{vendorId}   (snapshot for the sheet)
 //         platform_settings/stock_boost     (is the program open, where)
 //         financingReferrals                (their latest referral status)
 // Writes: none — requesting calls the requestStockBoost function, and the
@@ -109,9 +115,16 @@ class StockBoostCard extends StatelessWidget {
             List<String>.from(cfg?['countries'] ?? const ['KE']);
 
         // Vendors outside the program's countries see nothing at all,
-        // rather than a sales record framed around an unavailable thing.
+        // rather than copy framed around an unavailable thing.
         if (!programCountries.contains(country)) {
           return const SizedBox.shrink();
+        }
+
+        if (!programActive) {
+          // No partner signed yet. Reframe the earnings figure above as a
+          // trading record — WITHOUT repeating it, and without claiming a
+          // partner exists. Every sentence stays true with zero banks signed.
+          return _recordCard(context);
         }
 
         return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -121,13 +134,7 @@ class StockBoostCard extends StatelessWidget {
               debugPrint('StockBoost: stats read failed — ${statsSnap.error}');
               return const SizedBox.shrink();
             }
-            final lifetime = _lifetimeSales(statsSnap.data?.data());
-
-            if (!programActive) {
-              // No partner signed yet. Show the trading record — the thing
-              // selling actually builds — WITHOUT claiming a partner exists.
-              return _recordCard(context, country, lifetime);
-            }
+            final stats = statsSnap.data?.data();
 
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: latestReferralStream(vendorId),
@@ -141,7 +148,7 @@ class StockBoostCard extends StatelessWidget {
                     : null;
                 final isOpen = latest != null &&
                     _openStatuses.contains(latest['status']);
-                return _activeCard(context, country, lifetime, isOpen);
+                return _activeCard(context, country, stats, isOpen);
               },
             );
           },
@@ -150,32 +157,14 @@ class StockBoostCard extends StatelessWidget {
     );
   }
 
-  Widget _salesFigure(BuildContext context, String country, double lifetime,
-      {required bool onDark}) {
-    final labelColor = onDark ? Colors.white.withValues(alpha: 0.6) : Colors.black45;
-    final valueColor = onDark ? Colors.white : _navy;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Your sales through MobiGas',
-            style: TextStyle(color: labelColor, fontSize: 11)),
-        const SizedBox(height: 2),
-        Text(Currency.formatFor(country, lifetime),
-            style: TextStyle(
-                color: valueColor, fontSize: 24, fontWeight: FontWeight.w800)),
-      ],
-    );
-  }
-
   // -------------------------------------------------------------------------
-  // Program not active — no partner claim, no button. The sales record is
-  // real and stated as such; nothing here promises a program, a partner, or
-  // an outcome, so every sentence stays true with zero banks signed.
+  // Program not active — no partner claim, no button, and NO figure: the
+  // earnings header directly above already shows the same number.
   // -------------------------------------------------------------------------
-  Widget _recordCard(BuildContext context, String country, double lifetime) {
+  Widget _recordCard(BuildContext context) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -194,14 +183,13 @@ class StockBoostCard extends StatelessWidget {
                       color: _navy, fontWeight: FontWeight.w700, fontSize: 16)),
             ],
           ),
-          const SizedBox(height: 14),
-          _salesFigure(context, country, lifetime, onDark: false),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           const Text(
-            'Every delivery through MobiGas builds a verified sales record — '
-            'the kind of trading history finance providers look at when '
-            'offering stock financing to gas vendors.',
-            style: TextStyle(color: Colors.black54, fontSize: 13, height: 1.4),
+            'Every shilling above is more than earnings — each delivery '
+            'through MobiGas builds a verified sales record, the kind of '
+            'trading history finance providers look at when offering stock '
+            'financing to gas vendors.',
+            style: TextStyle(color: Colors.black54, fontSize: 13, height: 1.45),
           ),
         ],
       ),
@@ -209,16 +197,11 @@ class StockBoostCard extends StatelessWidget {
   }
 
   // -------------------------------------------------------------------------
-  // Program active — a partner is signed. Sales figure + request CTA, or the
-  // "partner will contact you" status once a referral is open.
-  //
-  // No condition is stated, because none exists: any vendor may request, and
-  // the partner decides. The one floor requestStockBoost enforces (a sale in
-  // the last 30 days, so the partner gets a lead with recent trading to look
-  // at) surfaces through the error message if it trips.
+  // Program active — request CTA, or "partner will contact you" once open.
+  // Still no figure here; the sheet shows the exact record being shared.
   // -------------------------------------------------------------------------
-  Widget _activeCard(
-      BuildContext context, String country, double lifetime, bool isOpen) {
+  Widget _activeCard(BuildContext context, String country,
+      Map<String, dynamic>? stats, bool isOpen) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(20),
@@ -244,17 +227,15 @@ class StockBoostCard extends StatelessWidget {
                       fontSize: 16)),
             ],
           ),
-          const SizedBox(height: 14),
-          _salesFigure(context, country, lifetime, onDark: true),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Text(
             isOpen
                 ? 'Request sent. Our finance partner will contact you directly '
                     'to take it from there.'
-                : 'You can request an introduction to our finance partner for '
-                    'stock financing. We share your MobiGas sales record with '
-                    'them; they review it and contact you directly. They make '
-                    'all decisions and set all terms.',
+                : 'Your sales record above can work for you. Request an '
+                    'introduction to our finance partner for stock financing — '
+                    'they review your record and contact you directly. They '
+                    'make all decisions and set all terms.',
             style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.8),
                 fontSize: 13,
@@ -300,7 +281,11 @@ class StockBoostCard extends StatelessWidget {
                   shape: const RoundedRectangleBorder(
                       borderRadius:
                           BorderRadius.vertical(top: Radius.circular(20))),
-                  builder: (_) => RequestStockBoostSheet(vendorId: vendorId),
+                  builder: (_) => RequestStockBoostSheet(
+                    vendorId: vendorId,
+                    country: country,
+                    stats: stats,
+                  ),
                 ),
                 child: const Text('Request stock boost',
                     style: TextStyle(fontWeight: FontWeight.w700)),
@@ -313,12 +298,22 @@ class StockBoostCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Request sheet — optional "how much stock" hint, then a single tap that acts
-// as consent to be referred. No credit language, no checkbox.
+// Request sheet — shows the vendor the EXACT record that will be shared
+// (this is the one place the concrete numbers appear beyond the earnings
+// header), an optional "how much stock" hint, then a single tap that acts
+// as consent. No credit language, no checkbox.
 // ---------------------------------------------------------------------------
 class RequestStockBoostSheet extends StatefulWidget {
   final String vendorId;
-  const RequestStockBoostSheet({super.key, required this.vendorId});
+  final String country;
+  final Map<String, dynamic>? stats;
+
+  const RequestStockBoostSheet({
+    super.key,
+    required this.vendorId,
+    required this.country,
+    required this.stats,
+  });
 
   @override
   State<RequestStockBoostSheet> createState() => _RequestStockBoostSheetState();
@@ -333,6 +328,18 @@ class _RequestStockBoostSheetState extends State<RequestStockBoostSheet> {
   void dispose() {
     _ctrl.dispose();
     super.dispose();
+  }
+
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  String? get _sellingSince {
+    final first = widget.stats?['firstDeliveredAt'];
+    if (first is! Timestamp) return null;
+    final d = first.toDate();
+    return '${_months[d.month - 1]} ${d.year}';
   }
 
   Future<void> _submit() async {
@@ -372,9 +379,30 @@ class _RequestStockBoostSheetState extends State<RequestStockBoostSheet> {
     }
   }
 
+  Widget _shareRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(color: Colors.black54, fontSize: 13)),
+          ),
+          Text(value,
+              style: const TextStyle(
+                  color: _navy, fontSize: 13, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final lifetime = _lifetimeSales(widget.stats);
+    final deliveries = (widget.stats?['fulfilled'] ?? 0) as num;
+    final since = _sellingSince;
+
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + bottom),
       child: Column(
@@ -386,13 +414,38 @@ class _RequestStockBoostSheetState extends State<RequestStockBoostSheet> {
                   fontWeight: FontWeight.w800, fontSize: 20, color: _navy)),
           const SizedBox(height: 6),
           const Text(
-            'We\'ll share your MobiGas sales record with our finance partner. '
-            'They review it and contact you directly — whether they offer '
-            'financing, how much, and on what terms is entirely their '
-            'decision, made with you, off the app.',
+            'Our finance partner reviews your MobiGas sales record and '
+            'contacts you directly. They make all decisions and set all '
+            'terms — everything is arranged with them, off the app.',
             style: TextStyle(color: Colors.black54, fontSize: 13, height: 1.4),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+
+          // The exact payload preview — the consent line below points here.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: _navy.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('What we\'ll share with them',
+                    style: TextStyle(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        fontSize: 12)),
+                const SizedBox(height: 6),
+                _shareRow('Sales through MobiGas',
+                    Currency.formatFor(widget.country, lifetime)),
+                _shareRow('Deliveries completed', '$deliveries'),
+                if (since != null) _shareRow('Selling since', since),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
           TextField(
             controller: _ctrl,
             keyboardType: TextInputType.number,
@@ -435,8 +488,8 @@ class _RequestStockBoostSheetState extends State<RequestStockBoostSheet> {
           ),
           const SizedBox(height: 8),
           Text(
-              'By requesting, you agree to share your MobiGas sales record '
-              'with our finance partner.',
+              'By requesting, you agree to share the record above with our '
+              'finance partner.',
               style:
                   TextStyle(color: Colors.black45, fontSize: 11, height: 1.3)),
         ],
