@@ -130,27 +130,16 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     final inFlight = _status == OrderStatus.accepted ||
         _status == OrderStatus.outForDelivery;
 
-    if (inFlight) {
-      DeliveryNotificationService.showDeliveryProgress(
-        vendorName: _order?.vendorName ?? '',
-        gasSize: _order?.listing.size ?? '',
-        status: _status == OrderStatus.outForDelivery
-            ? '🚴 Rider is on the way to you'
-            : '✅ Order accepted — preparing your gas',
-      );
-      return;
-    }
-
+    // Order-status notifications are now sent server-side by
+    // notifyOrderStatusChange (accepted / outForDelivery / delivered /
+    // cancelled), which reaches the customer whether the app is open,
+    // backgrounded or killed. These local ones only ever fired while
+    // this screen was mounted — a strict subset — so keeping them just
+    // meant every status alert arrived twice.
+    if (inFlight) return;
     if (_status == OrderStatus.delivered && !_deliveredHandled) {
       _deliveredHandled = true;
       DeliveryNotificationService.cancelDeliveryNotification();
-      DeliveryNotificationService.showDeliveryConfirmed(
-        gasSize: _order?.listing.size ?? '',
-        // Cash on delivery — customerTotal is the gas price, the same
-        // figure shown on the vendor card and the PIN panel. Already
-        // includes the currency symbol for the order's country.
-        amount: Currency.formatFor(_order?.country, _order?.customerTotal ?? 0),
-      );
       if (mounted) context.go('/delivery-confirmed');
       return;
     }

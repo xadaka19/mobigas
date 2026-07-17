@@ -251,9 +251,7 @@ class NotificationService {
     // Record it for the bell (above) but don't display a second one.
     if (message.notification != null) return;
 
-    // In the foreground Android does NOT auto-display FCM notification
-    // payloads, so we show one ourselves — using the message's own
-    // title/body, whether it arrived as a notification block or data.
+    // Data-only messages — we own the display.
     final data = message.data;
     final title = message.notification?.title ??
         data['notificationTitle'] ??
