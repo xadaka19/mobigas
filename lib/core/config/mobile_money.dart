@@ -64,6 +64,13 @@ class MobileMoney {
     ),
   ];
 
+  /// Every provider across every market, KE first. Used only by
+  /// [anyProviderByCode] — codes that appear in more than one country
+  /// ('mpesa' in KE+TZ, 'airtel' in UG+TZ) carry the same label in each,
+  /// so first-match-wins is safe for display. Anything country-sensitive
+  /// must go through [providersFor] / [providerByCodeOrNull] instead.
+  static const _all = [..._kenya, ..._uganda, ..._tanzania];
+
   /// Full list of payment provider options for a given country code (KE/UG/TZ).
   /// Falls back to Kenya's list if the country is unrecognized.
   static List<MobileMoneyProvider> providersFor(String? country) {
@@ -79,12 +86,43 @@ class MobileMoney {
   }
 
   /// Look up a provider by its stored code within a given country's list.
+  ///
+  /// Never fails: an unknown code falls back to the country's first
+  /// provider. That's the right behaviour when picking a DEFAULT to
+  /// select (vendor_setup_screen), but wrong when DISPLAYING a code
+  /// that's already saved — a stale UG doc carrying 'mpesa' would be
+  /// silently labelled "MTN Mobile Money". Use [providerByCodeOrNull]
+  /// for display.
   static MobileMoneyProvider providerByCode(String? country, String code) {
     final list = providersFor(country);
     return list.firstWhere(
       (p) => p.code == code,
       orElse: () => list.first,
     );
+  }
+
+  /// Look up a provider by code within a country's list, or null if that
+  /// country doesn't offer it. Lets callers distinguish "vendor chose
+  /// Tigo Pesa in TZ" from "vendor's saved code doesn't belong to their
+  /// country at all" (a legacy doc, or a pin that moved markets) —
+  /// something [providerByCode] can't express.
+  static MobileMoneyProvider? providerByCodeOrNull(String? country, String code) {
+    for (final p in providersFor(country)) {
+      if (p.code == code) return p;
+    }
+    return null;
+  }
+
+  /// Country-agnostic lookup — the label for a code, wherever it's
+  /// offered. For rails that exist in exactly one market (till, paybill
+  /// — Kenya only), this resolves the label from THIS list rather than
+  /// making callers hardcode 'Till (Buy Goods)' or pass a country they
+  /// already know. Null if the code is unknown everywhere.
+  static MobileMoneyProvider? anyProviderByCode(String code) {
+    for (final p in _all) {
+      if (p.code == code) return p;
+    }
+    return null;
   }
 
   /// Short label for plain-text mentions, e.g. "cash or ${MobileMoney.primaryLabelFor(country)}".

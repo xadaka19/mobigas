@@ -1,3 +1,5 @@
+import 'package:mobigas/core/config/vendor_requirements.dart';
+
 // All gas product types
 enum GasProductType {
   refill,           // Gas refill only (most common)
@@ -208,7 +210,22 @@ class VendorModel {
   final String businessName;
   final String ownerName;
   final String? email;
+
+  /// The vendor's CONTACT number — the line a customer calls about a
+  /// delivery. NOT necessarily where they take payment: a vendor on Till
+  /// or Paybill is paid on neither, and one who set payoutPhone is paid
+  /// on a different line entirely.
+  ///
+  /// Payout (paymentMethod / tillNumber / paybillNumber / paybillAccount
+  /// / payoutPhone) deliberately does NOT live on this model — it's read
+  /// straight off the vendor doc by the two screens that need it
+  /// (vendor_home_screen, vendor_fees_banner). This model is what the
+  /// CUSTOMER app knows about a vendor, and the customer never needs to
+  /// know how the vendor gets paid; they hand over cash or send money to
+  /// a number given at the door. OrderModel.vendorPhone copies THIS field
+  /// — don't "fix" it into a payout number.
   final String phone;
+
   final String area;
   final String estate;
   final String county;
@@ -234,8 +251,10 @@ class VendorModel {
   // ── Verification documents ──────────────────────────────────────
   // Uploaded once during onboarding; reviewed by admin before
   // isVerified is set to true. All fields empty until submitted.
-  // Three of these are "either/or" pairs — a vendor satisfies the
-  // requirement with whichever one they can actually get, not both:
+  // Which of these a given vendor actually needs is decided by their
+  // country — see VendorRequirements and documentsSubmitted below.
+  // Three are "either/or" pairs — a vendor satisfies the requirement
+  // with whichever one they can actually get, not both:
   //   - epraCertificateUrl    OR  subDealerAuthorizationUrl
   //   - weighingScaleCertUrl  OR  weighingScalePhotoUrl
   //   - brandAuthorizationUrl OR  dealerAssociationLetterUrl
@@ -251,6 +270,13 @@ class VendorModel {
   final String weighingScaleCertUrl;
   final String weighingScalePhotoUrl;
   final String premisesPhotoUrl;
+
+  /// Tanzania only: TIN + TRA Tax Clearance Certificate. Empty everywhere
+  /// else — see VendorRequirements for TZ, which is the only country whose
+  /// supportingDocs list includes it. VendorSetupScreen has collected and
+  /// saved this since TZ launch; the model simply never had a field for it,
+  /// so documentsSubmitted couldn't see it.
+  final String taxClearanceUrl;
 
   /// 'sole' | 'registered' | 'petrol_station' — determines whether
   /// businessRegistrationUrl is required (sole proprietors didn't
@@ -296,35 +322,62 @@ class VendorModel {
     this.weighingScaleCertUrl = '',
     this.weighingScalePhotoUrl = '',
     this.premisesPhotoUrl = '',
+    this.taxClearanceUrl = '',
     this.businessType = '',
     this.referralCode = '',
     this.referredByCode,
   });
 
-  /// True once every required compliance document has at least one
-  /// acceptable form uploaded — independent of admin approval
-  /// (isVerified), so the UI can distinguish "nothing submitted yet"
-  /// from "submitted, awaiting review".
-  bool get documentsSubmitted {
-    final hasEpraProof =
-        epraCertificateUrl.isNotEmpty || subDealerAuthorizationUrl.isNotEmpty;
-    final hasScaleProof =
-        weighingScaleCertUrl.isNotEmpty || weighingScalePhotoUrl.isNotEmpty;
-    final hasBrandProof = brandAuthorizationUrl.isNotEmpty ||
-        dealerAssociationLetterUrl.isNotEmpty;
-    // Registered companies and petrol stations already prove this via
-    // their Step-1 certificate (Certificate of Incorporation) — only
-    // sole proprietors need the separate BRS business-name document.
-    final hasBusinessReg =
-        businessType != 'sole' || businessRegistrationUrl.isNotEmpty;
-    return hasEpraProof &&
-        businessPermitUrl.isNotEmpty &&
-        fireCertificateUrl.isNotEmpty &&
-        premisesPhotoUrl.isNotEmpty &&
-        hasScaleProof &&
-        hasBrandProof &&
-        hasBusinessReg;
+  /// Resolves a Firestore document key to this vendor's stored URL —
+  /// the bridge between VendorRequirements' key-based document lists and
+  /// this model's typed fields.
+  String _docUrl(String key) {
+    switch (key) {
+      case 'epraCertificateUrl':
+        return epraCertificateUrl;
+      case 'subDealerAuthorizationUrl':
+        return subDealerAuthorizationUrl;
+      case 'brandAuthorizationUrl':
+        return brandAuthorizationUrl;
+      case 'dealerAssociationLetterUrl':
+        return dealerAssociationLetterUrl;
+      case 'businessPermitUrl':
+        return businessPermitUrl;
+      case 'businessRegistrationUrl':
+        return businessRegistrationUrl;
+      case 'fireCertificateUrl':
+        return fireCertificateUrl;
+      case 'weighingScaleCertUrl':
+        return weighingScaleCertUrl;
+      case 'weighingScalePhotoUrl':
+        return weighingScalePhotoUrl;
+      case 'premisesPhotoUrl':
+        return premisesPhotoUrl;
+      case 'taxClearanceUrl':
+        return taxClearanceUrl;
+      default:
+        // A key in VendorRequirements with no field here. Treated as
+        // missing rather than ignored, so it shows up as "not submitted"
+        // instead of silently passing — add the field above to fix.
+        return '';
+    }
   }
+
+  /// True once every compliance document THIS VENDOR'S COUNTRY requires
+  /// has at least one acceptable form uploaded — independent of admin
+  /// approval (isVerified), so the UI can distinguish "nothing submitted
+  /// yet" from "submitted, awaiting review".
+  ///
+  /// The country-specific part is why this delegates: this getter used to
+  /// hardcode Kenya's document set, so a Tanzanian vendor missing their
+  /// TRA tax clearance counted as fully submitted. VendorRequirements now
+  /// owns the list, and vendor_setup_screen's Step 3 renders from the same
+  /// one — so what a vendor is asked for and what counts can't drift.
+  bool get documentsSubmitted =>
+      VendorRequirements.forCountry(country).documentsSubmitted(
+        urlFor: _docUrl,
+        isSole: businessType == 'sole',
+      );
 
   /// Automatically locked out of receiving orders because unpaid
   /// platform fees reached the threshold. Unlocks automatically when
@@ -398,7 +451,13 @@ class OrderModel {
   final String customerId;
   final String vendorId;
   final String vendorName;
+
+  /// The vendor's CONTACT number, copied from VendorModel.phone at
+  /// order-creation time — what the customer calls about this delivery.
+  /// NOT a payout number: the vendor may take payment on a till, a
+  /// paybill, or a different line entirely.
   final String vendorPhone;
+
   final String customerName;
   final String customerArea;
   final String customerPhone;

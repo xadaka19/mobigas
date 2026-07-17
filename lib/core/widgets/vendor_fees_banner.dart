@@ -26,6 +26,26 @@ const String kFeeAccountHint = 'your phone number';
 /// screen.
 const Duration kStkResultTimeout = Duration(seconds: 90);
 
+/// The number MobiGas should CHARGE for platform fees — i.e. the line
+/// with the mobile-money wallet the vendor pays from, which is not
+/// necessarily the line customers ring.
+///
+/// `phone` is the vendor's contact number (see vendor_setup_screen.dart,
+/// Step 0 — asked of every vendor on every rail). `payoutPhone` is set
+/// only when the vendor said payments land somewhere else — typical for
+/// a registered business or petrol station whose office line isn't the
+/// wallet. When it's set, that's the wallet, so that's what we prefill.
+///
+/// Till/Paybill vendors have no payoutPhone (their payout is the till /
+/// paybill number, which can't receive an STK push), so they fall back
+/// to `phone`. It may or may not be M-Pesa-registered — it's the only
+/// number on file, and the field below is editable either way.
+String _feePayerPhoneFrom(Map<String, dynamic> data) {
+  final payout = (data['payoutPhone'] ?? '').toString().trim();
+  if (payout.isNotEmpty) return payout;
+  return (data['phone'] ?? '').toString().trim();
+}
+
 /// Shows the vendor their accrued platform fees (1% customer-finder
 /// fee on cash orders). Three states:
 ///  - feesOwed == 0            -> hidden
@@ -77,7 +97,12 @@ class VendorFeesBanner extends StatelessWidget {
               locked: locked,
               country: country,
               vendorId: uid,
-              vendorPhone: (data['phone'] ?? '').toString(),
+              // This prefills the number we send the STK push to — the
+              // vendor's WALLET, not their contact line. Previously
+              // read data['phone'] unconditionally, which is now
+              // explicitly the customer-facing contact number and can
+              // be a different handset entirely.
+              payerPhone: _feePayerPhoneFrom(data),
             ),
           ),
           child: Container(
@@ -152,14 +177,21 @@ class _FeeSheet extends StatefulWidget {
   final bool locked;
   final String country;
   final String vendorId;
-  final String vendorPhone;
+
+  /// The wallet MobiGas charges — see [_feePayerPhoneFrom]. Named
+  /// payerPhone rather than vendorPhone deliberately: this is the
+  /// account money leaves FROM, not the vendor's contact number, and
+  /// the old name invited exactly the `data['phone']` mix-up it's
+  /// replacing. Only ever a prefilled default — the vendor can type a
+  /// different number before paying.
+  final String payerPhone;
 
   const _FeeSheet({
     required this.feesOwed,
     required this.locked,
     required this.country,
     required this.vendorId,
-    required this.vendorPhone,
+    required this.payerPhone,
   });
 
   @override
@@ -181,7 +213,7 @@ class _FeeSheetState extends State<_FeeSheet> {
   @override
   void initState() {
     super.initState();
-    _phoneController = TextEditingController(text: widget.vendorPhone);
+    _phoneController = TextEditingController(text: widget.payerPhone);
   }
 
   @override
@@ -469,6 +501,24 @@ class _FeeSheetState extends State<_FeeSheet> {
                         color: AppColors.navy,
                         fontWeight: FontWeight.w700,
                       )),
+              const SizedBox(height: 4),
+              // Names what this field is for. It's prefilled from the
+              // vendor's payout number (or their contact number if
+              // that's the only one they have), but the money leaves
+              // whichever wallet is typed here — worth being explicit
+              // for a vendor whose payout line isn't the one they'd
+              // reach for by default.
+              Text(
+                _isPesapal
+                    ? 'The number you want to pay from.'
+                    : 'The M-Pesa number you want to pay from — we\'ll send '
+                          'the PIN prompt there.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray600,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: _phoneController,

@@ -1,5 +1,18 @@
 /// Per-country LPG retail vendor requirements — the documents each market's
-/// regulator actually requires of a SMALL/AGENT cylinder retailer.
+/// regulator actually requires of a SMALL/AGENT cylinder retailer, and the
+/// wording used to ask for them.
+///
+/// Lives in core/config (not features/vendor/widgets) because it holds no
+/// widgets: it's const data, and core/models/app_models.dart depends on it
+/// for VendorModel.documentsSubmitted. Same shelf as mobile_money.dart.
+///
+/// MERGED: this file used to have a twin, features/vendor/widgets/
+/// regulator_text.dart, which defined the same nine licence-tier strings for
+/// the same three countries. Step 3 read the twin, so vendors got ITS values
+/// — and it was the older, less-researched set: it punted on Tanzania's scale
+/// authority ("the relevant weights and measures authority") where this file
+/// names the WMA, and gave a generic agent path where this file names the
+/// actual wholesalers. The twin is deleted; this is the only source now.
 ///
 /// TWO-TIER, per country:
 ///   • Agent / sub-dealer — sells cylinders under a licensed distributor's
@@ -45,7 +58,16 @@ class VendorDoc {
 /// The full requirement set for one country.
 class VendorRequirements {
   final String code; // KE | TZ | UG
+
   final String regulator;
+
+  /// Documentation only — nothing reads this. Kept as a marker of how much
+  /// trust the wording below has earned. NOTE: the deleted regulator_text.dart
+  /// marked UG `false` ("NAME-SWAP PLACEHOLDER, agent specifics unverified")
+  /// while this file marks it `true` with sourced specifics. This file's value
+  /// is carried forward as the later judgement — but nothing depends on it
+  /// either way, so if UG's agent tier is in fact still provisional, flipping
+  /// this changes no behaviour and needs no other edit.
   final bool verified;
 
   // ── Licence tier (either/or toggle) ──
@@ -60,6 +82,10 @@ class VendorRequirements {
   final String parentLicenceNumberLabel;
 
   // ── Supporting docs, in display order (country-specific) ──
+  /// Step 3 renders these in order, skipping soleOnly entries for a registered
+  /// business or petrol station. Adding a country's document here is all it
+  /// takes to have it asked for AND counted by [documentsSubmitted] — the
+  /// screen and the getter both drive off this list, so they can't drift.
   final List<VendorDoc> supportingDocs;
 
   // ── Scale sub-toggle wording (cert vs photo — all three share the toggle) ──
@@ -104,6 +130,49 @@ class VendorRequirements {
     required this.brandAltDescription,
     this.acknowledgment,
   });
+
+  /// The three either/or pairs, identical in every market — a vendor satisfies
+  /// each with whichever form they can actually get, never both.
+  static const licenceKeys = ['epraCertificateUrl', 'subDealerAuthorizationUrl'];
+  static const scaleKeys = ['weighingScaleCertUrl', 'weighingScalePhotoUrl'];
+  static const brandKeys = [
+    'brandAuthorizationUrl',
+    'dealerAssociationLetterUrl',
+  ];
+
+  /// Whether every document THIS country requires has an acceptable form
+  /// uploaded — independent of admin approval (isVerified), so the UI can
+  /// distinguish "nothing submitted yet" from "submitted, awaiting review".
+  ///
+  /// [urlFor] resolves a Firestore key to its stored URL. It's a callback
+  /// because the vendor's data reaches callers in two shapes — VendorModel's
+  /// typed fields, or the raw Firestore map on the vendor home screen — and
+  /// that is the only difference between them. Both used to hand-roll this
+  /// check with a hardcoded KE-shaped document list, which meant a Tanzanian
+  /// vendor missing their TRA tax clearance still counted as fully submitted
+  /// and was told "Documents under review" while they were still short a
+  /// document. Driving off [supportingDocs] is what fixes that, and what stops
+  /// the next market's extra document from silently repeating it.
+  ///
+  /// ackNoDecanting is deliberately NOT checked: VendorSetupScreen._save()
+  /// refuses to write at all without it where a country requires it, so a
+  /// vendor with documents on file cannot have it false.
+  bool documentsSubmitted({
+    required String Function(String key) urlFor,
+    required bool isSole,
+  }) {
+    bool has(String key) => urlFor(key).trim().isNotEmpty;
+    bool either(List<String> keys) => keys.any(has);
+
+    final supportingIn = supportingDocs
+        .where((d) => !d.soleOnly || isSole)
+        .every((d) => has(d.key));
+
+    return either(licenceKeys) &&
+        either(scaleKeys) &&
+        either(brandKeys) &&
+        supportingIn;
+  }
 
   // ════════════════════════════════════════════════════════════════════
   //  KENYA — unchanged from production

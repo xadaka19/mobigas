@@ -18,8 +18,7 @@ import 'package:mobigas/core/widgets/location_picker_widget.dart';
 import 'package:mobigas/core/services/geo_service.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/config/mobile_money.dart';
-import 'package:mobigas/features/vendor/widgets/regulator_text.dart';
-import 'package:mobigas/features/vendor/widgets/vendor_requirements.dart';
+import 'package:mobigas/core/config/vendor_requirements.dart';
 //import 'package:mobigas/features/vendor/widgets/country_confirmation.dart';
 
 /// Which part of the vendor profile this screen instance edits.
@@ -90,7 +89,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late TextEditingController _businessNameController;
   late TextEditingController _ownerNameController;
   late TextEditingController _idOrBrnController; // National ID or BRN
+  // The vendor's CONTACT number (Step 0) — the line a customer calls
+  // about a delivery. Doubles as the payout number for phone-based
+  // rails unless _payoutPhoneController is set (see below).
   late TextEditingController _phoneController;
+  // Optional override: the number payments go to, when it isn't the
+  // contact line. Empty means "same as contact" — which is what every
+  // vendor saved before this field existed, so their `phone` (which
+  // WAS their payout number) keeps paying out unchanged.
+  late TextEditingController _payoutPhoneController;
+  late bool _useSeparatePayoutPhone;
   late TextEditingController _deliveryTimeController;
   late TextEditingController _referralCodeController;
   String _paymentMethod = 'mpesa'; // mpesa, till, paybill, mtn, airtel, tigo
@@ -236,6 +244,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       text: d['nationalId'] ?? d['businessRegNumber'] ?? '',
     );
     _phoneController = TextEditingController(text: d['phone'] ?? '');
+    // A saved payoutPhone means the vendor explicitly split the two
+    // lines; empty (the case for every doc written before this field
+    // existed) means payments follow the contact number.
+    _payoutPhoneController = TextEditingController(
+      text: d['payoutPhone'] ?? '',
+    );
+    _useSeparatePayoutPhone =
+        (d['payoutPhone'] ?? '').toString().trim().isNotEmpty;
     _deliveryTimeController = TextEditingController(
       text: d['deliveryTime'] ?? '20–40 min',
     );
@@ -337,6 +353,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _ownerNameController.dispose();
     _idOrBrnController.dispose();
     _phoneController.dispose();
+    _payoutPhoneController.dispose();
     _deliveryTimeController.dispose();
     _tillController.dispose();
     _paybillController.dispose();
@@ -364,6 +381,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   String get _vendorId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  /// The number a phone-based rail actually pays out to: the override
+  /// when the vendor set one, otherwise their contact line. Till and
+  /// Paybill don't use this at all — their destination is the till /
+  /// paybill number.
+  String get _effectivePayoutPhone => _useSeparatePayoutPhone
+      ? _payoutPhoneController.text.trim()
+      : _phoneController.text.trim();
+
   bool get _step0Valid {
     if (_businessNameController.text.trim().isEmpty) {
       return false;
@@ -372,6 +397,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       return false;
     }
     if (_idOrBrnController.text.trim().isEmpty) {
+      return false;
+    }
+    // A contact number is required of EVERY vendor now, whatever rail
+    // they're paid on. Previously `phone` was only ever collected as
+    // part of the M-Pesa/MTN/Airtel payment field, so a Till or
+    // Paybill vendor finished setup with no number at all — nothing
+    // for a customer to call about a delivery.
+    if (_phoneController.text.trim().length < 9) {
       return false;
     }
     return true;
@@ -392,7 +425,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         return _paybillController.text.trim().isNotEmpty &&
             _paybillAccountController.text.trim().isNotEmpty;
       default:
-        return _phoneController.text.trim().length >= 9;
+        // Normally already guaranteed by _step0Valid's contact check
+        // — but not in locationOnly mode, where Step 0 isn't shown.
+        // A vendor there whose saved contact number is blank (legacy)
+        // can still satisfy this by ticking "a different number".
+        return _effectivePayoutPhone.length >= 9;
     }
   }
 
@@ -585,7 +622,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           'nationalId': _idOrBrnController.text.trim()
         else
           'businessRegNumber': _idOrBrnController.text.trim(),
+        // Contact line — what a customer calls. Also the payout
+        // destination for phone rails, unless payoutPhone overrides it.
         'phone': _phoneController.text.trim(),
+        // Empty means "payments come to the contact number". Written
+        // explicitly (rather than omitted) so unticking the box
+        // actually clears a previously-set override.
+        'payoutPhone':
+            _useSeparatePayoutPhone ? _payoutPhoneController.text.trim() : '',
         'paymentMethod': _paymentMethod,
         'tillNumber': _tillController.text.trim(),
         'paybillNumber': _paybillController.text.trim(),
@@ -1011,6 +1055,28 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           keyboardType: _businessType == 'sole'
               ? TextInputType.number
               : TextInputType.text,
+        ),
+        const SizedBox(height: 16),
+        // Contact number — asked of every vendor, on every rail. This
+        // used to be collected only as part of the M-Pesa/MTN/Airtel
+        // payment field in Step 1, so Till and Paybill vendors reached
+        // the end of setup with no number a customer could call.
+        _field(
+          'Contact phone number',
+          _phoneController,
+          Icons.phone_outlined,
+          hint: '0712 345 678',
+          keyboardType: TextInputType.phone,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'The number customers call about a delivery. Payments come here '
+          'too unless you set a different one in the next step.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 11,
+            height: 1.4,
+          ),
         ),
         const SizedBox(height: 16),
         _buildCertificateUpload(),
@@ -1650,19 +1716,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   // ── STEP 3: VERIFICATION DOCUMENTS ───────────────────────────────
   Widget _buildStep3() {
-    final reg = RegulatorText.forCountry(_detectedCountry);
+    // ONE source for every string and every document in this step.
+    // Previously this read RegulatorText for the licence-tier wording and
+    // VendorRequirements for the supporting docs — two files defining the
+    // same nine strings, of which the screen happened to render the older,
+    // vaguer set. RegulatorText is gone; this is all of it now.
     final req = VendorRequirements.forCountry(_detectedCountry);
-    // Supporting docs (permit, fire, premises) by display order for this
-    // country — used to label the shared upload cards correctly.
-    final permitDoc = req.supportingDocs.firstWhere(
-        (d) => d.key == 'businessPermitUrl',
-        orElse: () => req.supportingDocs.first);
-    final fireDoc = req.supportingDocs.firstWhere(
-        (d) => d.key == 'fireCertificateUrl',
-        orElse: () => req.supportingDocs.first);
-    final premisesDoc = req.supportingDocs.firstWhere(
-        (d) => d.key == 'premisesPhotoUrl',
-        orElse: () => req.supportingDocs.first);
+    final isSole = _businessType == 'sole';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1685,8 +1745,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
         ),
         const SizedBox(height: 20),
+        // ── Licence tier: own licence OR agent authorization ──────
         Text(
-          reg.licenceSectionTitle,
+          req.licenceSectionTitle,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontSize: 13,
             color: AppColors.white,
@@ -1697,13 +1758,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         Row(
           children: [
             _altToggleTab(
-              label: reg.ownLicenceToggle,
+              label: req.ownLicenceToggle,
               selected: _hasOwnEpra,
               onTap: () => setState(() => _hasOwnEpra = true),
             ),
             const SizedBox(width: 8),
             _altToggleTab(
-              label: reg.agentToggle,
+              label: req.agentToggle,
               selected: !_hasOwnEpra,
               onTap: () => setState(() => _hasOwnEpra = false),
             ),
@@ -1713,71 +1774,50 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         if (_hasOwnEpra)
           _buildVerificationDocUpload(
             docKey: 'epraCertificateUrl',
-            title: reg.ownLicenceTitle,
-            description:
-                reg.ownLicenceDescription,
+            title: req.ownLicenceTitle,
+            description: req.ownLicenceDescription,
           )
         else ...[
           _buildVerificationDocUpload(
             docKey: 'subDealerAuthorizationUrl',
-            title: reg.agentAuthTitle,
-            description: reg.agentAuthDescription,
+            title: req.agentAuthTitle,
+            description: req.agentAuthDescription,
           ),
           const SizedBox(height: 12),
           _field(
-            reg.parentNameLabel,
+            req.parentNameLabel,
             _parentVendorNameController,
             Icons.store_outlined,
             hint: 'e.g. Total Kenya Ltd, K-Gas main distributor',
           ),
           const SizedBox(height: 12),
           _field(
-            reg.parentLicenceNumberLabel,
+            req.parentLicenceNumberLabel,
             _parentEpraNumberController,
             Icons.badge_outlined,
             hint: 'If known — helps MobiGas verify faster',
           ),
         ],
-        if (_businessType == 'sole') ...[
-          const SizedBox(height: 16),
-          _buildVerificationDocUpload(
-            docKey: 'businessRegistrationUrl',
-            title: 'Business name registration certificate',
-            description:
-                'From eCitizen / the Business Registration Service — '
-                'required even for a sole proprietorship',
-          ),
-        ],
-        const SizedBox(height: 16),
-        // TZ requires a TRA Tax Clearance Certificate — shown only there.
-        if (_detectedCountry == 'TZ') ...[
-          const SizedBox(height: 16),
-          _buildVerificationDocUpload(
-            docKey: 'taxClearanceUrl',
-            title: 'TIN & Tax Clearance Certificate',
-            description:
-                'Your TIN and a valid Tax Clearance Certificate from the '
-                'Tanzania Revenue Authority (TRA)',
-          ),
-        ],
-        const SizedBox(height: 16),
-        _buildVerificationDocUpload(
-          docKey: 'businessPermitUrl',
-          title: permitDoc.title,
-          description: permitDoc.description,
-        ),
-        const SizedBox(height: 16),
-        _buildVerificationDocUpload(
-          docKey: 'fireCertificateUrl',
-          title: fireDoc.title,
-          description: fireDoc.description,
-        ),
-        const SizedBox(height: 16),
-        _buildVerificationDocUpload(
-          docKey: 'premisesPhotoUrl',
-          title: premisesDoc.title,
-          description: premisesDoc.description,
-        ),
+        // ── Supporting docs, straight off the country's list ───────
+        // Was: a hardcoded sole-proprietor block, a hardcoded
+        // `if (_detectedCountry == 'TZ')` tax-clearance block, and three
+        // firstWhere lookups for permit/fire/premises. That KE-shaped
+        // sequence is why a Tanzanian vendor was asked for their BRELA
+        // certificate under the title "From eCitizen / the Business
+        // Registration Service" — the country's real titles were sitting
+        // in supportingDocs, unread. Rendering the list itself means a new
+        // market's documents appear here the moment they're added there,
+        // and documentsSubmitted counts the same set (see
+        // VendorRequirements.documentsSubmitted).
+        for (final doc in req.supportingDocs)
+          if (!doc.soleOnly || isSole) ...[
+            const SizedBox(height: 16),
+            _buildVerificationDocUpload(
+              docKey: doc.key,
+              title: doc.title,
+              description: doc.description,
+            ),
+          ],
         const SizedBox(height: 20),
         // ── Weighing scale: certificate OR a photo of the scale ────
         Text(
@@ -1805,19 +1845,21 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ],
         ),
         const SizedBox(height: 12),
+        // Was hardcoded Kenyan wording + 'From ${reg.scaleAuthority}',
+        // which read "From the relevant weights and measures authority"
+        // in Tanzania — a placeholder, while the real answer (WMA, with
+        // the 6/15/38kg detail) already existed in this country's config.
         if (_hasScaleCert)
           _buildVerificationDocUpload(
             docKey: 'weighingScaleCertUrl',
-            title: 'Weighing scale calibration certificate',
-            description: 'From ${reg.scaleAuthority}',
+            title: req.scaleCertTitle,
+            description: req.scaleCertDescription,
           )
         else
           _buildVerificationDocUpload(
             docKey: 'weighingScalePhotoUrl',
-            title: 'Photo of your weighing scale',
-            description:
-                'Clear photo showing the scale is rated for at least '
-                '300kg — accepted in place of a calibration certificate',
+            title: req.scalePhotoTitle,
+            description: req.scalePhotoDescription,
           ),
         const SizedBox(height: 20),
         // ── Brand authorization: brand letter OR association letter ─
@@ -1849,19 +1891,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         if (_hasBrandAuth)
           _buildVerificationDocUpload(
             docKey: 'brandAuthorizationUrl',
-            title: 'Brand authorization letter',
-            description:
-                'Written consent to sell from the gas brand(s) you stock '
-                '(e.g. an appointment letter from Total Gas, K-Gas, '
-                'Hashi, Africa Gas, etc.)',
+            title: req.brandLetterTitle,
+            description: req.brandLetterDescription,
           )
         else
           _buildVerificationDocUpload(
             docKey: 'dealerAssociationLetterUrl',
-            title: 'Independent dealer association letter',
-            description:
-                'Authorization letter from an independent LPG dealer '
-                'association, in place of a direct brand letter',
+            title: req.brandAltTitle,
+            description: req.brandAltDescription,
           ),
         // No-decanting acknowledgment — TZ & UG require it, KE doesn't.
         if (req.acknowledgment != null) ...[
@@ -1944,7 +1981,6 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       ],
     );
   }
-
   /// Small pill-style tab used for the two either/or document choices
   /// (weighing scale, brand authorization) — same visual language as
   /// the business-type tabs, sized for two-option rows.
@@ -2135,7 +2171,10 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 if (_step == 0 && !_step0Valid) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Please fill in all business details'),
+                      content: Text(
+                        'Please fill in all business details, including a '
+                        'contact phone number',
+                      ),
                       backgroundColor: AppColors.error,
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -2437,7 +2476,8 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         const SizedBox(height: 14),
         // Fields based on selection — till/paybill are Kenya-specific
         // two-field setups; every other provider (M-Pesa, MTN,
-        // Airtel, Tigo Pesa) is a single phone-number field.
+        // Airtel, Tigo Pesa) pays out to a phone number, which
+        // defaults to the contact number from Step 0.
         if (selectedProvider.code == 'till') ...[
           _field(
             'Till number',
@@ -2466,15 +2506,135 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           const SizedBox(height: 8),
           _paymentNote(selectedProvider.hint),
         ] else ...[
+          _buildPayoutPhoneChoice(selectedProvider),
+          const SizedBox(height: 8),
+          _paymentNote(selectedProvider.hint),
+        ],
+      ],
+    );
+  }
+
+  /// Phone-rail payout destination. One number is the common case — a
+  /// vendor answers and gets paid on the same line — so the contact
+  /// number from Step 0 is used by default and shown read-only here.
+  /// A registered business or petrol station whose till/office line
+  /// isn't the line payments land on ticks the box and enters the
+  /// second number; that (and only that) writes `payoutPhone`.
+  Widget _buildPayoutPhoneChoice(MobileMoneyProvider provider) {
+    final contact = _phoneController.text.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!_useSeparatePayoutPhone)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.white.withValues(alpha: 0.15),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.phone_outlined,
+                  color: AppColors.orange,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${provider.label} payments come to',
+                        style: const TextStyle(
+                          color: AppColors.gray400,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        // Blank only for a legacy vendor editing in
+                        // locationOnly mode, where Step 0 isn't shown
+                        // — the tick box below is their way out.
+                        contact.isEmpty
+                            ? 'No contact number set — add one in Edit '
+                                  'business details, or tick below'
+                            : contact,
+                        style: TextStyle(
+                          color: contact.isEmpty
+                              ? AppColors.error
+                              : AppColors.white,
+                          fontSize: contact.isEmpty ? 11 : 14,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 10),
+        InkWell(
+          onTap: () => setState(
+            () => _useSeparatePayoutPhone = !_useSeparatePayoutPhone,
+          ),
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  _useSeparatePayoutPhone
+                      ? Icons.check_box_rounded
+                      : Icons.check_box_outline_blank_rounded,
+                  color: _useSeparatePayoutPhone
+                      ? AppColors.orange
+                      : AppColors.gray400,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Payments go to a different number',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.white,
+                      height: 1.4,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_useSeparatePayoutPhone) ...[
+          const SizedBox(height: 10),
           _field(
-            '${selectedProvider.label} phone number',
-            _phoneController,
-            Icons.phone_outlined,
+            '${provider.label} number for payments',
+            _payoutPhoneController,
+            Icons.payments_outlined,
             hint: '0712 345 678',
             keyboardType: TextInputType.phone,
           ),
-          const SizedBox(height: 8),
-          _paymentNote(selectedProvider.hint),
+          const SizedBox(height: 6),
+          Text(
+            contact.isEmpty
+                ? 'Customers will still need a contact number — add one in '
+                      'your business details.'
+                : 'Customers still call $contact about deliveries.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray400,
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
         ],
       ],
     );

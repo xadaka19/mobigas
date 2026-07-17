@@ -12,6 +12,7 @@ import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/google_auth_service.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/config/currency.dart';
+import 'package:mobigas/core/config/vendor_requirements.dart';
 import 'package:mobigas/features/vendor/screens/vendor_edit_profile_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_setup_screen.dart';
 import 'package:mobigas/features/vendor/screens/vendor_order_screen.dart';
@@ -53,6 +54,19 @@ class _VendorEarnings {
   });
 }
 
+/// The vendor's chosen payout destination, resolved from their saved
+/// paymentMethod. See _VendorHomeScreenState._payout.
+class _Payout {
+  final String label;
+  final String value;
+  final IconData icon;
+  const _Payout({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+}
+
 class VendorHomeScreen extends StatefulWidget {
   const VendorHomeScreen({super.key});
 
@@ -85,6 +99,77 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
 
   double get _vendorLatitude => (_vendorData?['latitude'] ?? 0.0).toDouble();
   double get _vendorLongitude => (_vendorData?['longitude'] ?? 0.0).toDouble();
+
+  /// BUG FIX: this screen used to read _vendorData['phone'] in three
+  /// places and label it with MobileMoney.primaryLabelFor(country) —
+  /// i.e. it assumed every vendor is paid on a phone number, via the
+  /// country's primary provider. A vendor who picked Till or Paybill
+  /// during setup legitimately has an EMPTY phone field (see
+  /// _paymentMethodValid in vendor_setup_screen.dart, which validates
+  /// tillNumber / paybillNumber+paybillAccount instead), so those
+  /// vendors were shown "M-Pesa number: —" on Profile, a blank "Your
+  /// M-Pesa" on Earnings, and were told on every order card to collect
+  /// via M-Pesa send-money — none of which is what they set up.
+  ///
+  /// Every label here comes from mobile_money.dart, so it follows the
+  /// vendor's country automatically: 'mpesa' reads "M-Pesa" in KE and
+  /// in TZ, 'tigo' reads "Tigo Pesa", 'mtn' reads "MTN Mobile Money".
+  _Payout get _payout {
+    final country = (_vendorData?['country'] as String?) ?? 'KE';
+    final code = (_vendorData?['paymentMethod'] ?? '').toString();
+    String s(String key) => (_vendorData?[key] ?? '').toString();
+
+    // Till and Paybill are Kenya-only rails, so they're looked up
+    // without a country — a doc whose country somehow isn't KE still
+    // shows the vendor the till number they actually configured,
+    // rather than being written off as a stale code below.
+    switch (code) {
+      case 'till':
+        return _Payout(
+          label: MobileMoney.anyProviderByCode('till')!.label,
+          value: s('tillNumber'),
+          icon: Icons.store_rounded,
+        );
+      case 'paybill':
+        final account = s('paybillAccount');
+        final paybill = s('paybillNumber');
+        return _Payout(
+          label: MobileMoney.anyProviderByCode('paybill')!.label,
+          value: account.isEmpty ? paybill : '$paybill · Acc $account',
+          icon: Icons.account_balance_outlined,
+        );
+    }
+
+    // Phone-number rails (mpesa / mtn / airtel / tigo). Null means the
+    // saved code isn't offered in this vendor's country — a legacy doc
+    // written before paymentMethod existed (code is ''), or one whose
+    // pin moved markets before _ensurePaymentMethodValidForCountry()
+    // existed to correct it. Naming the country's providers generically
+    // beats providerByCode's orElse silently calling a UG vendor's
+    // stale 'mpesa' "MTN Mobile Money".
+    final provider = MobileMoney.providerByCodeOrNull(country, code);
+    // payoutPhone is the override the vendor set when payments land on
+    // a different line than the one customers call (common for a
+    // registered business or petrol station). Empty — including for
+    // every doc written before the field existed, where `phone` WAS
+    // the payout number — means payments follow the contact line.
+    final payoutPhone = s('payoutPhone');
+    return _Payout(
+      label: provider?.label ?? MobileMoney.primaryLabelFor(country),
+      value: payoutPhone.isNotEmpty ? payoutPhone : s('phone'),
+      icon: Icons.phone_outlined,
+    );
+  }
+
+  /// Whether the payout destination is anything other than the contact
+  /// number — a till, a paybill, or an explicit payoutPhone override.
+  /// False means _payout just restates `phone`, so showing it as a
+  /// separate row would be noise.
+  bool get _payoutIsSeparate {
+    final code = (_vendorData?['paymentMethod'] ?? '').toString();
+    if (code == 'till' || code == 'paybill') return true;
+    return (_vendorData?['payoutPhone'] ?? '').toString().isNotEmpty;
+  }
 
   /// Same Haversine calculation VendorProvider (customer app) already
   /// uses to show "X km away" when a customer is browsing vendors —
@@ -215,7 +300,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
           _vendorLoadFailed = false;
         });
         if (!_promoChecked) {
-          // ← add this block
           _promoChecked = true;
           checkForPromo(
             audience: 'vendor',
@@ -298,29 +382,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     }
   }
 
-  /// Mirrors VendorModel.documentsSubmitted (app_models.dart) — kept
-  /// as a raw-map check here since this screen reads _vendorData
-  /// directly rather than through the model. Update both together.
+  /// Delegates to the country's own requirement list — the same list
+  /// Step 3 renders from, so what the vendor is ASKED for and what
+  /// counts as submitted can no longer drift apart. They had: both this
+  /// and VendorModel.documentsSubmitted hardcoded a KE-shaped set, so a
+  /// Tanzanian vendor who skipped their TRA tax clearance still passed,
+  /// and this screen told them "Documents under review" while they were
+  /// short a document.
   bool get _documentsSubmitted {
-    String s(String key) => (_vendorData?[key] ?? '').toString();
-    final hasEpraProof =
-        s('epraCertificateUrl').isNotEmpty ||
-        s('subDealerAuthorizationUrl').isNotEmpty;
-    final hasScaleProof =
-        s('weighingScaleCertUrl').isNotEmpty ||
-        s('weighingScalePhotoUrl').isNotEmpty;
-    final hasBrandProof =
-        s('brandAuthorizationUrl').isNotEmpty ||
-        s('dealerAssociationLetterUrl').isNotEmpty;
-    final isSole = (_vendorData?['businessType'] ?? 'sole') == 'sole';
-    final hasBusinessReg = !isSole || s('businessRegistrationUrl').isNotEmpty;
-    return hasEpraProof &&
-        s('businessPermitUrl').isNotEmpty &&
-        s('fireCertificateUrl').isNotEmpty &&
-        s('premisesPhotoUrl').isNotEmpty &&
-        hasScaleProof &&
-        hasBrandProof &&
-        hasBusinessReg;
+    final country = (_vendorData?['country'] as String?) ?? 'KE';
+    return VendorRequirements.forCountry(country).documentsSubmitted(
+      urlFor: (key) => (_vendorData?[key] ?? '').toString(),
+      isSole: (_vendorData?['businessType'] ?? 'sole') == 'sole',
+    );
   }
 
   Future<void> _toggleOnline() async {
@@ -1358,6 +1432,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     final isAccepted = order.status == OrderStatus.accepted;
     final isOutForDelivery = order.status == OrderStatus.outForDelivery;
     final distance = _distanceToOrder(order);
+    // BUG FIX: this line used to say "cash or
+    // ${MobileMoney.primaryLabelFor(order.country)} to you" — telling
+    // a Till/Paybill vendor to collect via M-Pesa send-money, which
+    // is not the payout they configured. _payout resolves from the
+    // vendor's saved paymentMethod. Safe to read _vendorData here:
+    // this card only ever renders on the vendor's own home screen.
+    final payout = _payout;
 
     Color statusColor = isPending
         ? AppColors.warning
@@ -1606,7 +1687,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery (cash or ${MobileMoney.primaryLabelFor(order.country)} to you).',
+                    payout.value.isEmpty
+                        ? 'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery (cash or ${payout.label} to you).'
+                        : 'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery — cash, or ${payout.label} ${payout.value}.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppColors.navy,
                       fontSize: 11,
@@ -1812,6 +1895,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   // ── EARNINGS TAB ──────────────────────────────────────────────────
   Widget _buildEarningsTab() {
     final e = _earnings;
+    // BUG FIX: was _earningsRow('Your ${MobileMoney.primaryLabelFor(
+    // country)}', _vendorData?['phone']) — blank for every Till or
+    // Paybill vendor, since those never set a phone number.
+    final payout = _payout;
 
     return RefreshIndicator(
       color: AppColors.orange,
@@ -1915,10 +2002,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                             ],
                           ),
                         ),
-                        _earningsRow(
-                          'Your ${MobileMoney.primaryLabelFor(_vendorData?["country"])}',
-                          _vendorData?['phone'] ?? '',
-                        ),
+                        _earningsRow('Your ${payout.label}', payout.value),
                       ],
                     ),
                   ),
@@ -2013,7 +2097,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
           const Spacer(),
           Flexible(
             child: Text(
-              value,
+              // Was silently blank when the vendor had no phone set.
+              value.isEmpty ? '—' : value,
               textAlign: TextAlign.right,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: AppColors.navy,
@@ -2030,6 +2115,11 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   Widget _buildProfileTab() {
     final user = FirebaseAuth.instance.currentUser;
     final photoUrl = (_vendorData?['photoUrl'] as String?) ?? user?.photoURL;
+    // BUG FIX: the payout tile below was hardcoded to
+    // '${MobileMoney.primaryLabelFor(country)} number' + phone, so a
+    // Paybill vendor saw "M-Pesa number: —" (screenshot). Resolve the
+    // label, value AND icon from their actual paymentMethod instead.
+    final payout = _payout;
 
     // BUG FIX: `(_vendorData?['businessName'] ?? 'V')[0]` — `??` only
     // catches null, and a vendor who hasn't run setup has an EMPTY
@@ -2167,9 +2257,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                 ),
                 _profileTile(
                   Icons.phone_outlined,
-                  '${MobileMoney.primaryLabelFor(_vendorData?["country"])} number',
+                  'Contact phone',
                   (_vendorData?['phone'] ?? '').toString(),
                 ),
+                // Only worth its own row when it differs from the
+                // contact line above — for the vendor paid on the
+                // number they answer, this would just repeat it.
+                if (_payoutIsSeparate)
+                  _profileTile(payout.icon, payout.label, payout.value),
                 _profileTile(
                   Icons.location_on_outlined,
                   'Location',
