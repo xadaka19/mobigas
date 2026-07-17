@@ -205,6 +205,7 @@ class FirestoreService {
       id: id,
       businessName: data['businessName'] ?? '',
       ownerName: data['ownerName'] ?? '',
+      email: data['email'],
       phone: data['phone'] ?? '',
       area: data['area'] ?? '',
       estate: data['estate'] ?? '',
@@ -246,6 +247,10 @@ class FirestoreService {
       weighingScaleCertUrl: data['weighingScaleCertUrl'] ?? '',
       weighingScalePhotoUrl: data['weighingScalePhotoUrl'] ?? '',
       premisesPhotoUrl: data['premisesPhotoUrl'] ?? '',
+      // TZ only — the model gained this field so documentsSubmitted can
+      // see it; without it here, a Tanzanian vendor who HAS uploaded
+      // their TRA clearance still reads as not submitted.
+      taxClearanceUrl: data['taxClearanceUrl'] ?? '',
       businessType: data['businessType'] ?? '',
       referralCode: data['referralCode'] ?? '',
       referredByCode: data['referredByCode'],
