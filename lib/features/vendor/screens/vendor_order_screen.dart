@@ -38,6 +38,9 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   // watches, written by the rider's tracking page.
   LatLng? _riderLivePosition;
   StreamSubscription? _riderPositionSub;
+  // One-shot guard so the rider-arrived prompt can't re-fire on
+  // every subsequent snapshot of the order doc.
+  bool _riderArrivedHandled = false;
   GoogleMapController? _mapController;
   double? _vendorLat;
   double? _vendorLng;
@@ -97,6 +100,13 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
             );
           });
         }
+        // Rider tapped "I have arrived" on the tracking page.
+        if (data?['riderArrivedSignal'] == true &&
+            !_riderArrivedHandled &&
+            _step == _Step.enRoute) {
+          _riderArrivedHandled = true;
+          _showRiderArrivedDialog();
+        }
       });
     });
   }
@@ -131,7 +141,7 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
       // Not silent. A permission-denied here means the orders rules
       // reject this vendor's read, and the delivery map will open on
       // nothing with no explanation.
-      debugPrint('VendorOrderScreen: could not load customer coords — \$e');
+      debugPrint('VendorOrderScreen: could not load customer coords — $e');
     }
   }
 
@@ -260,14 +270,19 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
       ..writeln('Item: $item')
       ..write(
           'Payment: customer pays $_amount (cash or mobile money to the vendor). Confirm payment is received before taking the PIN.');
-    if (mapsLink != null) {
-      body.writeln();
-      body.write('Directions: $mapsLink');
-    }
+    // ONE link, one instruction. The tracking page has the map AND a
+    // "Navigate with Google Maps" button built in — sending a
+    // separate raw Maps link alongside it just invites the rider to
+    // tap that one instead and never start tracking. The raw Maps
+    // link only goes out as a fallback when the tracking link
+    // couldn't be minted.
     if (_riderTrackingUrl != null) {
       body.writeln();
       body.write(
-          'IMPORTANT — open this link and tap Start so the customer can see you coming: $_riderTrackingUrl');
+          'OPEN THIS LINK to start the delivery — it shows you the map, gives you Google Maps directions, and lets the customer see you coming: $_riderTrackingUrl');
+    } else if (mapsLink != null) {
+      body.writeln();
+      body.write('Directions: $mapsLink');
     }
     return body.toString();
   }
@@ -358,6 +373,54 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
         );
       }
     }
+  }
+
+  /// Shown once when the rider's tracking page sends the "arrived"
+  /// signal — offers to advance this screen to the Arrived step so
+  /// the vendor can enter the PIN.
+  void _showRiderArrivedDialog() {
+    final rider = _riderNameController.text.trim();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: Row(children: [
+          const Icon(Icons.two_wheeler_rounded,
+              color: AppColors.success, size: 26),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text('Rider has arrived!',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w700)),
+          ),
+        ]),
+        content: Text(
+            '${rider.isNotEmpty ? rider : 'Your rider'} is at ${widget.order.customerName}\'s location. Confirm payment is received, then move to the Arrived step to enter the PIN.',
+            style: Theme.of(ctx)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: AppColors.gray400, height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Not yet',
+                style: TextStyle(color: AppColors.gray400)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _markArrived();
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.success),
+            child: const Text('Mark as Arrived'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _startTrip() async {
@@ -754,11 +817,17 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _sendRiderDetailsSms,
                     icon: const Icon(Icons.sms_outlined, size: 16),
-                    label: const Text('SMS'),
+                    // FittedBox + tight padding: the default button
+                    // padding made the label overflow its half-width
+                    // slot on narrower screens, wrapping/clipping the
+                    // text. Scale down instead of ever wrapping.
+                    label: const FittedBox(child: Text('SMS')),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.orange,
                       side: const BorderSide(color: AppColors.orange),
                       minimumSize: const Size(0, 44),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8),
                     ),
                   ),
                 ),
@@ -767,11 +836,13 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _sendRiderDetailsWhatsApp,
                     icon: const Icon(Icons.chat_rounded, size: 16),
-                    label: const Text('WhatsApp'),
+                    label: const FittedBox(child: Text('WhatsApp')),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.success,
                       side: const BorderSide(color: AppColors.success),
                       minimumSize: const Size(0, 44),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8),
                     ),
                   ),
                 ),

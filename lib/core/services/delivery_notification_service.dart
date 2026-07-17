@@ -27,10 +27,25 @@ class DeliveryNotificationService {
   /// (new orders, payments, announcements).
   /// Title and body come from the FCM message, never hardcoded.
   /// [type] is stored as the tap payload for navigation.
+  ///
+  /// BUG FIX: the notification ID used to be
+  /// `DateTime.now().millisecondsSinceEpoch ~/ 1000`, which is
+  /// effectively random per call. FCM can redeliver the same
+  /// message (normal, expected behavior — not a bug in the queue),
+  /// and each redelivery got a fresh random ID, so
+  /// flutter_local_notifications never recognized two calls as "the
+  /// same" notification and stacked a second permanent banner
+  /// instead of overwriting the first. [notificationId] is now the
+  /// server-supplied notifications_queue doc ID (stable per event),
+  /// so a redelivered message overwrites the existing banner in
+  /// place. Falls back to a hash of title+body if no ID is supplied
+  /// — shouldn't happen once the server always sends one, but keeps
+  /// this safe either way.
   static Future<void> showGeneralNotification({
     required String title,
     required String body,
     String type = '',
+    String? notificationId,
   }) async {
     if (title.isEmpty && body.isEmpty) return;
     await initialize();
@@ -46,9 +61,7 @@ class DeliveryNotificationService {
     );
     final details = NotificationDetails(android: androidDetails);
     await _plugin.show(
-      // Unique ID per message so notifications stack instead of
-      // overwriting each other.
-      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      id: (notificationId ?? '$title|$body').hashCode,
       title: title.isNotEmpty ? title : 'MobiGas',
       body: body,
       notificationDetails: details,

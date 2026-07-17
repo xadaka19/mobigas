@@ -464,7 +464,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   /// wasn't awaited, so failures vanished.
   Future<void> _acceptOrder(OrderModel order) async {
     try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+
+      // The query must PROVE its results belong to this vendor —
+      // firestore.rules evaluates isVendor() against the query, not
+      // the rows it would return. Filtering on orderId alone is a
+      // permission-denied.
       final snap = await FirebaseService.orders
+          .where('vendorId', isEqualTo: uid)
           .where('orderId', isEqualTo: order.orderId)
           .limit(1)
           .get();
@@ -492,7 +500,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
         'status': OrderStatus.accepted.name,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('acceptOrder failed for ${order.orderId}: $e');
+      debugPrintStack(stackTrace: st);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

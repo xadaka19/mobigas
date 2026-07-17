@@ -61,8 +61,12 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
 
     try {
       // Save rating to order
+      // Scoped rules: a query filtered on orderId alone is rejected —
+      // Firestore cannot prove the result belongs to this customer.
       final orderSnap = await FirebaseService.orders
           .where('orderId', isEqualTo: order.orderId)
+          .where('customerId', isEqualTo: order.customerId)
+          .limit(1)
           .get();
 
       if (orderSnap.docs.isNotEmpty) {

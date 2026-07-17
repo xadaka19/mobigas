@@ -39,10 +39,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   } else {
     // Everything else (credit updates, new orders, payments, etc.)
     // gets a normal notification with the message's own title.
+    //
+    // BUG FIX: pass the server's stable notificationId (the
+    // notifications_queue doc ID) through so a redelivered FCM
+    // message overwrites the existing banner instead of stacking a
+    // second one — see DeliveryNotificationService.showGeneralNotification.
     await DeliveryNotificationService.showGeneralNotification(
       title: title,
       body: body,
       type: type,
+      notificationId: data['notificationId'],
     );
   }
 }
@@ -266,10 +272,14 @@ class NotificationService {
         status: body,
       );
     } else {
+      // BUG FIX: same notificationId passthrough as the background
+      // handler above, so a redelivered message overwrites the
+      // existing banner in the foreground path too.
       await DeliveryNotificationService.showGeneralNotification(
         title: title,
         body: body,
         type: type,
+        notificationId: data['notificationId'],
       );
     }
   }
