@@ -76,28 +76,24 @@ class _DeliveryConfirmedScreenState extends State<DeliveryConfirmedScreen>
         });
       }
 
-      // Update vendor's average rating
-      final vendorDoc = await FirebaseService.vendors
-          .doc(order.vendorId)
-          .get();
-
-      if (vendorDoc.exists) {
-        final data = vendorDoc.data() as Map<String, dynamic>;
-        final currentRating = (data['rating'] ?? 0.0).toDouble();
-        final totalReviews = (data['totalReviews'] ?? 0) as int;
-        final newTotal = totalReviews + 1;
-        final newRating =
-            ((currentRating * totalReviews) + _selectedRating) / newTotal;
-
-        await FirebaseService.vendors.doc(order.vendorId).update({
-          'rating': double.parse(newRating.toStringAsFixed(1)),
-          'totalReviews': newTotal,
-        });
-      }
-
+      // The vendor's average is computed server-side by onOrderRated
+      // (Admin SDK). The client used to read the vendor doc, do the
+      // arithmetic itself and write it back — which the rules correctly
+      // reject (a customer is not the vendor's owner), and which any
+      // customer could have used to set any vendor's rating to 5.0.
       setState(() => _ratingSubmitted = true);
     } catch (e) {
-      setState(() => _ratingSubmitted = true);
+      // This used to swallow the error and still show "rated", so the
+      // permission-denied was invisible and the rating silently vanished.
+      debugPrint('submitRating failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save your rating. Please try again.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
 
     setState(() => _isSubmittingRating = false);
