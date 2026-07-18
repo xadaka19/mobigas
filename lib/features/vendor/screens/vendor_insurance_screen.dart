@@ -6,6 +6,8 @@ import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/config/insurance_config.dart';
 import 'package:mobigas/core/models/insurance_models.dart';
 import 'package:mobigas/core/services/insurance_service.dart';
+import 'package:mobigas/core/config/mobile_money.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// How long we wait for the STK payment to settle before telling the
 /// vendor to check back — same generous window as the platform-fee
@@ -115,8 +117,13 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
 
   Future<void> _buyNow() async {
     final phone = _phoneController.text.trim();
+    final provider = MobileMoney.feeProviderFor(_country);
+    final isPesapal = provider == PlatformFeeProvider.pesapal;
+
     if (phone.length < 9) {
-      setState(() => _statusMessage = 'Enter a valid M-Pesa number.');
+      setState(() => _statusMessage = isPesapal
+          ? 'Enter a valid phone number.'
+          : 'Enter a valid M-Pesa number.');
       return;
     }
 
@@ -130,37 +137,82 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
     final (sumInsured, basis) = _quote;
 
     try {
-      final checkoutRequestId = await InsuranceService.initiatePremiumStk(
-        vendorId: widget.vendorId,
-        phone: phone,
-        sumInsured: sumInsured,
-        premium: _premium,
-        basis: basis,
-        multiplier: basis == SumInsuredBasis.computed ? _multiplier : null,
-        avgMonthlySales: _history?.avgMonthlySales,
-      );
+      if (isPesapal) {
+        final res = await InsuranceService.initiatePremiumPesapal(
+          vendorId: widget.vendorId,
+          phone: phone,
+          sumInsured: sumInsured,
+          premium: _premium,
+          basis: basis,
+          multiplier: basis == SumInsuredBasis.computed ? _multiplier : null,
+          avgMonthlySales: _history?.avgMonthlySales,
+        );
+        if (!mounted) return;
+        if (res.redirectUrl == null || res.orderTrackingId == null) {
+          setState(() {
+            _phase = _Phase.failed;
+            _statusMessage = 'Could not start the payment. Try again.';
+          });
+          return;
+        }
 
-      if (!mounted) return;
-      if (checkoutRequestId == null) {
+        final launched = await launchUrl(
+          Uri.parse(res.redirectUrl!),
+          mode: LaunchMode.externalApplication,
+        );
+        if (!launched) {
+          if (!mounted) return;
+          setState(() {
+            _phase = _Phase.failed;
+            _statusMessage = 'Could not open the payment page. Try again.';
+          });
+          return;
+        }
+
         setState(() {
-          _phase = _Phase.failed;
-          _statusMessage = 'Could not start the payment. Try again.';
+          _phase = _Phase.waitingForPin;
+          _statusMessage =
+              'Complete your payment in the browser, then come back — '
+              'this updates automatically once confirmed.';
         });
-        return;
+
+        _stkSub = FirebaseFirestore.instance
+            .collection('insurance_pesapal_transactions')
+            .doc(res.orderTrackingId)
+            .snapshots()
+            .listen(_handleStkUpdate);
+        _timeoutTimer = Timer(_kStkResultTimeout, _handleTimeout);
+      } else {
+        final checkoutRequestId = await InsuranceService.initiatePremiumStk(
+          vendorId: widget.vendorId,
+          phone: phone,
+          sumInsured: sumInsured,
+          premium: _premium,
+          basis: basis,
+          multiplier: basis == SumInsuredBasis.computed ? _multiplier : null,
+          avgMonthlySales: _history?.avgMonthlySales,
+        );
+        if (!mounted) return;
+        if (checkoutRequestId == null) {
+          setState(() {
+            _phase = _Phase.failed;
+            _statusMessage = 'Could not start the payment. Try again.';
+          });
+          return;
+        }
+
+        setState(() {
+          _phase = _Phase.waitingForPin;
+          _statusMessage = 'Check your phone to complete the M-Pesa payment.';
+        });
+
+        _stkSub = FirebaseFirestore.instance
+            .collection('insurance_stk_transactions')
+            .doc(checkoutRequestId)
+            .snapshots()
+            .listen(_handleStkUpdate);
+        _timeoutTimer = Timer(_kStkResultTimeout, _handleTimeout);
       }
-
-      setState(() {
-        _phase = _Phase.waitingForPin;
-        _statusMessage = 'Check your phone to complete the M-Pesa payment.';
-      });
-
-      _stkSub = FirebaseFirestore.instance
-          .collection('stk_transactions')
-          .doc(checkoutRequestId)
-          .snapshots()
-          .listen(_handleStkUpdate);
-
-      _timeoutTimer = Timer(_kStkResultTimeout, _handleTimeout);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -272,6 +324,8 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
 
   Widget _buildQuoteAndPay() {
     final (sumInsured, basis) = _quote;
+    final isPesapal =
+        MobileMoney.feeProviderFor(_country) == PlatformFeeProvider.pesapal;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -363,7 +417,7 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        Text('Pay with M-Pesa',
+        Text(isPesapal ? 'Pay with Pesapal' : 'Pay with M-Pesa',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: AppColors.white,
                 fontSize: 14,
@@ -375,7 +429,8 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
           keyboardType: TextInputType.phone,
           style: const TextStyle(color: AppColors.white),
           decoration: InputDecoration(
-            hintText: '07XX XXX XXX',
+            hintText:
+                isPesapal ? 'e.g. 0712 345 678' : '07XX XXX XXX',
             hintStyle: const TextStyle(color: AppColors.gray600),
             prefixIcon:
                 const Icon(Icons.phone_android_rounded, color: AppColors.gray400),
@@ -406,7 +461,9 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
             _phase == _Phase.sendingPrompt
                 ? 'Sending prompt...'
                 : _phase == _Phase.waitingForPin
-                    ? 'Waiting for M-Pesa PIN...'
+                    ? (isPesapal
+                        ? 'Waiting for payment...'
+                        : 'Waiting for M-Pesa PIN...')
                     : _phase == _Phase.issuing
                         ? 'Issuing your policy...'
                         : _phase == _Phase.failed

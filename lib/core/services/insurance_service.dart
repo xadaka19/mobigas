@@ -197,4 +197,35 @@ class InsuranceService {
     }).bounded(const Duration(seconds: 20));
     return result.data['checkoutRequestId'] as String?;
   }
+
+  /// Starts a Pesapal insurance-premium checkout (UG/TZ). Returns the
+  /// order tracking id (to listen on insurance_pesapal_transactions)
+  /// and the redirect URL the vendor completes payment at. Kenya uses
+  /// initiatePremiumStk instead.
+  static Future<({String? orderTrackingId, String? redirectUrl})>
+      initiatePremiumPesapal({
+    required String vendorId,
+    required String phone,
+    required double sumInsured,
+    required double premium,
+    required SumInsuredBasis basis,
+    CoverageMultiplier? multiplier,
+    double? avgMonthlySales,
+  }) async {
+    final callable = FirebaseFunctions.instance
+        .httpsCallable('initiateInsurancePremiumPesapal');
+    final result = await callable.call({
+      'vendorId': vendorId,
+      'phone': phone,
+      'sumInsured': sumInsured,
+      'premium': premium,
+      'sumInsuredBasis': basis.name,
+      'coverageMultiplier': multiplier?.name,
+      'avgMonthlySales': avgMonthlySales,
+    }).bounded(const Duration(seconds: 20));
+    return (
+      orderTrackingId: result.data['orderTrackingId'] as String?,
+      redirectUrl: result.data['redirectUrl'] as String?,
+    );
+  }
 }
