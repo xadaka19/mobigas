@@ -22,6 +22,7 @@ import 'package:mobigas/core/widgets/double_back_to_exit.dart';
 import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
 import 'package:mobigas/core/widgets/promo_popup_mixin.dart';
 import 'package:mobigas/features/stock_boost/vendor_stock_boost.dart';
+import 'package:mobigas/core/widgets/vendor_insurance_card.dart';
 
 /// BUG FIX: this is the specific unbounded call behind "vendor reopen
 /// is slow" — FirebaseService.vendors.doc(_vendorId).get() below had
@@ -1946,6 +1947,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
             ),
             // Stock boost — shows only for eligible vendors, else renders nothing
             StockBoostCard(vendorId: _vendorId, vendorData: _vendorData),
+            VendorInsuranceCard(vendorId: _vendorId, vendorData: _vendorData),
             Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
