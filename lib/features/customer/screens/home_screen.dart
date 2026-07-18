@@ -649,7 +649,10 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                     size: 14, color: AppColors.gray400),
               ],
             ),
-            if (cheapestRefill != null || hasFullKit || hasGrillKit) ...[
+            if (cheapestRefill != null ||
+                hasFullKit ||
+                hasGrillKit ||
+                vendor.acceptsPartialPayment) ...[
               const SizedBox(height: 10),
               Wrap(
                 spacing: 6,
@@ -660,6 +663,37 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                         '${cheapestRefill.size} refill from ${Currency.formatFor(vendor.country, cheapestRefill.price)}'),
                   if (hasFullKit) chip('Gas + cylinder'),
                   if (hasGrillKit) chip('Gas + cylinder + grill'),
+                  // Signals the vendor is open to arranging flexible
+                  // payment — the details are shown on the order screen,
+                  // where a specific vendor is selected. MobiGas only
+                  // surfaces that the option exists; it's not a party to
+                  // any arrangement.
+                  if (vendor.acceptsPartialPayment)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.handshake_outlined,
+                              size: 11, color: AppColors.orange),
+                          const SizedBox(width: 4),
+                          Text('Flexible payment',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: AppColors.orange,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ],

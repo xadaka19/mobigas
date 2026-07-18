@@ -2278,6 +2278,18 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                   'Brands',
                   (_vendorData?['brands'] as List?)?.join(', ') ?? '',
                 ),
+                _profileTile(
+                  Icons.handshake_outlined,
+                  'Flexible payment',
+                  (_vendorData?['acceptsPartialPayment'] ?? false) == true
+                      ? ((_vendorData?['partialPaymentNote'] ?? '')
+                                  .toString()
+                                  .trim()
+                                  .isEmpty
+                              ? 'On'
+                              : (_vendorData?['partialPaymentNote']).toString())
+                      : 'Off',
+                ),
                 const SizedBox(height: 8),
                 _editEntryButton(
                   icon: Icons.store_outlined,

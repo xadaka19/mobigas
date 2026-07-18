@@ -101,6 +101,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late bool _useSeparatePayoutPhone;
   late TextEditingController _deliveryTimeController;
   late TextEditingController _referralCodeController;
+
+  // Flexible-payment noticeboard — see VendorModel. A toggle, the
+  // vendor's own note, and a repeat-only checkbox. MobiGas stores and
+  // shows these; it arranges, computes, and enforces nothing.
+  late bool _acceptsPartialPayment;
+  late TextEditingController _partialPaymentNoteController;
+  late bool _partialRepeatOnly;
   String _paymentMethod = 'mpesa'; // mpesa, till, paybill, mtn, airtel, tigo
   late TextEditingController _tillController;
   late TextEditingController _paybillController;
@@ -258,6 +265,11 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _referralCodeController = TextEditingController(
       text: d['referredByCode'] ?? '',
     );
+    _acceptsPartialPayment = (d['acceptsPartialPayment'] ?? false) == true;
+    _partialPaymentNoteController = TextEditingController(
+      text: d['partialPaymentNote'] ?? '',
+    );
+    _partialRepeatOnly = (d['partialRepeatOnly'] ?? false) == true;
     _tillController = TextEditingController(text: d['tillNumber'] ?? '');
     _paybillController = TextEditingController(text: d['paybillNumber'] ?? '');
     _paybillAccountController = TextEditingController(
@@ -355,6 +367,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _phoneController.dispose();
     _payoutPhoneController.dispose();
     _deliveryTimeController.dispose();
+    _partialPaymentNoteController.dispose();
     _tillController.dispose();
     _paybillController.dispose();
     _paybillAccountController.dispose();
@@ -651,6 +664,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty
             ? _deliveryTimeController.text.trim()
             : '20–40 min',
+        // Flexible-payment noticeboard — vendor's own words, stored and
+        // shown, never acted on. Note is only kept when the toggle is on,
+        // so turning it off actually clears the message rather than
+        // leaving a stale one to reappear if it's turned back on.
+        'acceptsPartialPayment': _acceptsPartialPayment,
+        'partialPaymentNote': _acceptsPartialPayment
+            ? _partialPaymentNoteController.text.trim()
+            : '',
+        'partialRepeatOnly':
+            _acceptsPartialPayment && _partialRepeatOnly,
         'updatedAt': FieldValue.serverTimestamp(),
         'certificateUrl': certificateUrl,
         'epraCertificateUrl': docUrls['epraCertificateUrl'],
@@ -1088,8 +1111,143 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           hint: 'e.g. 20–40 min',
         ),
         const SizedBox(height: 16),
+        _buildPartialPaymentSection(),
+        const SizedBox(height: 16),
         _buildReferralCodeField(),
       ],
+    );
+  }
+
+  /// Flexible-payment noticeboard. This is NOT a credit tool: MobiGas
+  /// stores whether the vendor is open to arranging payment directly
+  /// with a customer, plus the vendor's own note, and shows both to
+  /// customers. It sets no terms, tracks no balance, and is never a
+  /// party to the arrangement — that's entirely between vendor and
+  /// customer. The copy here says so plainly, on purpose.
+  Widget _buildPartialPaymentSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.white.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.handshake_outlined,
+                color: AppColors.orange,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Flexible payment',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 14,
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Switch(
+                value: _acceptsPartialPayment,
+                activeThumbColor: AppColors.orange,
+                onChanged: (v) => setState(() => _acceptsPartialPayment = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Turn this on if you\'re open to arranging payment directly with '
+            'a customer. Any arrangement is strictly between you and them — '
+            'MobiGas only shows customers that you\'re open to it and '
+            'passes on your note below.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray400,
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+          if (_acceptsPartialPayment) ...[
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _partialPaymentNoteController,
+              maxLength: VendorModel.partialPaymentNoteMaxLength,
+              maxLines: 3,
+              minLines: 2,
+              textCapitalization: TextCapitalization.sentences,
+              style: const TextStyle(color: AppColors.white, fontSize: 13),
+              decoration: InputDecoration(
+                hintText:
+                    'Tell customers how you\'d like to handle payment — '
+                    'e.g. how much upfront, when you\'d want the rest.',
+                hintStyle: const TextStyle(
+                  color: AppColors.gray600,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+                counterStyle: const TextStyle(
+                  color: AppColors.gray400,
+                  fontSize: 10,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppColors.white.withValues(alpha: 0.2),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.orange),
+                ),
+                filled: true,
+                fillColor: AppColors.white.withValues(alpha: 0.05),
+                contentPadding: const EdgeInsets.all(12),
+              ),
+            ),
+            const SizedBox(height: 4),
+            InkWell(
+              onTap: () =>
+                  setState(() => _partialRepeatOnly = !_partialRepeatOnly),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      _partialRepeatOnly
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded,
+                      color: _partialRepeatOnly
+                          ? AppColors.orange
+                          : AppColors.gray400,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Only offer this to customers who\'ve ordered from '
+                        'me before. New customers can still buy at full '
+                        'price.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.white,
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

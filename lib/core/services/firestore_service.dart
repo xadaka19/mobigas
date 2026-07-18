@@ -252,6 +252,11 @@ class FirestoreService {
       // their TRA clearance still reads as not submitted.
       taxClearanceUrl: data['taxClearanceUrl'] ?? '',
       businessType: data['businessType'] ?? '',
+      // Flexible-payment noticeboard — vendor's stored intent + own note.
+      // MobiGas surfaces these; it's not a party to any arrangement.
+      acceptsPartialPayment: data['acceptsPartialPayment'] ?? false,
+      partialPaymentNote: data['partialPaymentNote'] ?? '',
+      partialRepeatOnly: data['partialRepeatOnly'] ?? false,
       referralCode: data['referralCode'] ?? '',
       referredByCode: data['referredByCode'],
     );

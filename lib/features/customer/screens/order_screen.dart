@@ -152,6 +152,21 @@ class _OrderScreenState extends State<OrderScreen> {
   /// vendor onboarding from GPS, not a customer preference.
   String get _vendorCountry => _selectedVendor?.country ?? 'KE';
 
+  /// Whether this customer has ordered from the selected vendor before.
+  /// Only used to decide whether a vendor's flexible-payment note shows
+  /// in full or greyed-out (when the vendor set partialRepeatOnly). It
+  /// gates the NOTE, never the order — a first-timer always orders at
+  /// full price regardless. "Before" counts any non-cancelled prior
+  /// order with this vendor; MobiGas isn't judging repayment, just
+  /// whether they're a returning customer.
+  bool _hasOrderedFromSelectedVendor(OrderProvider orders) {
+    final vid = _selectedVendor?.id;
+    if (vid == null) return false;
+    return orders.orders.any(
+      (o) => o.vendorId == vid && o.status != OrderStatus.cancelled,
+    );
+  }
+
   String _typeDescription(GasProductType t) {
     switch (t) {
       case GasProductType.refill:
@@ -832,7 +847,84 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ),
         ),
+        _buildFlexiblePaymentNote(),
       ],
+    );
+  }
+
+  /// The selected vendor's flexible-payment note, shown verbatim — or
+  /// greyed with a returning-customer message when the vendor limited it
+  /// to repeat customers and this is a first order. Renders nothing when
+  /// the vendor isn't offering it. This is a NOTICEBOARD: MobiGas shows
+  /// the vendor's own words and states plainly it isn't part of the
+  /// arrangement. It sets no terms, tracks no balance, and never blocks
+  /// the order — a first-time customer still buys at full price above.
+  Widget _buildFlexiblePaymentNote() {
+    final vendor = _selectedVendor;
+    if (vendor == null ||
+        !vendor.acceptsPartialPayment ||
+        vendor.partialPaymentNote.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final orders = context.watch<OrderProvider>();
+    final gated = vendor.partialRepeatOnly &&
+        !_hasOrderedFromSelectedVendor(orders);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.orange.withValues(alpha: gated ? 0.04 : 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.orange.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.handshake_outlined,
+                  size: 16,
+                  color: gated ? AppColors.gray400 : AppColors.orange),
+              const SizedBox(width: 8),
+              Text('Flexible payment',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: gated ? AppColors.gray600 : AppColors.orangeDeep,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      )),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            gated
+                ? 'This vendor offers flexible payment to returning customers. '
+                    'Order at full price now — it may be available on your '
+                    'next order with them.'
+                : vendor.partialPaymentNote.trim(),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: gated ? AppColors.gray600 : AppColors.navy,
+                  fontSize: 12,
+                  height: 1.45,
+                ),
+          ),
+          if (!gated) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Arrange this directly with the vendor. MobiGas isn\'t part of '
+              'the arrangement and doesn\'t track any balance.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray400,
+                    fontSize: 10.5,
+                    height: 1.4,
+                    fontStyle: FontStyle.italic,
+                  ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

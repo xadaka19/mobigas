@@ -283,6 +283,35 @@ class VendorModel {
   /// previously have to prove registration at all; now they do).
   final String businessType;
 
+  // ── Flexible payment (NOTICEBOARD ONLY) ─────────────────────────
+  // MobiGas is not a party to, and does not track, any payment
+  // arrangement between a vendor and a customer. It stores whether a
+  // vendor is open to arranging flexible payment, and the vendor's own
+  // words describing how — nothing more. There is deliberately NO
+  // deposit amount, due date, balance, or interest field anywhere:
+  // MobiGas computes nothing, enforces nothing, and records no debt.
+  // The customer arranges directly with the vendor; the app only points
+  // them to each other. Keeping it to a bool + free text + a bool is
+  // what keeps this a listing feature and not a credit product.
+
+  /// Vendor is open to arranging flexible payment directly with the
+  /// customer. Drives a badge on the vendor's card and the note below.
+  final bool acceptsPartialPayment;
+
+  /// The vendor's OWN description of how they'd like to handle payment,
+  /// shown to customers verbatim. MobiGas never parses, validates, or
+  /// acts on it — if a vendor wants "half upfront", they write that here
+  /// and it's between them and the customer. Capped so it stays a short
+  /// note, not a contract.
+  final String partialPaymentNote;
+
+  /// Vendor only wants to arrange flexible payment with customers who've
+  /// ordered from them before. When true, the note is shown greyed-out to
+  /// first-time customers — they can still order at full price now. This
+  /// gates the ARRANGEMENT, never the order: a first-timer is never
+  /// blocked from buying, only from the flexible-payment note.
+  final bool partialRepeatOnly;
+
   /// This vendor's own code to share with others.
   final String referralCode;
   /// The referral code THEY entered at setup, if any — permanent.
@@ -324,9 +353,16 @@ class VendorModel {
     this.premisesPhotoUrl = '',
     this.taxClearanceUrl = '',
     this.businessType = '',
+    this.acceptsPartialPayment = false,
+    this.partialPaymentNote = '',
+    this.partialRepeatOnly = false,
     this.referralCode = '',
     this.referredByCode,
   });
+
+  /// Max length of [partialPaymentNote]. A short note, not a contract —
+  /// enforced at the input field and worth clamping on read too.
+  static const int partialPaymentNoteMaxLength = 200;
 
   /// Resolves a Firestore document key to this vendor's stored URL —
   /// the bridge between VendorRequirements' key-based document lists and
