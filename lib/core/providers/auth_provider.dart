@@ -12,6 +12,7 @@ import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/services/geo_service.dart';
 import 'package:mobigas/core/services/google_auth_service.dart';
 import 'package:mobigas/core/services/notification_service.dart';
+import 'package:mobigas/core/services/pezesha_service.dart';
 import 'package:mobigas/core/services/storage_metadata.dart';
 import 'package:mobigas/flavors/flavor_config.dart';
 
@@ -88,6 +89,17 @@ class AuthProvider extends ChangeNotifier {
       (_customer?.latitude ?? 0) != 0 && (_customer?.longitude ?? 0) != 0;
 
   bool get hasVerification => (_customer?.nationalId ?? '').trim().isNotEmpty;
+
+  /// True once this customer has registered as a Pezesha borrower
+  /// (see registerPezeshaBorrower in functions/src/pezesha.ts). Lets
+  /// any screen — not just BnplLimitCard — check "already registered"
+  /// off the profile already in memory, without a network round trip.
+  /// This is a read-only reflection of Firestore's pezeshaId field;
+  /// PezeshaService.ensureRegistered is still the only thing that
+  /// writes it. Call refreshCustomer() after ensureRegistered succeeds
+  /// (see the open item this was flagged under) so this getter picks
+  /// up the change without waiting for the next full profile reload.
+  bool get hasPezeshaId => (_customer?.pezeshaId ?? '').trim().isNotEmpty;
 
   /// Verification (step 3) is optional in v1, so "complete" only
   /// requires the two things an order actually cannot ship without.
@@ -667,6 +679,10 @@ class AuthProvider extends ChangeNotifier {
     // Signs out of Google *and* Firebase. Harmless for password
     // accounts that never touched Google.
     await GoogleAuthService.signOut();
+    // See pezesha_service.dart's cache comment — without this, a
+    // second account signing in on the same device could briefly see
+    // the previous customer's cached BNPL offer.
+    PezeshaService.clearCache();
     _state = AuthState.unauthenticated;
     _customer = null;
     _bannerDismissed = false;

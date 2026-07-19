@@ -71,20 +71,32 @@ extension GasProductTypeExt on GasProductType {
 
 // How the customer pays for an order.
 //
-// Only one way, deliberately. MobiGas does not extend credit and does
-// not intermediate payment — the customer pays the vendor directly on
-// delivery (cash or mobile money straight to the vendor). The old
-// `credit` value (bank pays vendor, customer repays bank) was a BNPL
-// design that never shipped: no order was ever created with it, and
-// the functions behind it were never deployed. Removed rather than
-// left dormant, so no screen can ever render "MobiGas Credit" and no
-// reader has to wonder whether we lend.
+// 'cash': customer pays the vendor directly, on delivery — cash or
+// mobile money, no MobiGas involvement in the payment itself.
 //
-// Parsers use `orElse: () => PaymentMethod.cash`, so any legacy
-// Firestore doc carrying paymentMethod:'credit' degrades to cash
-// rather than throwing. There are none.
+// 'bnpl': Pezesha disburses the order amount straight to the vendor
+// at order time, and the customer repays PEZESHA directly per the
+// loan schedule they were shown and accepted at checkout — see
+// applyPezeshaLoan (functions/src/pezesha.ts) and
+// BnplCheckoutOption/BnplCheckoutSection (customer_bnpl.dart).
+// MobiGas is not a lender and does not collect repayment for this
+// path either; it only initiates the loan application on the
+// customer's behalf and records the resulting loanId on the order
+// (see OrderModel.loanId below) so support can look a loan up by
+// order.
+//
+// This is NOT a revival of the old `credit` value that used to sit
+// here (bank pays vendor, customer repays bank — a design that never
+// shipped: no order was ever created with it, and the functions
+// behind it were never deployed, so it was removed rather than left
+// dormant). `bnpl` is real, live, and backed by an actual
+// third-party disbursement (Pezesha) with a loanId you can look up
+// via getPezeshaLoanStatus/getPezeshaLoanHistory. Parsers still use
+// `orElse: () => PaymentMethod.cash`, so any legacy or unrecognized
+// Firestore value degrades to cash rather than throwing.
 enum PaymentMethod {
   cash, // Customer pays the vendor on delivery — cash or mobile money
+  bnpl, // Pezesha pays the vendor; customer repays Pezesha directly
 }
 
 extension PaymentMethodExt on PaymentMethod {
@@ -92,6 +104,8 @@ extension PaymentMethodExt on PaymentMethod {
     switch (this) {
       case PaymentMethod.cash:
         return 'Pay on delivery';
+      case PaymentMethod.bnpl:
+        return 'Pay later (BNPL via Pezesha)';
     }
   }
 }
@@ -124,6 +138,10 @@ class MobiGasFees {
   // Vendor pays MobiGas 1% customer-finder fee on every order,
   // accrued server-side in confirmDelivery when the order is confirmed
   // delivered, settled weekly. This is MobiGas's only order revenue.
+  // Deliberately NOT charged on financing itself — see the BNPL
+  // discussion: financing access stays a retention lever (bigger,
+  // more frequent orders), not a second monetized surface. If that
+  // changes, it's a new rate constant, not a change to this one.
   static const double cashFinderFeeRate = 0.01;
   // When a vendor's unpaid fees reach this amount (KES), they are
   // automatically hidden from customers until they settle.
@@ -219,11 +237,13 @@ class VendorModel {
   /// Payout (paymentMethod / tillNumber / paybillNumber / paybillAccount
   /// / payoutPhone) deliberately does NOT live on this model — it's read
   /// straight off the vendor doc by the two screens that need it
-  /// (vendor_home_screen, vendor_fees_banner). This model is what the
-  /// CUSTOMER app knows about a vendor, and the customer never needs to
-  /// know how the vendor gets paid; they hand over cash or send money to
-  /// a number given at the door. OrderModel.vendorPhone copies THIS field
-  /// — don't "fix" it into a payout number.
+  /// (vendor_home_screen, vendor_fees_banner), and now also by
+  /// resolveVendorDisbursement in functions/src/pezesha.ts for Pezesha
+  /// payouts — same five raw fields, no new ones added. This model is
+  /// what the CUSTOMER app knows about a vendor, and the customer never
+  /// needs to know how the vendor gets paid; they hand over cash or send
+  /// money to a number given at the door. OrderModel.vendorPhone copies
+  /// THIS field — don't "fix" it into a payout number.
   final String phone;
 
   final String area;
@@ -293,6 +313,11 @@ class VendorModel {
   // The customer arranges directly with the vendor; the app only points
   // them to each other. Keeping it to a bool + free text + a bool is
   // what keeps this a listing feature and not a credit product.
+  //
+  // (This is distinct from PaymentMethod.bnpl above, which IS a real
+  // credit product — just one MobiGas facilitates access to and Pezesha
+  // actually underwrites/collects, rather than one MobiGas tracks a
+  // balance for itself.)
 
   /// Vendor is open to arranging flexible payment directly with the
   /// customer. Drives a badge on the vendor's card and the note below.
@@ -316,6 +341,18 @@ class VendorModel {
   final String referralCode;
   /// The referral code THEY entered at setup, if any — permanent.
   final String? referredByCode;
+
+  /// This vendor's Pezesha borrower ID, once registered (see
+  /// registerPezeshaBorrower in functions/src/pezesha.ts). Null until
+  /// then. Mirrors CustomerModel.pezeshaId below — exists so screens
+  /// that just need to know "has this vendor already registered with
+  /// Pezesha" (e.g. to skip a redundant ensureRegistered round trip,
+  /// or to gate a UI element) can read it off the model already in
+  /// memory instead of making a fresh call. VendorPezeshaStockLoanCard
+  /// still always calls PezeshaService.ensureRegistered on open (it's
+  /// idempotent and confirms current state), so this field is an
+  /// optimization/gate, not the source of truth.
+  final String? pezeshaId;
 
   const VendorModel({
     required this.id,
@@ -358,6 +395,7 @@ class VendorModel {
     this.partialRepeatOnly = false,
     this.referralCode = '',
     this.referredByCode,
+    this.pezeshaId,
   });
 
   /// Max length of [partialPaymentNote]. A short note, not a contract —
@@ -427,6 +465,13 @@ class VendorModel {
   /// so this getter's meaning ("financially in good standing") stays
   /// distinct from "compliance-approved".
   bool get canReceiveOrders => !isSuspended && !isLockedForFees;
+
+  /// True once this vendor has registered with Pezesha. Mirrors
+  /// AuthProvider.hasPezeshaId on the customer side — see that getter's
+  /// comment for the gating this is meant to support. Whatever holds
+  /// VendorModel in memory (VendorProvider or equivalent — not shown
+  /// here) should expose this the same way AuthProvider does.
+  bool get hasPezeshaId => (pezeshaId ?? '').isNotEmpty;
 }
 
 class CustomerModel {
@@ -461,6 +506,14 @@ class CustomerModel {
   /// never changes after registration.
   final String? referredByCode;
 
+  /// This customer's Pezesha borrower ID, once registered (see
+  /// registerPezeshaBorrower in functions/src/pezesha.ts). Null until
+  /// then — written into Firestore by that Cloud Function, and pulled
+  /// into this model on the next profile read (see
+  /// FirestoreService._customerFromMap). AuthProvider.hasPezeshaId
+  /// below is the getter screens should actually use.
+  final String? pezeshaId;
+
   const CustomerModel({
     required this.id,
     required this.name,
@@ -479,6 +532,7 @@ class CustomerModel {
     this.fcmToken,
     this.referralCode = '',
     this.referredByCode,
+    this.pezeshaId,
   });
 }
 
@@ -509,15 +563,25 @@ class OrderModel {
   final String? riderName;
   final String? riderPhone;
 
-  /// How the customer pays. Only one value exists — kept as a field
-  /// rather than dropped entirely because every order document in
-  /// Firestore carries it, and confirmDelivery still reads it when
-  /// deciding whether the finder fee is chargeable.
+  /// How the customer pays. cash (the default) or bnpl — see the
+  /// PaymentMethod comment above for what each means.
   final PaymentMethod paymentMethod;
 
   /// Customer-finder fee the vendor owes MobiGas for this order
   /// (1% of gas price). Frozen at order time.
   final double finderFee;
+
+  /// Pezesha's loan ID for this order — set only when paymentMethod ==
+  /// bnpl. This is the loanId PezeshaService.applyLoan returns after
+  /// BnplCheckoutOption's loan application is approved; the checkout
+  /// flow should attach it here BEFORE calling createOrder (loan
+  /// approval happens first, order creation second — see
+  /// BnplCheckoutOption.onApproved), not backfill it afterward. Null
+  /// for every cash order. Null on a bnpl order means the loan record
+  /// wasn't attached — treat that as a data problem worth flagging to
+  /// support, not as "no loan exists" (getPezeshaLoanStatus/History
+  /// are the source of truth if this ever needs reconciling).
+  final String? loanId;
 
   /// 'customer' | 'vendor' | null — who cancelled this order. Both
   /// paths write status=cancelled, so this is the only way to tell
@@ -546,11 +610,17 @@ class OrderModel {
     this.riderPhone,
     this.paymentMethod = PaymentMethod.cash,
     this.finderFee = 0.0,
+    this.loanId,
     this.cancelledBy,
   });
 
-  /// What the customer pays in total: the gas price, handed to the
-  /// vendor on delivery. Nothing is added — no interest, no fee.
+  /// What the customer pays in total for the order itself: the gas
+  /// price. Unchanged by paymentMethod — cash and bnpl orders cost the
+  /// customer the same listing price; the difference is WHO they pay
+  /// and WHEN (vendor now in cash, Pezesha over time in bnpl), not how
+  /// much. Any interest/fee owed on a bnpl order is Pezesha's loan
+  /// terms (offer.rate/interest/fee — see PezeshaLoanOffer), owed to
+  /// Pezesha, and never added here — MobiGas still adds nothing.
   double get customerTotal => listing.price;
 }
 
@@ -569,6 +639,11 @@ class FeatureFlags {
   // from MobiGas. Gates nothing in code today; the real gate is
   // stockBoostEligibility, written by the nightly server sweep.
   static const bool stockBoostReferral = true;
+  // Pezesha vendor-stock-loan + customer-BNPL flows. Gates whether the
+  // Pezesha cards render at all, independent of the finer-grained
+  // platform_settings/financing country gate (FinancingConfigService) —
+  // this flag is the kill switch; that config is the country dial.
+  static const bool pezeshaFinancing = false;
   static const bool mpesaStkPush = false;         // In-app M-Pesa repayment
   static const bool vehicleLeasing = false;       // Vehicle leasing marketplace
   static const bool cargoInsurance = false;       // Cargo insurance

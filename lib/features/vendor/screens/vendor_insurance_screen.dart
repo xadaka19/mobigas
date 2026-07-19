@@ -332,7 +332,7 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
       children: [
         _infoCard(
           Icons.shield_outlined,
-          'Fire & theft cover for your gas stock — underwritten by our insurance partner. MobiGas only facilitates the purchase and earns a commission.',
+          'Fire & theft cover for your gas stock — underwritten by our insurance partner. MobiGas only facilitates the purchase.',
         ),
         const SizedBox(height: 20),
         if (basis == SumInsuredBasis.starter) ...[
@@ -516,7 +516,7 @@ class _VendorInsuranceScreenState extends State<VendorInsuranceScreen> {
         ],
         const SizedBox(height: 16),
         Text(
-          'MobiGas facilitates this policy and earns a commission from our '
+          'MobiGas facilitates this policy from our '
           'insurance partner — your cover is underwritten by them, not by '
           'MobiGas. Claims are handled directly with the underwriter.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(

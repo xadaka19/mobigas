@@ -159,6 +159,10 @@ class FirestoreService {
       fcmToken: data['fcmToken'],
       referralCode: data['referralCode'] ?? '',
       referredByCode: data['referredByCode'],
+      // Written by registerPezeshaBorrower (functions/src/pezesha.ts)
+      // the first time this customer registers with Pezesha. Null
+      // until then — AuthProvider.hasPezeshaId reflects this.
+      pezeshaId: data['pezeshaId'],
     );
   }
 
@@ -259,6 +263,10 @@ class FirestoreService {
       partialRepeatOnly: data['partialRepeatOnly'] ?? false,
       referralCode: data['referralCode'] ?? '',
       referredByCode: data['referredByCode'],
+      // Written by registerPezeshaBorrower (functions/src/pezesha.ts)
+      // the first time this vendor registers with Pezesha. Null until
+      // then — VendorModel.hasPezeshaId reflects this.
+      pezeshaId: data['pezeshaId'],
     );
   }
 
@@ -288,6 +296,11 @@ class FirestoreService {
       'paymentMethod': order.paymentMethod.name,
       'finderFee': order.finderFee,
       'finderFeeAccrued': false,
+      // Set only for paymentMethod == bnpl — see OrderModel.loanId's
+      // comment for why this must already be populated on `order`
+      // before createOrder is called (loan approval happens first,
+      // via PezeshaService.applyLoan / BnplCheckoutOption.onApproved).
+      'loanId': order.loanId,
       'pin': order.pin,
       'status': order.status.name,
       'riderName': order.riderName,
@@ -413,6 +426,7 @@ class FirestoreService {
         orElse: () => PaymentMethod.cash,
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
+      loanId: data['loanId'],
       cancelledBy: data['cancelledBy'],
       pin: data['pin'] ?? '',
       status: OrderStatus.values.firstWhere(
