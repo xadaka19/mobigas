@@ -8,6 +8,8 @@ import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/config/currency.dart';
+import 'package:mobigas/core/config/pezesha_config.dart';
+import 'package:mobigas/features/bnpl/customer_bnpl.dart';
 
 class OrderScreen extends StatefulWidget {
   const OrderScreen({super.key});
@@ -24,6 +26,15 @@ class _OrderScreenState extends State<OrderScreen> {
   String? _selectedBrand;
   VendorModel? _selectedVendor;
   GasListing? _selectedListing;
+
+  // BNPL: generate the order id up front so the SAME id is attached
+  // to the Pezesha loan at apply time and to the order at create
+  // time — the loan's orderId must match the order that ends up
+  // carrying its loanId. Lazily created, reused for whichever
+  // payment path the customer takes.
+  String? _pendingOrderId;
+  String get _orderId =>
+      _pendingOrderId ??= 'MG-${DateTime.now().millisecondsSinceEpoch}';
 
   @override
   void initState() {
@@ -127,6 +138,40 @@ class _OrderScreenState extends State<OrderScreen> {
       vendor: _selectedVendor!,
       listing: _selectedListing!,
       paymentMethod: PaymentMethod.cash,
+      orderId: _orderId,
+    );
+
+    if (!mounted) return;
+    if (orders.error != null) {
+      _showError(orders.error!);
+      return;
+    }
+    context.pushReplacement('/order-tracking');
+  }
+
+  /// Called by BnplCheckoutSection once Pezesha approves and
+  /// disburses the loan for THIS order. The loan is already applied
+  /// (loanId in hand); create the order as bnpl with that loanId and
+  /// the SAME _orderId the loan was applied against, then go to
+  /// tracking — mirroring the cash path's tail.
+  Future<void> _placeBnplOrder(String loanId) async {
+    final auth = context.read<AuthProvider>();
+    final orders = context.read<OrderProvider>();
+    final customer = auth.customer;
+
+    if (customer == null ||
+        _selectedVendor == null ||
+        _selectedListing == null) {
+      return;
+    }
+
+    await orders.placeOrder(
+      customer: customer,
+      vendor: _selectedVendor!,
+      listing: _selectedListing!,
+      paymentMethod: PaymentMethod.bnpl,
+      orderId: _orderId,
+      loanId: loanId,
     );
 
     if (!mounted) return;
@@ -848,6 +893,21 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
         ),
         _buildFlexiblePaymentNote(),
+        // Pezesha BNPL — only where Pezesha is live (KE/UG) and only
+        // if the customer already has an offer cached from tapping
+        // "Check my limit" on the home card. BnplCheckoutSection does
+        // not register here, so a customer who never opened that card
+        // sees cash only. Renders nothing when there is no offer.
+        if (PezeshaConfig.isAvailableFor(_vendorCountry) &&
+            _selectedVendor != null &&
+            _selectedListing != null)
+          BnplCheckoutSection(
+            vendor: _selectedVendor!,
+            listing: _selectedListing!,
+            country: _vendorCountry,
+            orderId: _orderId,
+            onApproved: _placeBnplOrder,
+          ),
       ],
     );
   }

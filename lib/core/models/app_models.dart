@@ -643,7 +643,7 @@ class FeatureFlags {
   // Pezesha cards render at all, independent of the finer-grained
   // platform_settings/financing country gate (FinancingConfigService) —
   // this flag is the kill switch; that config is the country dial.
-  static const bool pezeshaFinancing = false;
+  static const bool pezeshaFinancing = true;
   static const bool mpesaStkPush = false;         // In-app M-Pesa repayment
   static const bool vehicleLeasing = false;       // Vehicle leasing marketplace
   static const bool cargoInsurance = false;       // Cargo insurance

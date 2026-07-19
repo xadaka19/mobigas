@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/screens/delete_account_screen.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/widgets/notification_permission_tile.dart';
 
 class VendorEditProfileScreen extends StatefulWidget {
   final Map<String, dynamic> vendorData;
@@ -307,6 +308,26 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
                     const SizedBox(height: 16),
                     _buildField('Estate / Area', _estateController,
                         Icons.location_on_outlined),
+                    const SizedBox(height: 16),
+                    // Mirrors signup: if the vendor allowed push
+                    // notifications there, this just shows "Active".
+                    // If they declined, this toggle is the only in-app
+                    // way back in.
+                    Text('Notifications',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(
+                              fontSize: 13,
+                              color: AppColors.white,
+                              fontWeight: FontWeight.w600,
+                            )),
+                    const SizedBox(height: 6),
+                    const NotificationPermissionTile(
+                      darkMode: true,
+                      inactiveMessage:
+                          "Enable push notifications so you don't miss an order",
+                    ),
                     const SizedBox(height: 32),
                     ElevatedButton(
                       onPressed: _isSaving ? null : _saveProfile,

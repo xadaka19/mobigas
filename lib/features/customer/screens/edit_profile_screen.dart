@@ -12,6 +12,7 @@ import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/core/widgets/location_picker_widget.dart';
+import 'package:mobigas/core/widgets/notification_permission_tile.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -408,6 +409,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ],
                         helper: 'You can only set this once.',
                       ),
+                    const SizedBox(height: 16),
+                    // Mirrors signup: if the customer allowed push
+                    // notifications there, this just shows "Active".
+                    // If they declined, this toggle is the only in-app
+                    // way back in.
+                    Text('Notifications',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(
+                              fontSize: 13,
+                              color: AppColors.navy,
+                              fontWeight: FontWeight.w600,
+                            )),
+                    const SizedBox(height: 6),
+                    const NotificationPermissionTile(
+                      darkMode: false,
+                      inactiveMessage:
+                          'Enable push notifications to get live updates on your order',
+                    ),
                     const SizedBox(height: 32),
                     ElevatedButton(
                       onPressed: _isSaving ? null : _saveProfile,

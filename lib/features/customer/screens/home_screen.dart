@@ -14,6 +14,8 @@ import 'package:mobigas/core/widgets/profile_completion_banner.dart';
 import 'package:mobigas/core/services/firestore_service.dart';
 import 'package:mobigas/features/shared/refer_earn_screen.dart';
 import 'package:mobigas/core/widgets/promo_popup_mixin.dart';
+import 'package:mobigas/core/config/pezesha_config.dart';
+import 'package:mobigas/features/bnpl/customer_bnpl.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -186,6 +188,10 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                 children: [
                   const ProfileCompletionBanner(),
                   _buildOrderNowCard(),
+                  if (PezeshaConfig.isAvailableFor(customer.country)) ...[
+                    const SizedBox(height: 8),
+                    BnplLimitCard(country: customer.country),
+                  ],
                   const SizedBox(height: 20),
                   _buildVendorPreview(),
                   const SizedBox(height: 20),

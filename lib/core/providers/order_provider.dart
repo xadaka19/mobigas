@@ -81,19 +81,31 @@ class OrderProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Places an order. The customer pays the vendor directly on
-  /// delivery — cash or mobile money straight to them. MobiGas never
-  /// touches the money and never extends credit.
+  /// Places an order.
   ///
-  /// paymentMethod is retained in the signature (and can only be
-  /// PaymentMethod.cash) so existing callers compile unchanged and the
-  /// Firestore schema keeps carrying the field — confirmDelivery reads
-  /// it when deciding the finder fee is chargeable.
+  /// cash: the customer pays the vendor directly on delivery — MobiGas
+  /// never touches the money. bnpl: Pezesha has already disbursed the
+  /// order amount to the vendor and the customer repays Pezesha
+  /// directly; [loanId] is Pezesha's loan reference for this order and
+  /// MUST be supplied for a bnpl order (it is attached to
+  /// OrderModel.loanId so support can look the loan up by order). Even
+  /// for bnpl, MobiGas is not the lender and collects no repayment.
+  ///
+  /// [orderId] lets the caller pre-generate the id — the bnpl path
+  /// needs it known before the loan is applied, so the loan and the
+  /// order share one id. When null a fresh id is generated here,
+  /// preserving the old behaviour for cash callers that don't pass one.
+  ///
+  /// The 1% customer-finder fee still accrues on delivery
+  /// (confirmDelivery) for BOTH payment methods — financing changes who
+  /// the customer pays, not whether the vendor owes the platform fee.
   Future<void> placeOrder({
     required CustomerModel customer,
     required VendorModel vendor,
     required GasListing listing,
     required PaymentMethod paymentMethod,
+    String? orderId,
+    String? loanId,
   }) async {
     _isLoading = true;
     _error = null;
@@ -101,7 +113,7 @@ class OrderProvider extends ChangeNotifier {
 
     try {
       final order = OrderModel(
-        orderId: 'MG-${DateTime.now().millisecondsSinceEpoch}',
+        orderId: orderId ?? 'MG-${DateTime.now().millisecondsSinceEpoch}',
         customerId: customer.id,
         vendorId: vendor.id,
         vendorName: vendor.businessName,
@@ -118,10 +130,14 @@ class OrderProvider extends ChangeNotifier {
         customerLongitude: customer.longitude,
         listing: listing,
         country: vendor.country,
-        paymentMethod: PaymentMethod.cash,
+        paymentMethod: paymentMethod,
         // Vendor-side customer-finder fee (1%), accrued on delivery.
-        // Never shown to the customer anywhere in the app.
+        // Never shown to the customer anywhere in the app. Applies to
+        // bnpl too — the vendor still owes the platform fee on the sale.
         finderFee: listing.cashFinderFee,
+        // Only a bnpl order carries a loan reference; a cash order
+        // never does, even if a stray loanId were passed in.
+        loanId: paymentMethod == PaymentMethod.bnpl ? loanId : null,
         pin: _generatePin(),
         status: OrderStatus.pending,
         createdAt: DateTime.now(),

@@ -23,6 +23,8 @@ import 'package:mobigas/core/widgets/vendor_fees_banner.dart';
 import 'package:mobigas/core/widgets/promo_popup_mixin.dart';
 import 'package:mobigas/features/stock_boost/vendor_stock_boost.dart';
 import 'package:mobigas/core/widgets/vendor_insurance_card.dart';
+import 'package:mobigas/core/config/pezesha_config.dart';
+import 'package:mobigas/features/stock_boost/vendor_pezesha_stock_loan.dart';
 
 /// BUG FIX: this is the specific unbounded call behind "vendor reopen
 /// is slow" — FirebaseService.vendors.doc(_vendorId).get() below had
@@ -1945,8 +1947,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                 ],
               ),
             ),
-            // Stock boost — shows only for eligible vendors, else renders nothing
-            StockBoostCard(vendorId: _vendorId, vendorData: _vendorData),
+            // Financing: Pezesha stock loan where it's live (KE/UG),
+            // otherwise the referral-based stock boost. Both render
+            // nothing for ineligible vendors.
+            if (PezeshaConfig.isAvailableFor(
+                (_vendorData?['country'] as String?) ?? 'KE'))
+              VendorPezeshaStockLoanCard(
+                  vendorId: _vendorId, vendorData: _vendorData)
+            else
+              StockBoostCard(vendorId: _vendorId, vendorData: _vendorData),
             VendorInsuranceCard(vendorId: _vendorId, vendorData: _vendorData),
             Padding(
               padding: const EdgeInsets.all(20),

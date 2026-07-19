@@ -199,6 +199,43 @@ class NotificationService {
     }
   }
 
+  /// Current OS notification-permission state, WITHOUT prompting.
+  ///
+  /// Safe to call on every Edit Profile build/init — it never shows a
+  /// dialog, it just reads whatever the OS already decided (at signup,
+  /// via System Settings, or from a previous in-app request below).
+  static Future<AuthorizationStatus> getAuthorizationStatus() async {
+    final settings = await _messaging.getNotificationSettings();
+    return settings.authorizationStatus;
+  }
+
+  /// Re-prompts for notification permission. This is for the Edit
+  /// Profile toggle — a vendor/customer who said no at signup and
+  /// wants to turn it on later.
+  ///
+  /// Routed through PermissionSequencer for the same reason as the
+  /// signup call in initialize(): if some other permission dialog
+  /// (location, camera) is already in flight when this fires, Android
+  /// can drop the callback or skip the dialog outright.
+  ///
+  /// IMPORTANT: on Android 13+ and iOS, once a user has explicitly
+  /// denied, the OS does NOT show a second native dialog — this just
+  /// silently returns `denied` again. There is no in-app way to force
+  /// the system prompt back open after that; the only path is
+  /// `openAppSettings()` (permission_handler), which the caller should
+  /// fall back to when the returned status is still `denied`.
+  static Future<AuthorizationStatus> requestPermission() async {
+    final settings = await PermissionSequencer.run(
+      () => _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      ),
+    );
+    return settings?.authorizationStatus ?? AuthorizationStatus.notDetermined;
+  }
+
   static Future<void> _saveFcmToken(String token) async {
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
