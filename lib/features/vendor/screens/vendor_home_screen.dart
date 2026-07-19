@@ -1344,12 +1344,20 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
           children: [
             Icon(icon, color: color, size: 20),
             const SizedBox(height: 8),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
+            // FittedBox so a long total (e.g. "KSh 143,300") shrinks to
+            // one line instead of wrapping mid-number and unbalancing
+            // the three equal-width stat cards.
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                maxLines: 1,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.navy,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
               ),
             ),
             Text(

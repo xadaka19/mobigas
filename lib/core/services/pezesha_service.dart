@@ -79,7 +79,10 @@ class PezeshaService {
       case 'invalid-argument':
         return e.message ?? 'Something about this request wasn\'t valid.';
       case 'not-found':
-        return e.message ?? 'Not found.';
+        // Callable unreachable/undeployed, or borrower not known yet —
+        // never surface a raw code like "NOT_FOUND" to a vendor.
+        return 'Stock financing isn\'t available right now. '
+            'Please try again later.';
       default:
         return e.message ?? 'Something went wrong. Please try again.';
     }

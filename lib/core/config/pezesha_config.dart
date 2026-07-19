@@ -1,26 +1,25 @@
 // lib/core/config/pezesha_config.dart
 //
 // Single gate for whether the Pezesha financing UI (customer BNPL +
-// vendor stock loan) is offered at all. Every mount point — the
-// customer home card, the customer checkout section, and the vendor
-// earnings card — asks this one method, so "where does BNPL show" has
-// exactly one answer.
+// vendor stock loan) is offered at all. Every mount point asks this
+// one method, so "where does BNPL show" has exactly one answer.
 //
 // Two conditions, both required:
 //   1. FeatureFlags.pezeshaFinancing — the global kill switch in
-//      app_models.dart. Flip it false to remove every Pezesha surface
-//      instantly, without touching call sites.
-//   2. Country — Pezesha is licensed/operational in Kenya and Uganda
-//      only. A TZ vendor or customer never sees it, even with the flag
-//      on.
+//      app_models.dart. Keep it OFF until Pezesha onboarding reaches
+//      Go Live and production API credentials exist.
+//   2. Country — Pezesha lends across East Africa (confirmed by
+//      Pezesha), which covers every market MobiGas operates in:
+//      Kenya, Uganda, and Tanzania.
 
 import 'package:mobigas/core/models/app_models.dart';
 
 class PezeshaConfig {
   const PezeshaConfig._();
 
-  /// Countries where Pezesha is live. Kenya and Uganda only.
-  static const Set<String> supportedCountries = {'KE', 'UG'};
+  /// Countries where Pezesha is live. Pezesha lends across East
+  /// Africa, so this covers all current MobiGas markets.
+  static const Set<String> supportedCountries = {'KE', 'UG', 'TZ'};
 
   /// True when Pezesha financing should be offered to a customer or
   /// vendor in [country]. Null/empty country -> false.

@@ -216,18 +216,34 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Stock loan',
-              style: TextStyle(
-                  fontWeight: FontWeight.w800, fontSize: 20, color: _navy)),
-          const SizedBox(height: 14),
-          _buildBody(),
-        ],
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 24 + bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Grab handle so a short error/empty state reads as an
+            // intentional sheet, not a stray box at the screen edge.
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const Text('Stock loan',
+                style: TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 20, color: _navy)),
+            const SizedBox(height: 14),
+            _buildBody(),
+          ],
+        ),
       ),
     );
   }
@@ -249,10 +265,21 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_message ?? 'Something went wrong.',
-                style: const TextStyle(color: Colors.red, fontSize: 13)),
-            const SizedBox(height: 8),
-            TextButton(onPressed: _checkLimit, child: const Text('Retry')),
+            Text(_message ?? 'Something went wrong. Please try again.',
+                style: const TextStyle(
+                    color: Colors.black87, fontSize: 13, height: 1.4)),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton(
+                onPressed: _checkLimit,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _orange,
+                  side: const BorderSide(color: _orange),
+                ),
+                child: const Text('Retry'),
+              ),
+            ),
           ],
         );
       case _SheetState.success:
