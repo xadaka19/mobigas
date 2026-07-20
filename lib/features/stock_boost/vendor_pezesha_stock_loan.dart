@@ -18,10 +18,22 @@
 // Vendor is BOTH the borrower (pezesha_id) and the disbursement
 // target (their own till/paybill) — see applyPezeshaLoan in
 // functions/src/pezesha.ts.
+//
+// "View my loans" appears in TWO places, deliberately:
+//  - On the card itself, standing, independent of the sheet — a
+//    vendor with an existing loan shouldn't have to tap "Check your
+//    limit" (which re-runs eligibility checking) just to see its
+//    status. This is what satisfies the persistent-visibility
+//    requirement flagged in pezesha_service.dart's getLoanHistory
+//    comment (Google Play policy for lending-adjacent apps).
+//  - In the success state of the sheet, for anyone who wants to jump
+//    straight there right after applying — that sheet auto-closes 2s
+//    after showing, so this is a bonus shortcut, not the only way in.
 
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/services/pezesha_service.dart';
+import 'package:mobigas/features/bnpl/pezesha_loan_status_screen.dart';
 
 const _navy = Color(0xFF0D1B40);
 const _orange = Color(0xFFF97316);
@@ -102,6 +114,26 @@ class _VendorPezeshaStockLoanCardState
               ),
               child: const Text('Check your limit',
                   style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.center,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white70,
+                minimumSize: const Size(0, 36),
+              ),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PezeshaLoanStatusScreen(
+                    ownerType: 'vendor',
+                    country: country,
+                  ),
+                ),
+              ),
+              child: const Text('View my loans',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
             ),
           ),
         ],
@@ -283,13 +315,46 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
           ],
         );
       case _SheetState.success:
-        return const Row(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.check_circle_rounded, color: Colors.green),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text('Loan approved — funds are on their way to your '
-                  'account.'),
+            const Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: Colors.green),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text('Loan approved — funds are on their way to your '
+                      'account.'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Bonus shortcut — the card itself now has a standing
+            // "View my loans" link (see VendorPezeshaStockLoanCard
+            // above) that works whether or not this sheet was ever
+            // opened, so this one is just convenience for anyone
+            // already looking at this exact moment, before the sheet
+            // auto-closes below.
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 32),
+                  foregroundColor: _orange,
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PezeshaLoanStatusScreen(
+                      ownerType: 'vendor',
+                      country: widget.country,
+                    ),
+                  ),
+                ),
+                child: const Text('View my loans',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
             ),
           ],
         );

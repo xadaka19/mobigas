@@ -36,6 +36,7 @@ import 'package:flutter/material.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/services/pezesha_service.dart';
+import 'package:mobigas/features/bnpl/pezesha_loan_status_screen.dart';
 
 const _navy = Color(0xFF0D1B40);
 const _orange = Color(0xFFF97316);
@@ -178,6 +179,32 @@ class _BnplLimitCardState extends State<BnplLimitCard> {
             const Text(
               'Select "Pay with BNPL" at checkout on your next order.',
               style: TextStyle(color: Colors.black54, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            // Persistent visibility entry point — see
+            // pezesha_loan_status_screen.dart's header comment for why
+            // this exists (Google Play requirement for lending-adjacent
+            // apps), not just a nice-to-have link.
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  foregroundColor: _orange,
+                ),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PezeshaLoanStatusScreen(
+                      ownerType: 'customer',
+                      country: widget.country,
+                    ),
+                  ),
+                ),
+                child: const Text('View my loans',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
             ),
           ],
         );
