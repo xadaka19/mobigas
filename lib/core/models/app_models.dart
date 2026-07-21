@@ -246,6 +246,12 @@ class VendorModel {
   /// THIS field — don't "fix" it into a payout number.
   final String phone;
 
+  /// A second, optional number the vendor can be reached on, set from
+  /// the vendor profile screens. Purely informational — MobiGas and
+  /// customers still call/message `phone`; nothing reads this for
+  /// payouts, OTPs, or order routing.
+  final String altPhone;
+
   final String area;
   final String estate;
   final String county;
@@ -360,6 +366,7 @@ class VendorModel {
     required this.ownerName,
     this.email,
     required this.phone,
+    this.altPhone = '',
     required this.area,
     required this.estate,
     required this.county,
@@ -479,6 +486,14 @@ class CustomerModel {
   final String name;
   final String? email;
   final String phone;
+
+  /// A second, optional number the customer can be reached on, set
+  /// from the customer profile screen. Purely informational — never
+  /// used for OTPs, order updates, or any system-initiated contact;
+  /// those all go to `phone`. Empty for every account created before
+  /// this field existed.
+  final String altPhone;
+
   final String? deviceFingerprint;
   final bool deviceFlagged;
   /// Kept for the referral fraud guard (recordReferralSignup reads the
@@ -519,6 +534,7 @@ class CustomerModel {
     required this.name,
     this.email,
     required this.phone,
+    this.altPhone = '',
     this.deviceFingerprint,
     this.deviceFlagged = false,
     required this.nationalId,

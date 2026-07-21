@@ -93,6 +93,16 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // about a delivery. Doubles as the payout number for phone-based
   // rails unless _payoutPhoneController is set (see below).
   late TextEditingController _phoneController;
+  // Whether the contact number has already been set (this vendor has
+  // existingData with a non-empty 'phone'). Once true, the field is
+  // locked and shown read-only — the same write-once treatment as
+  // National ID / BRN. A brand-new vendor going through onboarding for
+  // the first time still gets a normal editable field.
+  late bool _phoneWasSet;
+  // A second line the vendor can be reached on, alongside the locked
+  // contact number. Purely informational — never used as a payout
+  // destination.
+  late TextEditingController _altPhoneController;
   // Optional override: the number payments go to, when it isn't the
   // contact line. Empty means "same as contact" — which is what every
   // vendor saved before this field existed, so their `phone` (which
@@ -251,6 +261,12 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       text: d['nationalId'] ?? d['businessRegNumber'] ?? '',
     );
     _phoneController = TextEditingController(text: d['phone'] ?? '');
+    // Locked once a contact number has already been saved — matches
+    // the write-once treatment given to National ID / BRN. A brand
+    // new vendor (existingData null, or 'phone' never set) still gets
+    // a normal editable field the first time through.
+    _phoneWasSet = (d['phone'] ?? '').toString().trim().isNotEmpty;
+    _altPhoneController = TextEditingController(text: d['altPhone'] ?? '');
     // A saved payoutPhone means the vendor explicitly split the two
     // lines; empty (the case for every doc written before this field
     // existed) means payments follow the contact number.
@@ -365,6 +381,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _ownerNameController.dispose();
     _idOrBrnController.dispose();
     _phoneController.dispose();
+    _altPhoneController.dispose();
     _payoutPhoneController.dispose();
     _deliveryTimeController.dispose();
     _partialPaymentNoteController.dispose();
@@ -416,7 +433,9 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     // they're paid on. Previously `phone` was only ever collected as
     // part of the M-Pesa/MTN/Airtel payment field, so a Till or
     // Paybill vendor finished setup with no number at all — nothing
-    // for a customer to call about a delivery.
+    // for a customer to call about a delivery. Still enforced even
+    // when the field is locked/read-only, since a locked field was
+    // necessarily set to something valid already.
     if (_phoneController.text.trim().length < 9) {
       return false;
     }
@@ -637,7 +656,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           'businessRegNumber': _idOrBrnController.text.trim(),
         // Contact line — what a customer calls. Also the payout
         // destination for phone rails, unless payoutPhone overrides it.
+        // Write-once in practice: once _phoneWasSet is true the field
+        // is locked in the UI, so this always round-trips the same
+        // value back for a returning vendor.
         'phone': _phoneController.text.trim(),
+        // A second, purely informational line the vendor can be
+        // reached on. Never used for payouts.
+        'altPhone': _altPhoneController.text.trim(),
         // Empty means "payments come to the contact number". Written
         // explicitly (rather than omitted) so unticking the box
         // actually clears a previously-set override.
@@ -1084,17 +1109,44 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         // used to be collected only as part of the M-Pesa/MTN/Airtel
         // payment field in Step 1, so Till and Paybill vendors reached
         // the end of setup with no number a customer could call.
+        // Locked once already set — write-once, same as National ID —
+        // so a returning vendor can no longer silently change the
+        // number customers call and payments (by default) land on.
+        if (_phoneWasSet)
+          _readOnlyField(
+            'Contact phone number',
+            _phoneController.text,
+            Icons.phone_outlined,
+          )
+        else
+          _field(
+            'Contact phone number',
+            _phoneController,
+            Icons.phone_outlined,
+            hint: '0712 345 678',
+            keyboardType: TextInputType.phone,
+          ),
+        const SizedBox(height: 6),
+        Text(
+          'The number customers call about a delivery. Payments come here '
+          'too unless you set a different one in the next step.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.gray400,
+            fontSize: 11,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 16),
         _field(
-          'Contact phone number',
-          _phoneController,
-          Icons.phone_outlined,
+          'Alternate phone number (optional)',
+          _altPhoneController,
+          Icons.phone_android_outlined,
           hint: '0712 345 678',
           keyboardType: TextInputType.phone,
         ),
         const SizedBox(height: 6),
         Text(
-          'The number customers call about a delivery. Payments come here '
-          'too unless you set a different one in the next step.',
+          'A second number customers or MobiGas can reach you on.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: AppColors.gray400,
             fontSize: 11,
@@ -3054,6 +3106,53 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             ),
             filled: true,
             fillColor: AppColors.white.withValues(alpha: 0.05),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Locked-field display for the contact phone number once it's
+  /// already been set — same visual language as `_field`, but with a
+  /// lock glyph and no input behavior. Matches the read-only treatment
+  /// given to National ID / BRN elsewhere in this wizard.
+  Widget _readOnlyField(String label, String value, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontSize: 13,
+            color: AppColors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppColors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: AppColors.white.withValues(alpha: 0.2),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: AppColors.gray400, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  value.isEmpty ? 'Not set' : value,
+                  style: const TextStyle(color: AppColors.white),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.lock_outline_rounded,
+                  color: AppColors.gray400, size: 14),
+            ],
           ),
         ),
       ],

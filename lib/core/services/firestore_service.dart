@@ -29,25 +29,45 @@ extension _Bounded<T> on Future<T> {
 
 class FirestoreService {
   // ── USERS ─────────────────────────────────────────────────────────
-  // Check if phone or national ID already registered
+  // Check if phone, alt phone, or national ID already registered.
+  //
+  // `altPhone` is checked as its OWN axis, not folded into `phone` —
+  // a customer's alt number colliding with someone else's PRIMARY
+  // phone is a real conflict (that number is already how that other
+  // account gets contacted/verified), and so is it colliding with
+  // someone else's alt number. Both should surface as `altPhoneTaken`.
+  //
+  // BACKEND DEPENDENCY: the checkDuplicates Cloud Function itself
+  // (functions/src/index.ts — not included here) needs a matching
+  // update to actually read `data.altPhone` from the callable request
+  // and check it against both the `phone` and `altPhone` fields on
+  // `users`/`vendors`, returning `altPhoneTaken` in its response. Until
+  // that ships, the client will always get `altPhoneTaken: false` back
+  // (unmatched fields are simply absent from the callable's response),
+  // which is a safe default — it fails open the same way every other
+  // check here does on error, it just doesn't yet fail CLOSED on a
+  // genuine collision. Wire the function first if that matters before
+  // launch.
   static Future<Map<String, bool>> checkDuplicates({
     required String phone,
     required String nationalId,
+    String? altPhone,
     String? deviceFingerprint,
   }) async {
     // Moved server-side. The old version queried `users` and `vendors`
     // filtered by phone/nationalId/deviceFingerprint — a shape the
     // Firestore rules engine can never prove safe, so it was rejected
     // with permission-denied for every customer. The checkDuplicates
-    // Cloud Function runs the same six-way parallel check with the
-    // Admin SDK and returns only booleans, so no other user's PII is
-    // ever readable from a client.
+    // Cloud Function runs the same parallel check with the Admin SDK
+    // and returns only booleans, so no other user's PII is ever
+    // readable from a client.
     try {
       final callable =
           FirebaseFunctions.instance.httpsCallable('checkDuplicates');
       final result = await callable.call({
         'phone': phone,
         'nationalId': nationalId,
+        'altPhone': ?altPhone,
         'deviceFingerprint': ?deviceFingerprint,
       }).timeout(const Duration(seconds: 15));
 
@@ -55,6 +75,7 @@ class FirestoreService {
       return {
         'phoneTaken': data['phoneTaken'] == true,
         'idTaken': data['idTaken'] == true,
+        'altPhoneTaken': data['altPhoneTaken'] == true,
         'deviceFlagged': data['deviceFlagged'] == true,
       };
     } catch (_) {
@@ -63,7 +84,12 @@ class FirestoreService {
       // recoverable (support can flag it later); a customer blocked
       // from finishing signup by a transient Cloud Function or network
       // hiccup is not an acceptable tradeoff.
-      return {'phoneTaken': false, 'idTaken': false, 'deviceFlagged': false};
+      return {
+        'phoneTaken': false,
+        'idTaken': false,
+        'altPhoneTaken': false,
+        'deviceFlagged': false,
+      };
     }
   }
 
@@ -90,6 +116,10 @@ class FirestoreService {
       'deviceFingerprint': customer.deviceFingerprint,
       'deviceFlagged': customer.deviceFlagged,
       'phone': customer.phone,
+      // Almost always empty at signup time today (no screen collects
+      // it yet) — written explicitly anyway so a future signup flow
+      // that DOES set it doesn't need a second write to add it.
+      'altPhone': customer.altPhone,
       'nationalId': customer.nationalId,
       'county': customer.county,
       'area': customer.area,
@@ -148,6 +178,7 @@ class FirestoreService {
       deviceFingerprint: data['deviceFingerprint'],
       deviceFlagged: data['deviceFlagged'] ?? false,
       phone: data['phone'] ?? '',
+      altPhone: data['altPhone'] ?? '',
       nationalId: data['nationalId'] ?? '',
       county: data['county'] ?? '',
       area: data['area'] ?? '',
@@ -211,6 +242,7 @@ class FirestoreService {
       ownerName: data['ownerName'] ?? '',
       email: data['email'],
       phone: data['phone'] ?? '',
+      altPhone: data['altPhone'] ?? '',
       area: data['area'] ?? '',
       estate: data['estate'] ?? '',
       county: data['county'] ?? '',

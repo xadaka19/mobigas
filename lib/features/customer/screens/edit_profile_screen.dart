@@ -28,13 +28,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   late TextEditingController _nameController;
   late TextEditingController _phoneController;
+  // A second number the customer can be reached on, alongside the
+  // locked primary phone number below. Purely informational.
+  late TextEditingController _altPhoneController;
   late TextEditingController _idController;
 
-  /// The phone and ID we started with. Duplicate checks only run when
-  /// a value actually changed — `checkDuplicates` matches against the
-  /// whole users collection, including this account, so re-saving an
-  /// unchanged phone would always come back "taken".
-  late String _originalPhone;
+  /// The alt phone we started with. Like _originalPhone before it —
+  /// checkDuplicates matches against the whole users collection,
+  /// including this account, so re-saving an unchanged alt number
+  /// would otherwise always come back "taken" against itself... except
+  /// it wouldn't, because checkDuplicates excludes the current uid.
+  /// What this DOES prevent is calling checkDuplicates at all when
+  /// nothing changed — no point spending a network round trip re-
+  /// verifying a value that's already saved and valid.
+  late String _originalAltPhone;
 
   /// A National ID is write-once. Blank means the customer skipped it
   /// at signup (it's optional in v1) and can still add one here.
@@ -51,8 +58,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final customer = context.read<AuthProvider>().customer;
     _nameController = TextEditingController(text: customer?.name ?? '');
     _phoneController = TextEditingController(text: customer?.phone ?? '');
+    _altPhoneController =
+        TextEditingController(text: customer?.altPhone ?? '');
+    _originalAltPhone = (customer?.altPhone ?? '').trim();
     _idController = TextEditingController(text: customer?.nationalId ?? '');
-    _originalPhone = (customer?.phone ?? '').trim();
     _idWasSet = (customer?.nationalId ?? '').trim().isNotEmpty;
     _selectedAddress = customer?.estate ?? '';
     _selectedLat = customer?.latitude ?? 0;
@@ -86,6 +95,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
+    _altPhoneController.dispose();
     _idController.dispose();
     super.dispose();
   }
@@ -143,8 +153,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (_nameController.text.trim().isEmpty) {
       return 'Enter your full name';
     }
-    if (_phoneController.text.trim().length < 9) {
-      return 'Enter a valid phone number';
+    // The primary phone number is locked (write-once, set at signup)
+    // so it no longer needs validating here — only the optional
+    // alternate number does.
+    final altPhone = _altPhoneController.text.trim();
+    if (altPhone.isNotEmpty && altPhone.length < 9) {
+      return 'Enter a valid alternate phone number, or leave it blank';
     }
     if (!_idWasSet) {
       final id = _idController.text.trim();
@@ -174,24 +188,36 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final phone = _phoneController.text.trim();
       final newId = _idWasSet ? null : _idController.text.trim();
+      final altPhone = _altPhoneController.text.trim();
 
-      // Only check values that actually changed. checkDuplicates scans
-      // every user, this account included, so an unchanged phone would
-      // always report itself as taken.
-      final phoneChanged = phone != _originalPhone;
+      // The primary phone number is locked, so it can never be the
+      // thing that changed here. What CAN change: the National ID
+      // (write-once, same as before) and the new alt phone. Only
+      // check whichever actually changed — checkDuplicates scans
+      // every user, this account included, so a value that's
+      // unchanged from what's already saved would be pointless to
+      // re-verify.
       final addingId = newId != null && newId.isNotEmpty;
+      final altPhoneChanged = altPhone != _originalAltPhone;
 
-      if (phoneChanged || addingId) {
+      if (addingId || altPhoneChanged) {
         final fingerprint = await DeviceFingerprintService.getFingerprint();
+        // NOTE: this reuses the existing `phone` parameter, which (as
+        // implemented pre-altPhone) only checks the incoming value
+        // against other users' PRIMARY `phone` field — it will catch
+        // "this alt number is actually someone else's main login
+        // number" but not "two customers both listed the same alt
+        // number". Closing that second gap means checkDuplicates on
+        // the backend needs to also match against everyone's altPhone
+        // field. Flagging rather than guessing at that implementation.
         final duplicates = await FirestoreService.checkDuplicates(
-          phone: phoneChanged ? phone : '',
+          phone: altPhoneChanged ? altPhone : '',
           nationalId: addingId ? newId : '',
           deviceFingerprint: fingerprint,
         );
 
-        if (phoneChanged && duplicates['phoneTaken'] == true) {
+        if (altPhoneChanged && duplicates['phoneTaken'] == true) {
           if (mounted) setState(() => _isSaving = false);
           _error('Another account already uses this phone number.');
           return;
@@ -215,7 +241,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       final updates = <String, dynamic>{
         'name': _nameController.text.trim(),
-        'phone': phone,
+        // 'phone' is intentionally NOT included — it's locked on this
+        // screen (write-once, set at signup) and must never be
+        // overwritten from here.
+        'altPhone': _altPhoneController.text.trim(),
         'estate': _selectedAddress,
         'area': _selectedAddress,
         // BUG FIX: county was never written, so the locked County field
@@ -359,15 +388,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         Icons.person_outline_rounded,
                         textCapitalization: TextCapitalization.words),
                     const SizedBox(height: 16),
-                    _buildField(
+                    // Locked — the customer's registered phone number,
+                    // set at signup. Changing it here would silently
+                    // move where order updates and verification codes
+                    // go, so it's display-only, same treatment as
+                    // National ID below.
+                    _readOnlyField(
                       'Phone number',
-                      _phoneController,
+                      customer?.phone ?? '',
                       Icons.phone_outlined,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildField(
+                      'Alternate phone number (optional)',
+                      _altPhoneController,
+                      Icons.phone_android_outlined,
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
                         FilteringTextInputFormatter.digitsOnly,
                         LengthLimitingTextInputFormatter(10),
                       ],
+                      helper: 'A second number you can be reached on.',
                     ),
                     const SizedBox(height: 16),
                     Text('Location',

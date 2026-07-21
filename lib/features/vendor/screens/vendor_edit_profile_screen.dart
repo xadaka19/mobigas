@@ -25,6 +25,10 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
   late TextEditingController _businessNameController;
   late TextEditingController _ownerNameController;
   late TextEditingController _phoneController;
+  // Second line the vendor can be reached on — the contact/payout
+  // number itself is locked here (set during setup); this is the
+  // only phone-related field this screen can actually change.
+  late TextEditingController _altPhoneController;
   late TextEditingController _estateController;
 
   @override
@@ -36,6 +40,8 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
         TextEditingController(text: widget.vendorData['ownerName'] ?? '');
     _phoneController =
         TextEditingController(text: widget.vendorData['phone'] ?? '');
+    _altPhoneController =
+        TextEditingController(text: widget.vendorData['altPhone'] ?? '');
     _estateController =
         TextEditingController(text: widget.vendorData['estate'] ?? '');
   }
@@ -45,6 +51,7 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
     _businessNameController.dispose();
     _ownerNameController.dispose();
     _phoneController.dispose();
+    _altPhoneController.dispose();
     _estateController.dispose();
     super.dispose();
   }
@@ -156,7 +163,10 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
       final updates = <String, dynamic>{
         'businessName': _businessNameController.text.trim(),
         'ownerName': _ownerNameController.text.trim(),
-        'phone': _phoneController.text.trim(),
+        // 'phone' is intentionally NOT included — it's locked on this
+        // screen (set once during setup) and must never be
+        // overwritten from here.
+        'altPhone': _altPhoneController.text.trim(),
         'estate': _estateController.text.trim(),
       };
       if (photoUrl != null) updates['photoUrl'] = photoUrl;
@@ -302,9 +312,26 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
                     _buildField('Owner name', _ownerNameController,
                         Icons.person_outline_rounded),
                     const SizedBox(height: 16),
-                    _buildField('Mobile money number', _phoneController,
-                        Icons.phone_outlined,
-                        keyboardType: TextInputType.phone),
+                    // Locked — this is the vendor's registered contact
+                    // / mobile money number, set once during setup.
+                    // Changing it here would silently move where
+                    // customers call and where payouts land, so it's
+                    // display-only, same treatment as National ID on
+                    // the customer profile screen.
+                    _readOnlyField(
+                      'Mobile money number',
+                      widget.vendorData['phone'] as String? ?? '',
+                      Icons.phone_outlined,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildField(
+                      'Alternate phone number (optional)',
+                      _altPhoneController,
+                      Icons.phone_android_outlined,
+                      keyboardType: TextInputType.phone,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildIdField(),
                     const SizedBox(height: 16),
                     _buildField('Estate / Area', _estateController,
                         Icons.location_on_outlined),
@@ -434,6 +461,64 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Shows whichever identity document the vendor registered with —
+  /// National ID for a sole proprietor, Business Registration Number
+  /// for a registered business / petrol station. Set once during
+  /// setup (VendorSetupScreen Step 0); not editable from this screen.
+  Widget _buildIdField() {
+    final nationalId = widget.vendorData['nationalId'] as String?;
+    final brn = widget.vendorData['businessRegNumber'] as String?;
+    final hasNationalId = nationalId != null && nationalId.isNotEmpty;
+    return _readOnlyField(
+      hasNationalId ? 'National ID' : 'Business Registration Number',
+      hasNationalId ? nationalId : (brn ?? ''),
+      hasNationalId ? Icons.badge_outlined : Icons.app_registration_rounded,
+    );
+  }
+
+  /// Locked-field style matching the dark theme used throughout this
+  /// screen — same visual language as the editable fields below, but
+  /// with a lock glyph and no input behavior.
+  Widget _readOnlyField(String label, String value, IconData icon) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 13,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w600,
+                )),
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppColors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: AppColors.white.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: AppColors.gray400, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  value.isEmpty ? 'Not set' : value,
+                  style: const TextStyle(color: AppColors.white),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.lock_outline_rounded,
+                  color: AppColors.gray400, size: 14),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
