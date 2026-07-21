@@ -38,8 +38,8 @@ class NotificationPermissionTile extends StatefulWidget {
       _NotificationPermissionTileState();
 }
 
-class _NotificationPermissionTileState
-    extends State<NotificationPermissionTile> with WidgetsBindingObserver {
+class _NotificationPermissionTileState extends State<NotificationPermissionTile>
+    with WidgetsBindingObserver {
   AuthorizationStatus? _status;
   bool _requesting = false;
 
@@ -144,7 +144,9 @@ class _NotificationPermissionTileState
           height: 18,
           width: 18,
           child: CircularProgressIndicator(
-              strokeWidth: 2, color: AppColors.orange),
+            strokeWidth: 2,
+            color: AppColors.orange,
+          ),
         ),
       );
     }
@@ -158,8 +160,11 @@ class _NotificationPermissionTileState
       ),
       child: Row(
         children: [
-          Icon(Icons.notifications_outlined,
-              color: AppColors.gray400, size: 20),
+          Icon(
+            Icons.notifications_outlined,
+            color: AppColors.gray400,
+            size: 20,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -182,19 +187,25 @@ class _NotificationPermissionTileState
             ),
           ),
           if (_isActive)
-            const Icon(Icons.check_circle_rounded,
-                color: AppColors.success, size: 22)
+            const Icon(
+              Icons.check_circle_rounded,
+              color: AppColors.success,
+              size: 22,
+            )
           else if (_requesting)
             const SizedBox(
               height: 20,
               width: 20,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: AppColors.orange),
+                strokeWidth: 2,
+                color: AppColors.orange,
+              ),
             )
           else
             Switch(
               value: false,
-              activeColor: AppColors.orange,
+              activeThumbColor: AppColors.orange,
+              activeTrackColor: AppColors.orange.withOpacity(0.3),
               onChanged: (_) => _enable(),
             ),
         ],

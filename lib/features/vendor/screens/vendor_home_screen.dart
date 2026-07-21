@@ -26,11 +26,13 @@ import 'package:mobigas/core/widgets/vendor_insurance_card.dart';
 import 'package:mobigas/core/config/pezesha_config.dart';
 import 'package:mobigas/features/stock_boost/vendor_pezesha_stock_loan.dart';
 
-/// BUG FIX: this is the specific unbounded call behind "vendor reopen
-/// is slow" — FirebaseService.vendors.doc(_vendorId).get() below had
-/// no timeout, so a slow connection or App Check attestation could
-/// leave this screen's spinner running indefinitely. .bounded() makes
-/// it fail within a fixed ceiling instead, so the screen can recover.
+/// Puts a hard ceiling on the SERVER-backed reads so a stuck connection
+/// or a slow App Check attestation can't leave the screen's spinner
+/// running forever — it fails within a fixed window and the UI can
+/// recover. Note this only bounds the failure case; the cold-start
+/// SPEED win comes from the Source.cache fast path in _loadVendorData,
+/// which renders last run's profile without any server round trip at
+/// all (mirrors AuthProvider's allowCache path in the customer app).
 extension _Bounded<T> on Future<T> {
   Future<T> bounded([Duration timeout = const Duration(seconds: 15)]) {
     return this.timeout(
@@ -90,6 +92,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   // hiccup, even though they'd already set up their account.
   bool _vendorLoadFailed = false;
   bool _promoChecked = false;
+  // Mirrors AuthProvider._bootstrapping in the customer app. initState
+  // kicks off the profile load immediately AND via the authStateChanges
+  // listener (which re-emits the current user the moment it subscribes),
+  // so a warm start would otherwise run two profile loads in parallel
+  // over the same cold connection. Whichever reaches _loadVendorData
+  // first owns the load; the other bails. Cleared in a finally, so
+  // pull-to-refresh and post-edit refreshes — which run long after this
+  // settles — are unaffected.
+  bool _vendorLoadInFlight = false;
   StreamSubscription<User?>? _authSub;
   Timer? _authBackstop;
 
@@ -235,12 +246,17 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     // manually logged out and back in. Listening instead guarantees
     // we load the profile the moment a real user becomes available,
     // however long that takes.
+    //
+    // allowCache: true — a returning vendor should render off the
+    // local cache instantly (see _loadVendorData). The _vendorLoadInFlight
+    // guard makes this and the immediate call below cooperate instead
+    // of racing.
     _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user != null) _refreshAll();
+      if (user != null) _refreshAll(allowCache: true);
     });
     // Also try immediately, in case auth is already resolved (the
     // normal case for anyone who didn't just reinstall).
-    _refreshAll();
+    _refreshAll(allowCache: true);
     // BUG FIX: the splash screen already confirmed a signed-in user
     // before ever navigating here, so _vendorId should virtually
     // always be populated by the time this screen mounts. This timer
@@ -262,11 +278,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     super.dispose();
   }
 
-  Future<void> _refreshAll() async {
-    await Future.wait([_loadVendorData(), _loadEarnings()]);
+  Future<void> _refreshAll({bool allowCache = false}) async {
+    await Future.wait([
+      _loadVendorData(allowCache: allowCache),
+      _loadEarnings(),
+    ]);
   }
 
-  Future<void> _loadVendorData() async {
+  Future<void> _loadVendorData({bool allowCache = false}) async {
     if (_vendorId.isEmpty) {
       // BUG FIX: this used to set _isLoadingVendor = false here, on
       // the very first call — which usually runs BEFORE auth has
@@ -284,53 +303,118 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
       // up until the real, uid-backed load below actually resolves.
       // The 10s Timer in initState is the backstop in case auth
       // somehow never resolves at all.
+      //
+      // Note this returns BEFORE touching _vendorLoadInFlight, so the
+      // no-uid case never locks out the authStateChanges listener that
+      // will retry once a real user lands.
       return;
     }
+
+    // See the _vendorLoadInFlight field: coalesces the immediate call
+    // and the authStateChanges re-emit on a warm start into one load.
+    if (_vendorLoadInFlight) return;
+    _vendorLoadInFlight = true;
+
     try {
-      // BUG FIX: unbounded — this was the specific call behind
-      // "vendor reopen is slow". A stuck connection or a slow App
-      // Check attestation could leave this hanging with no ceiling,
-      // and because _isLoadingVendor was never true on this path
-      // before (see above), the vendor had no visible spinner and no
-      // way to know anything was even loading.
-      final doc = await FirebaseService.vendors.doc(_vendorId).get().bounded();
-      if (!mounted) return;
-      if (doc.exists) {
-        setState(() {
-          _vendorData = doc.data() as Map<String, dynamic>;
-          _isOnline = _vendorData?['isOnline'] ?? false;
-          _isLoadingVendor = false;
-          _vendorLoadFailed = false;
-        });
-        if (!_promoChecked) {
-          _promoChecked = true;
-          checkForPromo(
-            audience: 'vendor',
-            country: (_vendorData?['country'] as String?) ?? 'KE',
-            userId: _vendorId,
-          );
+      // COLD-START FAST PATH: mirrors AuthProvider's allowCache branch
+      // in the customer app. A returning vendor already has
+      // vendors/{uid} in the local Firestore cache from last run, but a
+      // plain .get() (Source.serverAndCache) still blocks on a full
+      // server round trip before handing it back — that round trip IS
+      // the "vendor reopen is slow" wait, and .bounded() only capped
+      // it, it never made it fast. Reading Source.cache first renders
+      // the dashboard instantly on a hit, then _refreshVendorFromServer()
+      // catches up in the background. On a fresh install / first login
+      // the cache is empty, the cache read throws, and we fall straight
+      // through to the bounded server read below — so it's never slower
+      // than before, only faster when a cached profile exists.
+      if (allowCache) {
+        try {
+          final cached = await FirebaseService.vendors
+              .doc(_vendorId)
+              .get(const GetOptions(source: Source.cache));
+          if (cached.exists && mounted) {
+            _applyVendorDoc(cached.data() as Map<String, dynamic>);
+            unawaited(_refreshVendorFromServer());
+            return;
+          }
+        } catch (_) {
+          // Cold cache (fresh install / evicted) or a read error —
+          // fall through to the server-backed load below.
         }
-      } else {
-        // New vendor — no profile yet, show setup banner
-        setState(() {
-          _vendorData = null;
-          _isLoadingVendor = false;
-          _vendorLoadFailed = false;
-        });
       }
-    } catch (e) {
-      // BUG FIX: previously left _vendorData exactly as it was (null,
-      // on the common path) with no distinction from "no profile
-      // exists yet" — so a timeout/connectivity error showed the same
-      // "Complete your business setup" banner to an existing vendor.
-      // _vendorLoadFailed lets the UI tell the two apart and offer a
-      // retry instead of implying the account needs re-setup.
-      if (mounted) {
-        setState(() {
-          _isLoadingVendor = false;
-          _vendorLoadFailed = true;
-        });
+
+      try {
+        final doc =
+            await FirebaseService.vendors.doc(_vendorId).get().bounded();
+        if (!mounted) return;
+        if (doc.exists) {
+          _applyVendorDoc(doc.data() as Map<String, dynamic>);
+        } else {
+          // New vendor — no profile yet, show setup banner.
+          setState(() {
+            _vendorData = null;
+            _isLoadingVendor = false;
+            _vendorLoadFailed = false;
+          });
+        }
+      } catch (e) {
+        // BUG FIX: previously left _vendorData exactly as it was (null,
+        // on the common path) with no distinction from "no profile
+        // exists yet" — so a timeout/connectivity error showed the same
+        // "Complete your business setup" banner to an existing vendor.
+        // _vendorLoadFailed lets the UI tell the two apart and offer a
+        // retry instead of implying the account needs re-setup.
+        if (mounted) {
+          setState(() {
+            _isLoadingVendor = false;
+            _vendorLoadFailed = true;
+          });
+        }
       }
+    } finally {
+      _vendorLoadInFlight = false;
+    }
+  }
+
+  /// Applies a loaded vendors/{uid} document to the screen — shared by
+  /// the cache-first fast path and the server read so the two can't
+  /// drift. Fires the promo check once, on the first successful load.
+  void _applyVendorDoc(Map<String, dynamic> data) {
+    setState(() {
+      _vendorData = data;
+      _isOnline = data['isOnline'] ?? false;
+      _isLoadingVendor = false;
+      _vendorLoadFailed = false;
+    });
+    if (!_promoChecked) {
+      _promoChecked = true;
+      checkForPromo(
+        audience: 'vendor',
+        country: (data['country'] as String?) ?? 'KE',
+        userId: _vendorId,
+      );
+    }
+  }
+
+  /// Background-only refresh after a cache hit. Reads vendors/{uid} from
+  /// the server and updates the in-memory profile if it changed (e.g.
+  /// the vendor got verified, or a price edit synced, since last run).
+  /// Stays silent on failure — if we're offline, the cached profile
+  /// already on screen is the right thing to keep showing, so it must
+  /// NOT set _vendorLoadFailed. Runs outside the _vendorLoadInFlight
+  /// guard by design: it calls _applyVendorDoc directly, never
+  /// _loadVendorData, so there's no re-entrancy.
+  Future<void> _refreshVendorFromServer() async {
+    try {
+      final doc = await FirebaseService.vendors
+          .doc(_vendorId)
+          .get(const GetOptions(source: Source.server))
+          .bounded();
+      if (!mounted || !doc.exists) return;
+      _applyVendorDoc(doc.data() as Map<String, dynamic>);
+    } catch (_) {
+      // Offline / transient — keep the cached profile on screen.
     }
   }
 

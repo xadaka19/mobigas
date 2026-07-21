@@ -162,11 +162,11 @@ class PezeshaService {
       final result = await FirebaseFunctions.instance
           .httpsCallable('applyPezeshaLoan')
           .call({
-        'loanType': loanType,
-        'amount': amount,
-        if (targetVendorId != null) 'targetVendorId': targetVendorId,
-        if (orderId != null) 'orderId': orderId,
-      });
+            'loanType': loanType,
+            'amount': amount,
+            if (targetVendorId != null) 'targetVendorId': targetVendorId!,
+            if (orderId != null) 'orderId': orderId!,
+          });
       final ownerType = loanType == 'vendor_stock' ? 'vendor' : 'customer';
       _offerCache.remove(ownerType);
       return result.data['loanId'] as String;
