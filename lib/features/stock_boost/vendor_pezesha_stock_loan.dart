@@ -9,6 +9,17 @@
 // target (their own till/paybill) — see applyPezeshaLoan in
 // functions/src/pezesha.ts.
 //
+// ── WHO OWNS THE FLOW ───────────────────────────────────────────────
+// The CARD owns the sheet -> upload -> sheet cycle, not the sheet.
+// The sheet can't run it: opening the upload screen means closing the
+// sheet first (leaving a live modal behind a pushed route strands it
+// there, stale, showing the old "no limit" answer), and once popped
+// the sheet's State is gone — it can't reopen anything. So the sheet
+// just pops `true` to say "the vendor wants the statement flow", and
+// _openLimitSheet below drives it: reopen on a successful score, so a
+// vendor who just got scored lands straight back on their new limit
+// instead of hunting for "Check your limit" again.
+//
 // "View my loans" appears in TWO places, deliberately:
 //  - On the card itself, standing, independent of the sheet — a
 //    vendor with an existing loan shouldn't have to tap "Check your
@@ -19,14 +30,6 @@
 //  - In the success state of the sheet, for anyone who wants to jump
 //    straight there right after applying — that sheet auto-closes 2s
 //    after showing, so this is a bonus shortcut, not the only way in.
-//
-// "Improve my limit" opens PezeshaStatementUploadScreen — the
-// statement-upload scoring flow from Pezesha's own deck (attach
-// M-Pesa statement -> Datascore scores it -> new limit). It is
-// offered in two places for the same reason: on the card standing,
-// and inside the sheet's "no limit yet" state, which is exactly the
-// moment a vendor most wants a way to change that answer. Mirrors
-// BnplLimitCard on the customer side (customer_bnpl.dart).
 
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/config/currency.dart';
@@ -65,8 +68,39 @@ class _VendorPezeshaStockLoanCardState
     return phone.isEmpty ? null : phone;
   }
 
+  /// Opens the limit sheet and drives whatever it asks for next.
+  ///
+  /// The sheet pops `true` when the vendor chooses the statement flow.
+  /// The upload screen in turn pops `true` only when scoring actually
+  /// produced a limit — so reopening on that (and only that) puts them
+  /// straight back on the new number, while a no-limit outcome leaves
+  /// them on the upload screen's own "what usually helps" state rather
+  /// than bouncing them into a sheet that would just repeat it.
+  ///
+  /// The recursion is the point: reopen -> "Improve my limit" again ->
+  /// upload -> reopen, for as long as the vendor keeps going.
+  Future<void> _openLimitSheet() async {
+    final wantsUpload = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _StockLoanSheet(
+        country: _country,
+        initialPhone: _contactPhone,
+      ),
+    );
+    if (!mounted || wantsUpload != true) return;
+    await _openStatementUpload();
+  }
+
+  /// Pushes the statement flow, and drops back into the limit sheet if
+  /// a limit came back. Also the card's own "Improve my limit" entry
+  /// point, so that button behaves the same as the one inside the
+  /// sheet.
   Future<void> _openStatementUpload() async {
-    await Navigator.of(context).push<bool>(
+    final gotLimit = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => PezeshaStatementUploadScreen(
           ownerType: 'vendor',
@@ -75,6 +109,10 @@ class _VendorPezeshaStockLoanCardState
         ),
       ),
     );
+    if (!mounted || gotLimit != true) return;
+    // Scored, and a limit came back — the sheet re-runs its own check
+    // on open, so it lands on the new number.
+    await _openLimitSheet();
   }
 
   @override
@@ -125,18 +163,7 @@ class _VendorPezeshaStockLoanCardState
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
               ),
-              onPressed: () => showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(20))),
-                builder: (_) => _StockLoanSheet(
-                  country: country,
-                  initialPhone: _contactPhone,
-                ),
-              ),
+              onPressed: _openLimitSheet,
               child: const Text('Check your limit',
                   style: TextStyle(fontWeight: FontWeight.w700)),
             ),
@@ -183,6 +210,9 @@ class _VendorPezeshaStockLoanCardState
 
 enum _SheetState { checking, unavailable, available, applying, success, error }
 
+/// Pops `true` to ask the CARD to open the statement flow — see the
+/// "who owns the flow" note in the file header. It never pushes that
+/// screen itself.
 class _StockLoanSheet extends StatefulWidget {
   final String country;
   final String? initialPhone;
@@ -211,25 +241,10 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
     super.dispose();
   }
 
-  /// Closes this sheet FIRST, then pushes the upload screen on the same
-  /// navigator — pushing on top of a live modal sheet leaves it sitting
-  /// behind the new route, and it would still be there (stale, showing
-  /// the old "no limit" answer) when the vendor comes back. The
-  /// navigator is captured before the pop because `context` is dead
-  /// once this widget unmounts.
-  Future<void> _openStatementUpload() async {
-    final navigator = Navigator.of(context);
-    navigator.pop();
-    await navigator.push<bool>(
-      MaterialPageRoute(
-        builder: (_) => PezeshaStatementUploadScreen(
-          ownerType: 'vendor',
-          country: widget.country,
-          initialPhone: widget.initialPhone,
-        ),
-      ),
-    );
-  }
+  /// Hands control back to the card, which closes this sheet, pushes
+  /// the statement screen, and reopens a fresh sheet if a limit comes
+  /// back.
+  void _requestStatementUpload() => Navigator.of(context).pop(true);
 
   Future<void> _checkLimit() async {
     setState(() => _state = _SheetState.checking);
@@ -240,10 +255,12 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
       if (offer == null) {
         setState(() {
           _state = _SheetState.unavailable;
-          _message =
-              'No stock loan available yet — keep fulfilling orders '
-              'through MobiGas to build your record, or upload your '
-              'M-Pesa statement so Pezesha can score you now.';
+          // Leads with the action, not the refusal — see the matching
+          // comment in customer_bnpl.dart. A vendor with no Pezesha
+          // history gets "no limit" on their first check by default;
+          // the statement is what changes that, so it goes first.
+          _message = 'Pezesha needs your M-Pesa statement to work out '
+              'your limit. It takes about a minute.';
         });
       } else {
         setState(() {
@@ -290,7 +307,9 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
       if (!mounted) return;
       setState(() => _state = _SheetState.success);
       Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) Navigator.of(context).pop();
+        // pop(false), not pop(true) — a completed application must not
+        // read as "open the statement flow" to the card above.
+        if (mounted) Navigator.of(context).pop(false);
       });
     } on PezeshaException catch (e) {
       if (!mounted) return;
@@ -359,17 +378,27 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
             Text(_message ?? '',
                 style: const TextStyle(
                     color: Colors.black54, fontSize: 13, height: 1.4)),
+            const SizedBox(height: 8),
+            // What they'll need, before they tap — see the matching
+            // comment in customer_bnpl.dart.
+            const Text(
+              'You\'ll need your M-Pesa statement as a PDF (6 or 12 '
+              'months) and the password Safaricom sent with it — '
+              'request both on *334#.',
+              style:
+                  TextStyle(color: Colors.black45, fontSize: 12, height: 1.4),
+            ),
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _openStatementUpload,
+              child: ElevatedButton.icon(
+                onPressed: _requestStatementUpload,
                 icon: const Icon(Icons.upload_file_rounded, size: 18),
-                label: const Text('Upload statements to get a limit'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _orange,
-                  side: const BorderSide(color: _orange),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                label: const Text('Upload my statement'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
             ),
@@ -412,9 +441,8 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
               ],
             ),
             const SizedBox(height: 8),
-            // Bonus shortcut — the card itself now has a standing
-            // "View my loans" link (see VendorPezeshaStockLoanCard
-            // above) that works whether or not this sheet was ever
+            // Bonus shortcut — the card itself has a standing "View my
+            // loans" link that works whether or not this sheet was ever
             // opened, so this one is just convenience for anyone
             // already looking at this exact moment, before the sheet
             // auto-closes below.
@@ -503,7 +531,7 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
                 ),
                 onPressed: _state == _SheetState.applying
                     ? null
-                    : _openStatementUpload,
+                    : _requestStatementUpload,
                 child: const Text('Improve my limit',
                     style:
                         TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),

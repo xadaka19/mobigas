@@ -79,9 +79,13 @@ class _BnplLimitCardState extends State<BnplLimitCard> {
       if (offer == null) {
         setState(() {
           _state = _CardState.unavailable;
-          _message =
-              'No BNPL limit available yet — keep ordering through MobiGas '
-              'to build your record.';
+          // Leads with the action, not the refusal. For a thin-file
+          // customer — which is most of them at signup — Pezesha has
+          // nothing to score yet, so "no limit" is the EXPECTED first
+          // answer, not a rejection. Telling them to come back later
+          // is a dead end; the statement is the thing that changes it.
+          _message = 'Pezesha needs your M-Pesa statement to work out '
+              'your limit. It takes about a minute.';
         });
       } else {
         setState(() {
@@ -247,13 +251,28 @@ class _BnplLimitCardState extends State<BnplLimitCard> {
                 style: const TextStyle(
                     color: Colors.black54, fontSize: 13, height: 1.4)),
             const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: _openStatementUpload,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _orange,
-                side: const BorderSide(color: _orange),
+            // What they'll need, BEFORE they tap. The statement
+            // password is the part nobody has to hand, and finding
+            // that out only after the file picker opens is how you
+            // lose someone mid-flow.
+            const Text(
+              'You\'ll need your M-Pesa statement as a PDF (6 or 12 '
+              'months) and the password Safaricom sent with it — '
+              'request both on *334#.',
+              style:
+                  TextStyle(color: Colors.black45, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _openStatementUpload,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _orange,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Upload my statement'),
               ),
-              child: const Text('Upload statements'),
             ),
           ],
         );

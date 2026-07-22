@@ -327,6 +327,10 @@ class _PezeshaStatementUploadScreenState
 
   Widget _buildResult() {
     final offer = _newOffer;
+    return offer != null ? _buildApproved(offer) : _buildNoLimitYet();
+  }
+
+  Widget _buildApproved(PezeshaLoanOffer offer) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -336,28 +340,147 @@ class _PezeshaStatementUploadScreenState
             const Icon(Icons.check_circle_rounded, color: _success, size: 56),
             const SizedBox(height: 16),
             Text(
-              offer != null
-                  ? 'You\'re now approved for up to '
-                      '${Currency.formatFor(widget.country, offer.amount)}.'
-                  : 'Your documents were submitted. No limit is available '
-                      'yet — keep ordering through MobiGas to build your '
-                      'record.',
+              'You\'re now approved for up to '
+              '${Currency.formatFor(widget.country, offer.amount)}.',
               textAlign: TextAlign.center,
               style: const TextStyle(
                   color: _navy, fontWeight: FontWeight.w700, fontSize: 16),
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: _orange, foregroundColor: Colors.white),
-              child: const Text('Done'),
+            const SizedBox(height: 8),
+            Text(
+              'Repaid over ${offer.duration} days. Your statement went to '
+              'Pezesha and has been deleted from MobiGas — we don\'t keep '
+              'a copy.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.black54, fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _orange,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                child: const Text('Done'),
+              ),
             ),
           ],
         ),
       ),
     );
   }
+
+  /// Scored, but Pezesha returned no limit.
+  ///
+  /// Deliberately NOT the green tick — nothing was approved, and
+  /// dressing a decline as a success is the kind of thing people
+  /// remember. The point of this state is to leave someone who has
+  /// just done real work with a concrete next action, instead of the
+  /// dead end the old copy ended on ("keep ordering to build your
+  /// record"), which was the same non-answer they saw BEFORE
+  /// uploading anything.
+  ///
+  /// VERIFY: Pezesha hasn't confirmed whether Datascore returns a
+  /// decline reason, a minimum qualifying score, or a cool-off before
+  /// re-scoring (see pezesha.ts VERIFY items). So everything suggested
+  /// below is limited to what's true regardless of their scorecard —
+  /// more history scores better than less — rather than inventing a
+  /// reason. Replace these with the real remediation once they answer.
+  Widget _buildNoLimitYet() {
+    final hasBank = _bankFile != null;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.hourglass_empty_rounded, color: _orange, size: 48),
+          const SizedBox(height: 16),
+          const Text(
+            'Not enough to set a limit yet',
+            style: TextStyle(
+                color: _navy, fontWeight: FontWeight.w800, fontSize: 18),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Pezesha scored what you sent but hasn\'t set a limit on it '
+            'yet. Your statement went to them and has been deleted from '
+            'MobiGas — we don\'t keep a copy.',
+            style: TextStyle(color: Colors.black54, fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 22),
+          const Text('What usually helps',
+              style: TextStyle(
+                  color: _navy, fontWeight: FontWeight.w700, fontSize: 14)),
+          const SizedBox(height: 10),
+          if (!hasBank)
+            _tip('Add a bank statement. More history gives Pezesha more '
+                'to score — it\'s the biggest thing you can add right now.'),
+          _tip('Send 12 months instead of 6, if you have it.'),
+          _tip('Keep ordering through MobiGas. Your order history builds '
+              'a record that counts on your next check.'),
+          const SizedBox(height: 24),
+          if (!hasBank) ...[
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                // Back to the form with the M-Pesa file still selected,
+                // so adding a bank statement is one more tap rather
+                // than starting over.
+                onPressed: () => setState(() => _step = _Step.form),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _orange,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                child: const Text('Add a bank statement'),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              // pop(false) — scoring ran but produced no limit. The
+              // vendor card treats `true` as "a limit came back, reopen
+              // the limit sheet", and reopening it here would just
+              // repeat the answer this screen already gave in more
+              // detail. The customer card likewise only re-checks on
+              // true. Cancelling (system back) pops null, which both
+              // read the same way.
+              onPressed: () => Navigator.of(context).pop(false),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _navy,
+                side: BorderSide(color: _navy.withValues(alpha: 0.3)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Done'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tip(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 1),
+              child: Icon(Icons.arrow_right_rounded, size: 18, color: _orange),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(text,
+                  style: const TextStyle(
+                      color: Colors.black54, fontSize: 13, height: 1.4)),
+            ),
+          ],
+        ),
+      );
 
   Widget _buildError() {
     return Center(
