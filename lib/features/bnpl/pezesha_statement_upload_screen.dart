@@ -7,14 +7,19 @@
 // submit -> new score/limit comes back.
 //
 // Shared by both apps — ownerType decides who's being scored, same
-// pattern as PezeshaLoanStatusScreen. Requires the `file_picker` and
-// `firebase_storage` packages in pubspec.yaml.
+// pattern as PezeshaLoanStatusScreen. Requires `file_selector` and
+// `firebase_storage` in pubspec.yaml.
+//
+// file_selector, NOT file_picker: file_picker's Android module still
+// uses the pre-AGP-9 Gradle DSL and fails to configure on this
+// toolchain ('Configuration with name implementation not found').
+// file_selector is maintained by flutter.dev and builds cleanly.
 //
 // VERIFY: see pezesha_service.dart's submitStatementsForScoring
 // comment — the Cloud Function contract isn't confirmed yet.
 
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/services/pezesha_service.dart';
@@ -77,13 +82,15 @@ class _PezeshaStatementUploadScreenState
   }
 
   Future<void> _pickPdf({required bool isMpesa}) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
+    const pdfGroup = XTypeGroup(
+      label: 'PDF',
+      extensions: <String>['pdf'],
+      mimeTypes: <String>['application/pdf'],
     );
-    if (result == null || result.files.single.path == null) return;
-    final file = File(result.files.single.path!);
-    final name = result.files.single.name;
+    final picked = await openFile(acceptedTypeGroups: <XTypeGroup>[pdfGroup]);
+    if (picked == null) return;
+    final file = File(picked.path);
+    final name = picked.name;
     setState(() {
       if (isMpesa) {
         _mpesaFile = file;
