@@ -142,6 +142,14 @@ class MobiGasFees {
   // discussion: financing access stays a retention lever (bigger,
   // more frequent orders), not a second monetized surface. If that
   // changes, it's a new rate constant, not a change to this one.
+  //
+  // Also deliberately NOT charged on a vendor's delivery fee. The 1%
+  // is a cut of GMV — the goods sold — and a delivery fee is the
+  // vendor's own cost of getting the cylinder to the door, not margin
+  // on a sale. GasListing.cashFinderFee is computed from the listing
+  // price alone and OrderModel.deliveryFee is kept out of it, which
+  // is why the two are separate fields on the order rather than one
+  // summed total.
   static const double cashFinderFeeRate = 0.01;
   // When a vendor's unpaid fees reach this amount (KES), they are
   // automatically hidden from customers until they settle.
@@ -220,6 +228,8 @@ class GasListing {
   });
 
   // Vendor owes MobiGas 1% on every order — never shown to customer.
+  // Computed from the listing price ONLY; a vendor's delivery fee is
+  // deliberately excluded (see MobiGasFees.cashFinderFeeRate).
   double get cashFinderFee => price * MobiGasFees.cashFinderFeeRate;
 }
 
@@ -273,6 +283,34 @@ class VendorModel {
   /// Suspended by admin for unpaid platform fees — receives NO orders
   /// until cleared.
   final bool isSuspended;
+
+  // ── Delivery ────────────────────────────────────────────────────
+  // A vendor sets ONE flat fee per order (or none), in the pricing
+  // step of vendor_setup_screen. Three states, not two:
+  //
+  //   null  — never answered. Every vendor doc written before this
+  //           feature shipped is here, because it has no
+  //           chargesDeliveryFee field at all. Show the customer NO
+  //           delivery note: we genuinely don't know, and inventing
+  //           "Free delivery" would be a promise made on the vendor's
+  //           behalf that they never agreed to and might not honour.
+  //   false — explicitly chose free delivery. THIS is what earns a
+  //           "Free delivery" note on their card.
+  //   true  — charges deliveryFee on every order.
+  //
+  // Use the three getters below rather than reading the nullable bool
+  // directly — `chargesDeliveryFee == true` and `!= false` are easy to
+  // get subtly wrong at a call site, and the difference between them
+  // is the difference between showing a note and not.
+
+  /// Whether this vendor charges for delivery. Null means unanswered —
+  /// see the block comment above before reading this directly.
+  final bool? chargesDeliveryFee;
+
+  /// Flat fee per order in the vendor's own currency. Meaningful only
+  /// when chargesDeliveryFee is true; 0 otherwise. Read
+  /// [effectiveDeliveryFee] instead of this raw value.
+  final double deliveryFee;
 
   // ── Verification documents ──────────────────────────────────────
   // Uploaded once during onboarding; reviewed by admin before
@@ -383,6 +421,8 @@ class VendorModel {
     required this.deliveryTime,
     this.feesOwed = 0.0,
     this.isSuspended = false,
+    this.chargesDeliveryFee,
+    this.deliveryFee = 0.0,
     this.epraCertificateUrl = '',
     this.subDealerAuthorizationUrl = '',
     this.parentVendorName = '',
@@ -405,9 +445,152 @@ class VendorModel {
     this.pezeshaId,
   });
 
+  /// Returns a copy with only the named fields changed.
+  ///
+  /// EXISTS TO STOP A SPECIFIC BUG CLASS. VendorProvider.loadVendors
+  /// used to rebuild this object by hand — `VendorModel(id: v.id,
+  /// businessName: v.businessName, ...)` — purely to attach a distance
+  /// string. That constructor call listed ~18 of the fields on this
+  /// class, so every field it omitted was silently reset to its default
+  /// on the distance-filtered path, which is the path essentially every
+  /// customer takes. country fell back to 'KE' (wrong currency for UG
+  /// and TZ vendors) and acceptsPartialPayment/partialPaymentNote fell
+  /// back to false/'' (the "Flexible payment" chip never rendered) —
+  /// neither with any error, anywhere.
+  ///
+  /// Adding a field to this class and forgetting to add it there was
+  /// the whole failure mode, and it recurs every time the model grows.
+  /// copyWith carries everything forward by default, so a new field is
+  /// safe the moment it's declared. Do not reintroduce a hand-built
+  /// constructor call for "just tweaking one field".
+  VendorModel copyWith({
+    String? id,
+    String? businessName,
+    String? ownerName,
+    String? email,
+    String? phone,
+    String? altPhone,
+    String? area,
+    String? estate,
+    String? county,
+    String? country,
+    double? latitude,
+    double? longitude,
+    List<String>? brands,
+    List<GasListing>? listings,
+    double? rating,
+    int? totalReviews,
+    bool? isOnline,
+    bool? isVerified,
+    String? distance,
+    String? deliveryTime,
+    double? feesOwed,
+    bool? isSuspended,
+    bool? chargesDeliveryFee,
+    double? deliveryFee,
+    String? epraCertificateUrl,
+    String? subDealerAuthorizationUrl,
+    String? parentVendorName,
+    String? parentEpraNumber,
+    String? brandAuthorizationUrl,
+    String? dealerAssociationLetterUrl,
+    String? businessPermitUrl,
+    String? businessRegistrationUrl,
+    String? fireCertificateUrl,
+    String? weighingScaleCertUrl,
+    String? weighingScalePhotoUrl,
+    String? premisesPhotoUrl,
+    String? taxClearanceUrl,
+    String? businessType,
+    bool? acceptsPartialPayment,
+    String? partialPaymentNote,
+    bool? partialRepeatOnly,
+    String? referralCode,
+    String? referredByCode,
+    String? pezeshaId,
+  }) {
+    return VendorModel(
+      id: id ?? this.id,
+      businessName: businessName ?? this.businessName,
+      ownerName: ownerName ?? this.ownerName,
+      email: email ?? this.email,
+      phone: phone ?? this.phone,
+      altPhone: altPhone ?? this.altPhone,
+      area: area ?? this.area,
+      estate: estate ?? this.estate,
+      county: county ?? this.county,
+      country: country ?? this.country,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      brands: brands ?? this.brands,
+      listings: listings ?? this.listings,
+      rating: rating ?? this.rating,
+      totalReviews: totalReviews ?? this.totalReviews,
+      isOnline: isOnline ?? this.isOnline,
+      isVerified: isVerified ?? this.isVerified,
+      distance: distance ?? this.distance,
+      deliveryTime: deliveryTime ?? this.deliveryTime,
+      feesOwed: feesOwed ?? this.feesOwed,
+      isSuspended: isSuspended ?? this.isSuspended,
+      // Nullable by design (see the tri-state block above), so `??`
+      // here can only ever ADD an answer, never clear one back to
+      // "unanswered". Nothing needs to un-answer it, and a caller that
+      // passed null expecting a reset would be silently ignored — which
+      // is the safer of the two failure modes.
+      chargesDeliveryFee: chargesDeliveryFee ?? this.chargesDeliveryFee,
+      deliveryFee: deliveryFee ?? this.deliveryFee,
+      epraCertificateUrl: epraCertificateUrl ?? this.epraCertificateUrl,
+      subDealerAuthorizationUrl:
+          subDealerAuthorizationUrl ?? this.subDealerAuthorizationUrl,
+      parentVendorName: parentVendorName ?? this.parentVendorName,
+      parentEpraNumber: parentEpraNumber ?? this.parentEpraNumber,
+      brandAuthorizationUrl:
+          brandAuthorizationUrl ?? this.brandAuthorizationUrl,
+      dealerAssociationLetterUrl:
+          dealerAssociationLetterUrl ?? this.dealerAssociationLetterUrl,
+      businessPermitUrl: businessPermitUrl ?? this.businessPermitUrl,
+      businessRegistrationUrl:
+          businessRegistrationUrl ?? this.businessRegistrationUrl,
+      fireCertificateUrl: fireCertificateUrl ?? this.fireCertificateUrl,
+      weighingScaleCertUrl:
+          weighingScaleCertUrl ?? this.weighingScaleCertUrl,
+      weighingScalePhotoUrl:
+          weighingScalePhotoUrl ?? this.weighingScalePhotoUrl,
+      premisesPhotoUrl: premisesPhotoUrl ?? this.premisesPhotoUrl,
+      taxClearanceUrl: taxClearanceUrl ?? this.taxClearanceUrl,
+      businessType: businessType ?? this.businessType,
+      acceptsPartialPayment:
+          acceptsPartialPayment ?? this.acceptsPartialPayment,
+      partialPaymentNote: partialPaymentNote ?? this.partialPaymentNote,
+      partialRepeatOnly: partialRepeatOnly ?? this.partialRepeatOnly,
+      referralCode: referralCode ?? this.referralCode,
+      referredByCode: referredByCode ?? this.referredByCode,
+      pezeshaId: pezeshaId ?? this.pezeshaId,
+    );
+  }
+
   /// Max length of [partialPaymentNote]. A short note, not a contract —
   /// enforced at the input field and worth clamping on read too.
   static const int partialPaymentNoteMaxLength = 200;
+
+  // ── Delivery getters ────────────────────────────────────────────
+
+  /// True once this vendor has explicitly answered the delivery
+  /// question by saving their pricing step. Gate EVERY customer-facing
+  /// delivery note on this — false means show nothing at all, not
+  /// "assume free".
+  bool get deliveryPreferenceSet => chargesDeliveryFee != null;
+
+  /// The vendor explicitly chose to deliver free. The only state that
+  /// earns a "Free delivery" note — deliberately not `!charges...`,
+  /// which would also be true for a vendor who never answered.
+  bool get hasFreeDelivery => chargesDeliveryFee == false;
+
+  /// What this vendor actually adds to an order for delivery. 0 for
+  /// free delivery AND for an unanswered vendor — an unanswered vendor
+  /// has never told us a number, so charging one would be inventing it.
+  double get effectiveDeliveryFee =>
+      chargesDeliveryFee == true ? deliveryFee : 0.0;
 
   /// Resolves a Firestore document key to this vendor's stored URL —
   /// the bridge between VendorRequirements' key-based document lists and
@@ -587,6 +770,21 @@ class OrderModel {
   /// (1% of gas price). Frozen at order time.
   final double finderFee;
 
+  /// The vendor's flat delivery fee for this order, copied from
+  /// VendorModel.effectiveDeliveryFee at order-creation time and then
+  /// FROZEN — exactly like finderFee and country. A vendor raising
+  /// their fee tomorrow must never change what an order placed today
+  /// cost, so this is stored on the order rather than looked up from
+  /// the vendor doc when the order is displayed.
+  ///
+  /// 0 for free delivery, for a vendor who has never set a preference,
+  /// and for every order placed before this field existed. Kept
+  /// separate from listing.price (rather than summed into it) for two
+  /// reasons: the 1% finder fee is computed off the gas price alone,
+  /// and the vendor's earnings aggregate sums the `gasPrice` field —
+  /// folding delivery in would silently change both.
+  final double deliveryFee;
+
   /// Pezesha's loan ID for this order — set only when paymentMethod ==
   /// bnpl. This is the loanId PezeshaService.applyLoan returns after
   /// BnplCheckoutOption's loan application is approved; the checkout
@@ -626,18 +824,22 @@ class OrderModel {
     this.riderPhone,
     this.paymentMethod = PaymentMethod.cash,
     this.finderFee = 0.0,
+    this.deliveryFee = 0.0,
     this.loanId,
     this.cancelledBy,
   });
 
-  /// What the customer pays in total for the order itself: the gas
-  /// price. Unchanged by paymentMethod — cash and bnpl orders cost the
-  /// customer the same listing price; the difference is WHO they pay
-  /// and WHEN (vendor now in cash, Pezesha over time in bnpl), not how
-  /// much. Any interest/fee owed on a bnpl order is Pezesha's loan
-  /// terms (offer.rate/interest/fee — see PezeshaLoanOffer), owed to
-  /// Pezesha, and never added here — MobiGas still adds nothing.
-  double get customerTotal => listing.price;
+  /// What the customer pays in total for the order: the gas price plus
+  /// the vendor's flat delivery fee (0 when they deliver free, which is
+  /// the case for every order predating that feature).
+  ///
+  /// Unchanged by paymentMethod — cash and bnpl orders cost the
+  /// customer the same; the difference is WHO they pay and WHEN (vendor
+  /// now in cash, Pezesha over time in bnpl), not how much. Any
+  /// interest/fee owed on a bnpl order is Pezesha's loan terms
+  /// (offer.rate/interest/fee — see PezeshaLoanOffer), owed to Pezesha,
+  /// and never added here — MobiGas still adds nothing of its own.
+  double get customerTotal => listing.price + deliveryFee;
 }
 
 enum OrderStatus {

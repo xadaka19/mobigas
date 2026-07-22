@@ -203,27 +203,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       if (addingId || altPhoneChanged) {
         final fingerprint = await DeviceFingerprintService.getFingerprint();
-        // NOTE: this reuses the existing `phone` parameter, which (as
-        // implemented pre-altPhone) only checks the incoming value
-        // against other users' PRIMARY `phone` field — it will catch
-        // "this alt number is actually someone else's main login
-        // number" but not "two customers both listed the same alt
-        // number". Closing that second gap means checkDuplicates on
-        // the backend needs to also match against everyone's altPhone
-        // field. Flagging rather than guessing at that implementation.
+        // checkDuplicates now takes altPhone as its own axis — it's
+        // checked against everyone else's primary AND alt phone
+        // fields, not just folded into the `phone` param the way an
+        // earlier version of this did. See FirestoreService for the
+        // Cloud Function dependency this relies on.
         final duplicates = await FirestoreService.checkDuplicates(
-          phone: altPhoneChanged ? altPhone : '',
+          phone: '',
           nationalId: addingId ? newId : '',
+          altPhone: altPhoneChanged ? altPhone : null,
           deviceFingerprint: fingerprint,
         );
 
-        if (altPhoneChanged && duplicates['phoneTaken'] == true) {
-          if (mounted) setState(() => _isSaving = false);
+        if (altPhoneChanged && duplicates['altPhoneTaken'] == true) {
+          if (!mounted) return;
+          setState(() => _isSaving = false);
           _error('Another account already uses this phone number.');
           return;
         }
         if (addingId && duplicates['idTaken'] == true) {
-          if (mounted) setState(() => _isSaving = false);
+          if (!mounted) return;
+          setState(() => _isSaving = false);
           _error('Another account already uses this National ID.');
           return;
         }

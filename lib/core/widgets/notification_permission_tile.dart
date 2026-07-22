@@ -205,7 +205,7 @@ class _NotificationPermissionTileState extends State<NotificationPermissionTile>
             Switch(
               value: false,
               activeThumbColor: AppColors.orange,
-              activeTrackColor: AppColors.orange.withOpacity(0.3),
+              activeTrackColor: AppColors.orange.withValues(alpha: 0.3),
               onChanged: (_) => _enable(),
             ),
         ],

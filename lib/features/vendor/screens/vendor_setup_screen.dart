@@ -103,6 +103,12 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   // contact number. Purely informational — never used as a payout
   // destination.
   late TextEditingController _altPhoneController;
+  /// The alt phone we started with — checkDuplicates matches against
+  /// every vendor/user, this account included, so re-saving an
+  /// unchanged value (or the focused pricesOnly/documentsOnly/
+  /// locationOnly modes, which never touch this field at all) never
+  /// needs to re-verify it.
+  late String _originalAltPhone;
   // Optional override: the number payments go to, when it isn't the
   // contact line. Empty means "same as contact" — which is what every
   // vendor saved before this field existed, so their `phone` (which
@@ -198,6 +204,25 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       TextEditingController();
   bool _mekoCookerAvailable = false;
 
+  // ── Delivery fee ─────────────────────────────────────────────────
+  // A single FLAT fee per order, not per-size or per-distance — the
+  // vendor names one number that applies to everything they deliver.
+  // Off means they deliver free.
+  //
+  // Note the TRI-STATE this feeds. A vendor who has never saved since
+  // this shipped has no chargesDeliveryFee field in Firestore at all,
+  // and their customer-facing card shows NO delivery note whatsoever —
+  // see VendorModel.deliveryPreferenceSet. Saving this screen (either
+  // way) writes the field and is what turns the note on. The local
+  // default below is therefore only ever a form default, never a claim
+  // made on an unsaved vendor's behalf.
+  //
+  // Lives in the pricing step, and so in VendorEditMode.pricesOnly,
+  // because it's part of what the customer pays — not a business
+  // detail.
+  late bool _chargesDeliveryFee;
+  final TextEditingController _deliveryFeeController = TextEditingController();
+
   // Step 2 - Location (Google Places, or GPS auto-detect)
   String _selectedAddress = '';
   double _selectedLat = 0.0;
@@ -267,6 +292,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     // a normal editable field the first time through.
     _phoneWasSet = (d['phone'] ?? '').toString().trim().isNotEmpty;
     _altPhoneController = TextEditingController(text: d['altPhone'] ?? '');
+    _originalAltPhone = (d['altPhone'] ?? '').toString().trim();
     // A saved payoutPhone means the vendor explicitly split the two
     // lines; empty (the case for every doc written before this field
     // existed) means payments follow the contact number.
@@ -286,6 +312,19 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       text: d['partialPaymentNote'] ?? '',
     );
     _partialRepeatOnly = (d['partialRepeatOnly'] ?? false) == true;
+    // Absent on every doc written before this feature shipped. The
+    // form opens on "free" as the neutral default — but see the field
+    // comment: until this screen is SAVED, Firestore still has no
+    // chargesDeliveryFee field, and the customer card shows nothing.
+    _chargesDeliveryFee = (d['chargesDeliveryFee'] ?? false) == true;
+    final savedDeliveryFee = (d['deliveryFee'] ?? 0).toDouble();
+    _deliveryFeeController.text = savedDeliveryFee > 0
+        // Whole numbers are the realistic case for KES/UGX/TZS, and
+        // plain .toString() would put "250.0" in the field.
+        ? (savedDeliveryFee == savedDeliveryFee.roundToDouble()
+            ? savedDeliveryFee.toStringAsFixed(0)
+            : savedDeliveryFee.toString())
+        : '';
     _tillController = TextEditingController(text: d['tillNumber'] ?? '');
     _paybillController = TextEditingController(text: d['paybillNumber'] ?? '');
     _paybillAccountController = TextEditingController(
@@ -384,6 +423,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
     _altPhoneController.dispose();
     _payoutPhoneController.dispose();
     _deliveryTimeController.dispose();
+    _deliveryFeeController.dispose();
     _partialPaymentNoteController.dispose();
     _tillController.dispose();
     _paybillController.dispose();
@@ -418,6 +458,20 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   String get _effectivePayoutPhone => _useSeparatePayoutPhone
       ? _payoutPhoneController.text.trim()
       : _phoneController.text.trim();
+
+  /// The flat delivery fee as it will be saved: 0 whenever the vendor
+  /// isn't charging, so "free" has exactly one representation on the
+  /// customer side rather than two (toggle off, or fee of zero).
+  double get _effectiveDeliveryFee => _chargesDeliveryFee
+      ? (double.tryParse(_deliveryFeeController.text.trim()) ?? 0.0)
+      : 0.0;
+
+  /// A vendor who switches delivery to "I charge a fee" has to name
+  /// one. Without this, the toggle could save as chargesDeliveryFee:
+  /// true with deliveryFee: 0 — a state the customer card can only
+  /// render as a contradiction, and one that silently charges nothing.
+  bool get _deliveryFeeValid =>
+      !_chargesDeliveryFee || _effectiveDeliveryFee > 0;
 
   bool get _step0Valid {
     if (_businessNameController.text.trim().isEmpty) {
@@ -473,6 +527,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
   bool get _step2Valid =>
       _selectedBrands.isNotEmpty &&
+      _deliveryFeeValid &&
       _priceControllers.entries.any(
         (e) => _sizeAvailable[e.key] == true && e.value.text.isNotEmpty,
       );
@@ -522,6 +577,30 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
 
     try {
       final isNewVendor = widget.existingData == null;
+
+      // Alt phone duplicate check — only when it actually changed.
+      // checkDuplicates scans every vendor and user, this account
+      // included, so re-verifying an unchanged, already-saved value
+      // (or the empty string in every mode that doesn't show Step 0
+      // at all) would be a pointless round trip.
+      final altPhone = _altPhoneController.text.trim();
+      final altPhoneChanged = altPhone != _originalAltPhone;
+      if (altPhoneChanged && altPhone.isNotEmpty) {
+        final fingerprint = await DeviceFingerprintService.getFingerprint();
+        final duplicates = await FirestoreService.checkDuplicates(
+          phone: '',
+          nationalId: '',
+          altPhone: altPhone,
+          deviceFingerprint: fingerprint,
+        );
+        if (duplicates['altPhoneTaken'] == true) {
+          if (!mounted) return;
+          setState(() => _isSaving = false);
+          _showFocusedError(
+              'Another account already uses this phone number.');
+          return;
+        }
+      }
 
       // Business certificate / ID (Step 0). Preserve the existing URL
       // by default — only overwrite it if a new file was picked this
@@ -689,6 +768,19 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
         'deliveryTime': _deliveryTimeController.text.trim().isNotEmpty
             ? _deliveryTimeController.text.trim()
             : '20–40 min',
+        // Flat per-order delivery fee. Writing chargesDeliveryFee on
+        // EVERY save (whatever its value) is what flips this vendor
+        // from "hasn't answered" to "answered" — the signal the
+        // customer card uses to decide whether to show a delivery note
+        // at all — so it must never be conditional. Writing deliveryFee
+        // explicitly likewise means switching the toggle off actually
+        // clears a previously-saved amount; a merge that omitted it
+        // would leave the old fee in place and keep charging customers
+        // for delivery the vendor now gives away. _effectiveDeliveryFee
+        // is already 0 when the toggle is off, so "free" has exactly
+        // one representation downstream.
+        'chargesDeliveryFee': _chargesDeliveryFee,
+        'deliveryFee': _effectiveDeliveryFee,
         // Flexible-payment noticeboard — vendor's own words, stored and
         // shown, never acted on. Note is only kept when the toggle is on,
         // so turning it off actually clears the message rather than
@@ -929,8 +1021,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   return;
                 }
                 if (widget.mode == VendorEditMode.pricesOnly && !_step2Valid) {
+                  // Name the actual blocker — a vendor who priced
+                  // everything correctly but left the delivery fee
+                  // blank would otherwise be told to set a price.
                   _showFocusedError(
-                    'Select at least one brand and set a price',
+                    !_deliveryFeeValid
+                        ? 'Enter your delivery fee, or switch delivery to free'
+                        : 'Select at least one brand and set a price',
                   );
                   return;
                 }
@@ -1297,6 +1394,133 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                 ),
               ),
             ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Flat per-order delivery fee, set alongside the gas prices because
+  /// it's part of what the customer pays — not a business detail.
+  /// Off is the default and means free delivery, which the customer's
+  /// vendor card surfaces as a "Free delivery" note. On means the fee
+  /// named here shows on the card and is added to the order total.
+  Widget _buildDeliveryFeeSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _chargesDeliveryFee && !_deliveryFeeValid
+              // The one state that blocks saving — say so visually
+              // instead of only on tapping Save.
+              ? AppColors.error.withValues(alpha: 0.6)
+              : AppColors.white.withValues(alpha: 0.15),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.two_wheeler_rounded,
+                color: AppColors.orange,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'I charge for delivery',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 14,
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Switch(
+                value: _chargesDeliveryFee,
+                activeThumbColor: AppColors.orange,
+                onChanged: (v) => setState(() => _chargesDeliveryFee = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _chargesDeliveryFee
+                ? 'One flat fee on every order, whatever the size. Customers '
+                      'see it on your card and pay it on top of the gas price.'
+                : 'Leave this off if you deliver free — customers see a '
+                      '"Free delivery" note on your card, which is one of the '
+                      'first things they compare.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray400,
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+          if (_chargesDeliveryFee) ...[
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _deliveryFeeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+              ],
+              // Keeps the error border and the helper text below in
+              // sync as the vendor types, rather than only on Save.
+              onChanged: (_) => setState(() {}),
+              style: const TextStyle(
+                color: AppColors.white,
+                fontWeight: FontWeight.w600,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Delivery fee per order',
+                labelStyle: const TextStyle(
+                  color: AppColors.gray400,
+                  fontSize: 12,
+                ),
+                prefixText: '${Currency.symbolFor(_detectedCountry)} ',
+                prefixStyle: const TextStyle(
+                  color: AppColors.orange,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+                hintText: '0',
+                hintStyle: const TextStyle(color: AppColors.gray600),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppColors.white.withValues(alpha: 0.2),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.orange),
+                ),
+                filled: true,
+                fillColor: AppColors.white.withValues(alpha: 0.05),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 14,
+                ),
+              ),
+            ),
+            if (!_deliveryFeeValid) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Enter an amount above 0, or switch delivery back to free.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.error,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -1890,6 +2114,13 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           onToggle: (v) => setState(() => _mekoCookerAvailable = v),
           label: 'Meko + Cooker',
         ),
+        const SizedBox(height: 24),
+        // Delivery sits at the end of the pricing step — after every
+        // product price, because it's the last thing added to what the
+        // customer pays.
+        _sectionHeader('Delivery'),
+        const SizedBox(height: 10),
+        _buildDeliveryFeeSection(),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
@@ -2404,10 +2635,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
                   return;
                 }
                 if (_step == 2 && !_step2Valid) {
+                  // Name the actual blocker — see _buildFocusedFooter.
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
+                    SnackBar(
                       content: Text(
-                        'Select at least one brand and set a price',
+                        !_deliveryFeeValid
+                            ? 'Enter your delivery fee, or switch delivery '
+                                  'to free'
+                            : 'Select at least one brand and set a price',
                       ),
                       backgroundColor: AppColors.error,
                       behavior: SnackBarBehavior.floating,

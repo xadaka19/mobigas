@@ -80,14 +80,14 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
     final customer = context.read<AuthProvider>().customer;
     if (customer == null) return;
 
-    if (!_promoChecked) {                     // ← add this block
-    _promoChecked = true;
-    checkForPromo(
-      audience: 'customer',
-      country: customer.country,
-      userId: customer.id,
-    );
-  }
+    if (!_promoChecked) {
+      _promoChecked = true;
+      checkForPromo(
+        audience: 'customer',
+        country: customer.country,
+        userId: customer.id,
+      );
+    }
 
     if (!_ordersWatched) {
       _ordersWatched = true;
@@ -556,6 +556,15 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
       }
     }
 
+    // Delivery: THREE states, not two. deliveryPreferenceSet is false
+    // for any vendor who hasn't saved their pricing step since the
+    // delivery feature shipped — we genuinely don't know what they
+    // charge, so the card shows nothing at all rather than promising
+    // free delivery on their behalf. See VendorModel's tri-state
+    // comment; do not simplify this to `!vendor.chargesDeliveryFee`.
+    final showsDelivery = vendor.deliveryPreferenceSet;
+    final freeDelivery = vendor.hasFreeDelivery;
+
     Widget chip(String label) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
@@ -569,6 +578,30 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
                   )),
+        );
+
+    /// Coloured chip for the things a customer actively compares on —
+    /// free delivery and flexible payment — so they don't disappear
+    /// into the grey run of product chips.
+    Widget accentChip(IconData icon, String label, Color color) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 11, color: color),
+              const SizedBox(width: 4),
+              Text(label,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: color,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      )),
+            ],
+          ),
         );
 
     final initial = vendor.businessName.trim().isEmpty
@@ -658,6 +691,7 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
             if (cheapestRefill != null ||
                 hasFullKit ||
                 hasGrillKit ||
+                showsDelivery ||
                 vendor.acceptsPartialPayment) ...[
               const SizedBox(height: 10),
               Wrap(
@@ -669,37 +703,25 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                         '${cheapestRefill.size} refill from ${Currency.formatFor(vendor.country, cheapestRefill.price)}'),
                   if (hasFullKit) chip('Gas + cylinder'),
                   if (hasGrillKit) chip('Gas + cylinder + grill'),
+                  // Free delivery gets the accent treatment — it's one
+                  // of the first things a customer compares between two
+                  // vendors at similar prices. A vendor who charges
+                  // gets the plain grey chip naming the fee, so the
+                  // customer knows the real cost before they tap in.
+                  if (showsDelivery)
+                    freeDelivery
+                        ? accentChip(Icons.local_shipping_outlined,
+                            'Free delivery', AppColors.success)
+                        : chip(
+                            '+ ${Currency.formatFor(vendor.country, vendor.deliveryFee)} delivery'),
                   // Signals the vendor is open to arranging flexible
                   // payment — the details are shown on the order screen,
                   // where a specific vendor is selected. MobiGas only
                   // surfaces that the option exists; it's not a party to
                   // any arrangement.
                   if (vendor.acceptsPartialPayment)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppColors.orange.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.handshake_outlined,
-                              size: 11, color: AppColors.orange),
-                          const SizedBox(width: 4),
-                          Text('Flexible payment',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: AppColors.orange,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                        ],
-                      ),
-                    ),
+                    accentChip(Icons.handshake_outlined, 'Flexible payment',
+                        AppColors.orange),
                 ],
               ),
             ],
@@ -830,12 +852,26 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                         .textTheme
                         .bodySmall
                         ?.copyWith(color: AppColors.gray400)),
+                // Only when there was one. Says why the total above is
+                // more than the gas price the customer chose, without
+                // adding a row to every free-delivery order.
+                if (order.deliveryFee > 0)
+                  Text(
+                      'Incl. ${Currency.formatFor(order.country, order.deliveryFee)} delivery',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.gray400,
+                            fontSize: 10,
+                          )),
               ],
             ),
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              // customerTotal = gas + delivery. Already correct here
+              // before this feature (delivery was simply always 0), so
+              // this line needed no change — it picks the fee up the
+              // moment OrderModel carries one.
               Text(Currency.formatFor(order.country, order.customerTotal),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,

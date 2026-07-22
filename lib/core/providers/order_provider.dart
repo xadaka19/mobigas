@@ -134,7 +134,19 @@ class OrderProvider extends ChangeNotifier {
         // Vendor-side customer-finder fee (1%), accrued on delivery.
         // Never shown to the customer anywhere in the app. Applies to
         // bnpl too — the vendor still owes the platform fee on the sale.
+        // Computed from the LISTING PRICE only (see
+        // GasListing.cashFinderFee): the delivery fee below is
+        // deliberately outside it, because 1% is a cut of goods sold,
+        // not of the vendor's cost to get the cylinder to the door.
         finderFee: listing.cashFinderFee,
+        // The vendor's flat delivery fee, read off their profile HERE
+        // and frozen onto the order. effectiveDeliveryFee (not the raw
+        // deliveryFee field) is what handles the tri-state: it returns
+        // 0 both for a vendor who chose free delivery and for one who
+        // has never answered, so an unanswered vendor can never have a
+        // charge invented for them. Frozen because a vendor raising
+        // their fee tomorrow must not change what this order cost.
+        deliveryFee: vendor.effectiveDeliveryFee,
         // Only a bnpl order carries a loan reference; a cash order
         // never does, even if a stray loanId were passed in.
         loanId: paymentMethod == PaymentMethod.bnpl ? loanId : null,

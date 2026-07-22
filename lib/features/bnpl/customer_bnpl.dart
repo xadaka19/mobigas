@@ -37,6 +37,7 @@ import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/services/pezesha_service.dart';
 import 'package:mobigas/features/bnpl/pezesha_loan_status_screen.dart';
+import 'package:mobigas/features/bnpl/pezesha_statement_upload_screen.dart';
 
 const _navy = Color(0xFF0D1B40);
 const _orange = Color(0xFFF97316);
@@ -103,6 +104,18 @@ class _BnplLimitCardState extends State<BnplLimitCard> {
     }
   }
 
+  Future<void> _openStatementUpload() async {
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PezeshaStatementUploadScreen(
+          ownerType: 'customer',
+          country: widget.country,
+        ),
+      ),
+    );
+    if (updated == true) _checkLimit();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -153,6 +166,11 @@ class _BnplLimitCardState extends State<BnplLimitCard> {
               ),
               child: const Text('Check my limit'),
             ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _openStatementUpload,
+              child: const Text('Or upload statements to improve your score'),
+            ),
           ],
         );
       case _CardState.checking:
@@ -185,33 +203,60 @@ class _BnplLimitCardState extends State<BnplLimitCard> {
             // pezesha_loan_status_screen.dart's header comment for why
             // this exists (Google Play requirement for lending-adjacent
             // apps), not just a nice-to-have link.
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  foregroundColor: _orange,
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => PezeshaLoanStatusScreen(
-                      ownerType: 'customer',
-                      country: widget.country,
+            Row(
+              children: [
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    foregroundColor: _orange,
+                  ),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => PezeshaLoanStatusScreen(
+                        ownerType: 'customer',
+                        country: widget.country,
+                      ),
                     ),
                   ),
+                  child: const Text('View my loans',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                 ),
-                child: const Text('View my loans',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-              ),
+                const SizedBox(width: 12),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    foregroundColor: _orange,
+                  ),
+                  onPressed: _openStatementUpload,
+                  child: const Text('Improve my limit',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                ),
+              ],
             ),
           ],
         );
       case _CardState.unavailable:
-        return Text(_message ?? '',
-            style: const TextStyle(
-                color: Colors.black54, fontSize: 13, height: 1.4));
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_message ?? '',
+                style: const TextStyle(
+                    color: Colors.black54, fontSize: 13, height: 1.4)),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _openStatementUpload,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _orange,
+                side: const BorderSide(color: _orange),
+              ),
+              child: const Text('Upload statements'),
+            ),
+          ],
+        );
       case _CardState.error:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,

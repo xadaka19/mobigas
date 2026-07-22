@@ -38,49 +38,49 @@ class VendorProvider extends ChangeNotifier {
 
       // Filter by distance if customer location is available
       if (lat != null && lng != null && lat != 0 && lng != 0) {
-        final nearbyVendors = <VendorModel>[];
+        // Compute each vendor's distance ONCE and carry it alongside
+        // the model. The old version called _distanceKm inside the
+        // comparator as well as in the filter, so sorting recomputed
+        // Haversine 2×log(n) times per load for numbers it had already
+        // worked out a moment earlier.
+        final nearby = <({VendorModel vendor, double distKm})>[];
 
         for (final vendor in allVendors) {
           if (vendor.latitude == 0 && vendor.longitude == 0) continue;
 
-          final distKm = _distanceKm(
-              lat, lng, vendor.latitude, vendor.longitude);
+          final distKm =
+              _distanceKm(lat, lng, vendor.latitude, vendor.longitude);
+          if (distKm > _defaultRadiusKm) continue;
 
-          if (distKm <= _defaultRadiusKm) {
-            // Update distance string
-            final updatedVendor = VendorModel(
-              id: vendor.id,
-              businessName: vendor.businessName,
-              ownerName: vendor.ownerName,
-              phone: vendor.phone,
-              area: vendor.area,
-              estate: vendor.estate,
-              county: vendor.county,
-              latitude: vendor.latitude,
-              longitude: vendor.longitude,
-              brands: vendor.brands,
-              listings: vendor.listings,
-              rating: vendor.rating,
-              totalReviews: vendor.totalReviews,
-              isOnline: vendor.isOnline,
-              isVerified: vendor.isVerified,
-              distance: _formatDistance(distKm),
-              deliveryTime: vendor.deliveryTime,
-              feesOwed: vendor.feesOwed,
-              isSuspended: vendor.isSuspended,
-            );
-            nearbyVendors.add(updatedVendor);
-          }
+          // BUG FIX: this used to hand-build a replacement VendorModel
+          // — `VendorModel(id: vendor.id, businessName: ..., ...)` —
+          // listing about 18 of the model's fields purely so it could
+          // attach a distance string. EVERY field that constructor call
+          // didn't mention was silently reset to its default on this
+          // path, and this is the path essentially every customer takes
+          // (they have a pin, so the distance filter runs).
+          //
+          // Live consequences before this fix: `country` reset to 'KE',
+          // so Currency.formatFor showed KSh on Ugandan and Tanzanian
+          // vendors' prices; acceptsPartialPayment/partialPaymentNote
+          // reset to false/'', so the "Flexible payment" chip in
+          // home_screen._vendorCard never rendered for anyone. No error,
+          // no warning — the fields just quietly weren't there.
+          //
+          // copyWith carries everything forward by default, so the same
+          // mistake can't recur when the model gains a field (the new
+          // delivery-fee fields would have been swallowed identically).
+          nearby.add((
+            vendor: vendor.copyWith(distance: _formatDistance(distKm)),
+            distKm: distKm,
+          ));
         }
 
-        // Sort by distance (closest first)
-        nearbyVendors.sort((a, b) {
-          final dA = _distanceKm(lat, lng, a.latitude, a.longitude);
-          final dB = _distanceKm(lat, lng, b.latitude, b.longitude);
-          return dA.compareTo(dB);
-        });
+        // Sort by distance (closest first), using the values already
+        // computed above.
+        nearby.sort((a, b) => a.distKm.compareTo(b.distKm));
 
-        _vendors = nearbyVendors;
+        _vendors = nearby.map((e) => e.vendor).toList();
       } else {
         // No customer location — show all verified vendors
         _vendors = allVendors;

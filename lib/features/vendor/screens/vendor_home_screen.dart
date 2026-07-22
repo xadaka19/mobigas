@@ -549,7 +549,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
         .map(
           (snap) => snap.docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            return _orderFromMap(doc.id, data);
+            return FirestoreService.orderFromMap(doc.id, data);
           }).toList(),
         );
   }
@@ -567,56 +567,21 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
         .map(
           (snap) => snap.docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            return _orderFromMap(doc.id, data);
+            return FirestoreService.orderFromMap(doc.id, data);
           }).toList(),
         );
   }
 
-  OrderModel _orderFromMap(String docId, Map<String, dynamic> data) {
-    return OrderModel(
-      orderId: data['orderId'] ?? docId,
-      customerId: data['customerId'] ?? '',
-      vendorId: data['vendorId'] ?? '',
-      vendorName: data['vendorName'] ?? '',
-      vendorPhone: data['vendorPhone'] ?? '',
-      customerName: data['customerName'] ?? '',
-      customerArea: data['customerArea'] ?? '',
-      customerPhone: data['customerPhone'] ?? '',
-      // BUG FIX: this local copy of the mapper silently dropped the
-      // customer's coordinates, so every OrderModel handed to
-      // VendorOrderScreen carried 0,0 and any map or navigation
-      // pointed at the Gulf of Guinea. The FirestoreService mapper
-      // always had these; the two drifted because this one exists.
-      customerLatitude: (data['customerLatitude'] ?? 0.0).toDouble(),
-      customerLongitude: (data['customerLongitude'] ?? 0.0).toDouble(),
-      listing: GasListing(
-        size: data['gasSize'] ?? '',
-        kg: data['gasKg'] ?? 0,
-        price: (data['gasPrice'] ?? 0).toDouble(),
-        available: true,
-        productType: GasProductType.values.firstWhere(
-          (t) => t.name == (data['gasProductType'] ?? 'refill'),
-          orElse: () => GasProductType.refill,
-        ),
-        brand: data['gasBrand'] ?? '',
-      ),
-      paymentMethod: PaymentMethod.values.firstWhere(
-        (m) => m.name == (data['paymentMethod'] ?? 'cash'),
-        orElse: () => PaymentMethod.cash,
-      ),
-      finderFee: (data['finderFee'] ?? 0).toDouble(),
-      cancelledBy: data['cancelledBy'],
-      pin: data['pin'] ?? '',
-      status: OrderStatus.values.firstWhere(
-        (e) => e.name == data['status'],
-        orElse: () => OrderStatus.pending,
-      ),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-
-      riderName: data['riderName'],
-      riderPhone: data['riderPhone'],
-    );
-  }
+  // The local _orderFromMap that used to live here is GONE — it is
+  // now FirestoreService.orderFromMap, the single mapper both apps
+  // share. It had drifted from the service copy twice: first dropping
+  // customerLatitude/customerLongitude (every OrderModel handed to
+  // VendorOrderScreen carried 0,0), and then — still, until now —
+  // omitting `country` entirely, so every order on this screen fell
+  // back to the 'KE' default and Currency.formatFor below showed KSh
+  // to Ugandan and Tanzanian vendors on their own dashboard. It
+  // omitted loanId too. Two mappers for one document shape drift by
+  // construction; there is one now. Don't reintroduce a local copy.
 
   /// Accepting re-reads the order first. The vendor's list can be a
   /// few seconds stale, and the old code wrote `status: accepted`
@@ -1782,9 +1747,15 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
+                    // customerTotal, NOT listing.price — it is gas plus
+                    // this vendor's own flat delivery fee, and this line
+                    // is the number they physically collect at the door.
+                    // Showing the gas price alone would have them
+                    // under-collecting their own delivery charge on
+                    // every single order.
                     payout.value.isEmpty
-                        ? 'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery (cash or ${payout.label} to you).'
-                        : 'Collect ${Currency.formatFor(order.country, order.listing.price)} from the customer on delivery — cash, or ${payout.label} ${payout.value}.',
+                        ? 'Collect ${Currency.formatFor(order.country, order.customerTotal)} from the customer on delivery (cash or ${payout.label} to you).${order.deliveryFee > 0 ? ' Includes your ${Currency.formatFor(order.country, order.deliveryFee)} delivery fee.' : ''}'
+                        : 'Collect ${Currency.formatFor(order.country, order.customerTotal)} from the customer on delivery — cash, or ${payout.label} ${payout.value}.${order.deliveryFee > 0 ? ' Includes your ${Currency.formatFor(order.country, order.deliveryFee)} delivery fee.' : ''}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppColors.navy,
                       fontSize: 11,
@@ -1975,7 +1946,10 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
             ),
           ),
           Text(
-            Currency.formatFor(order.country, order.listing.price),
+            // What the customer actually paid on this order, gas +
+            // delivery — matches the "Collect X" figure the vendor saw
+            // on the order card, so the two screens can't disagree.
+            Currency.formatFor(order.country, order.customerTotal),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontSize: 14,
               color: AppColors.success,

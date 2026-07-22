@@ -271,6 +271,18 @@ class FirestoreService {
       deliveryTime: data['deliveryTime'] ?? '30–45 min',
       feesOwed: (data['feesOwed'] ?? 0.0).toDouble(),
       isSuspended: data['isSuspended'] ?? false,
+      // DELIBERATELY NOT `data['chargesDeliveryFee'] ?? false`. The
+      // model's field is nullable and the three states are distinct:
+      // absent (this vendor has never saved since the delivery feature
+      // shipped — show NO delivery note), false (explicitly chose free
+      // delivery — show "Free delivery"), true (charges deliveryFee).
+      // The `is bool` test is what preserves null for an absent field;
+      // `?? false` would collapse "never answered" into "free" and
+      // promise free delivery on behalf of every legacy vendor.
+      chargesDeliveryFee: data['chargesDeliveryFee'] is bool
+          ? data['chargesDeliveryFee'] as bool
+          : null,
+      deliveryFee: (data['deliveryFee'] ?? 0).toDouble(),
       epraCertificateUrl: data['epraCertificateUrl'] ?? '',
       subDealerAuthorizationUrl: data['subDealerAuthorizationUrl'] ?? '',
       parentVendorName: data['parentVendorName'] ?? '',
@@ -317,10 +329,11 @@ class FirestoreService {
       'customerLongitude': order.customerLongitude,
       'gasSize': order.listing.size,
       'gasKg': order.listing.kg,
-      // The one money field on an order. confirmDelivery accrues the
-      // finder fee from it, onOrderStatusChange sums it into
+      // The GOODS money field. confirmDelivery accrues the 1% finder
+      // fee from it, onOrderStatusChange sums it into
       // vendor_stats_alltime, and the vendor's earnings screen
-      // aggregates it. Do not add a second one.
+      // aggregates it. The vendor's delivery fee is deliberately NOT
+      // added in here — see deliveryFee below.
       'gasPrice': order.listing.price,
       'gasProductType': order.listing.productType.name,
       'gasBrand': order.listing.brand,
@@ -328,6 +341,19 @@ class FirestoreService {
       'paymentMethod': order.paymentMethod.name,
       'finderFee': order.finderFee,
       'finderFeeAccrued': false,
+      // The vendor's flat delivery fee, frozen at order time. Its OWN
+      // field rather than part of gasPrice, on purpose: the 1% finder
+      // fee is a cut of goods sold, and a delivery fee is the vendor's
+      // cost of getting the cylinder to the door, not margin on a
+      // sale. Folding it into gasPrice would silently charge the
+      // vendor 1% of their own delivery cost (and inflate the earnings
+      // aggregate, which sums gasPrice). 0 for free delivery and for
+      // every order placed before this existed.
+      //
+      // NOTE: if firestore.rules whitelists the fields a client may
+      // write onto an order, add 'deliveryFee' there or this whole
+      // write starts failing permission-denied.
+      'deliveryFee': order.deliveryFee,
       // Set only for paymentMethod == bnpl — see OrderModel.loanId's
       // comment for why this must already be populated on `order`
       // before createOrder is called (loan approval happens first,
@@ -350,7 +376,7 @@ class FirestoreService {
         .snapshots()
         .map((snap) => snap.docs.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
-              return _orderFromMap(doc.id, data);
+              return orderFromMap(doc.id, data);
             }).toList());
   }
 
@@ -366,7 +392,7 @@ class FirestoreService {
         .snapshots()
         .map((snap) => snap.docs.map((doc) {
               final data = doc.data() as Map<String, dynamic>;
-              return _orderFromMap(doc.id, data);
+              return orderFromMap(doc.id, data);
             }).toList());
   }
 
@@ -428,7 +454,23 @@ class FirestoreService {
     });
   }
 
-  static OrderModel _orderFromMap(
+  /// THE order mapper. Public on purpose.
+  ///
+  /// vendor_home_screen.dart used to keep a private copy of this, and
+  /// the two drifted — twice. First it dropped customerLatitude /
+  /// customerLongitude, so every OrderModel handed to VendorOrderScreen
+  /// carried 0,0 and any map pointed at the Gulf of Guinea. That got
+  /// patched there but not here, and the copy then also turned out to
+  /// omit `country`, so every order on the vendor's screen fell back to
+  /// the 'KE' default and Currency.formatFor showed KSh to Ugandan and
+  /// Tanzanian vendors on their own dashboards. It omitted loanId too.
+  ///
+  /// Two mappers for one document shape will always drift, because
+  /// adding a field to the model only forces you to update the one you
+  /// happen to be looking at. So there is now exactly one, and both
+  /// apps call it. Don't add a second — if a screen needs a tweak to
+  /// the result, map here and adjust at the call site.
+  static OrderModel orderFromMap(
       String docId, Map<String, dynamic> data) {
     return OrderModel(
       orderId: data['orderId'] ?? docId,
@@ -458,6 +500,10 @@ class FirestoreService {
         orElse: () => PaymentMethod.cash,
       ),
       finderFee: (data['finderFee'] ?? 0).toDouble(),
+      // Frozen at order time — never re-read from the vendor doc, so a
+      // vendor raising their fee tomorrow can't change what an order
+      // placed today cost. Feeds OrderModel.customerTotal.
+      deliveryFee: (data['deliveryFee'] ?? 0).toDouble(),
       loanId: data['loanId'],
       cancelledBy: data['cancelledBy'],
       pin: data['pin'] ?? '',

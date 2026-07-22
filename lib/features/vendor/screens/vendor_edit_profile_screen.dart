@@ -7,6 +7,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobigas/core/screens/delete_account_screen.dart';
 import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/services/firebase_service.dart';
+import 'package:mobigas/core/services/firestore_service.dart';
+import 'package:mobigas/core/services/device_fingerprint_service.dart';
 import 'package:mobigas/core/widgets/notification_permission_tile.dart';
 
 class VendorEditProfileScreen extends StatefulWidget {
@@ -31,6 +33,12 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
   late TextEditingController _altPhoneController;
   late TextEditingController _estateController;
 
+  /// The alt phone we started with — checkDuplicates matches against
+  /// every vendor/user, this account included, so re-saving an
+  /// unchanged alt number would be a pointless network round trip if
+  /// not for this guard.
+  late String _originalAltPhone;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +50,7 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
         TextEditingController(text: widget.vendorData['phone'] ?? '');
     _altPhoneController =
         TextEditingController(text: widget.vendorData['altPhone'] ?? '');
+    _originalAltPhone = (widget.vendorData['altPhone'] ?? '').toString().trim();
     _estateController =
         TextEditingController(text: widget.vendorData['estate'] ?? '');
   }
@@ -147,6 +156,35 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
     setState(() => _isSaving = true);
 
     try {
+      final altPhone = _altPhoneController.text.trim();
+      final altPhoneChanged = altPhone != _originalAltPhone;
+
+      // Only check when it actually changed — checkDuplicates scans
+      // every vendor and user, this account included, so re-verifying
+      // an unchanged, already-saved value is a wasted round trip.
+      if (altPhoneChanged && altPhone.isNotEmpty) {
+        final fingerprint = await DeviceFingerprintService.getFingerprint();
+        final duplicates = await FirestoreService.checkDuplicates(
+          phone: '',
+          nationalId: '',
+          altPhone: altPhone,
+          deviceFingerprint: fingerprint,
+        );
+        if (duplicates['altPhoneTaken'] == true) {
+          if (!mounted) return;
+          setState(() => _isSaving = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Another account already uses this phone number.'),
+              backgroundColor: AppColors.error,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        }
+      }
+
       String? photoUrl;
 
       if (_newPhoto != null) {
@@ -166,7 +204,7 @@ class _VendorEditProfileScreenState extends State<VendorEditProfileScreen> {
         // 'phone' is intentionally NOT included — it's locked on this
         // screen (set once during setup) and must never be
         // overwritten from here.
-        'altPhone': _altPhoneController.text.trim(),
+        'altPhone': altPhone,
         'estate': _estateController.text.trim(),
       };
       if (photoUrl != null) updates['photoUrl'] = photoUrl;

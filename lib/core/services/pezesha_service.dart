@@ -10,7 +10,10 @@
 // that directly against the borrower. Nothing here reads or writes a
 // "repayment" concept; loan status is read-only, for display.
 
+import 'dart:io';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 class PezeshaLoanOffer {
   final double amount;
@@ -139,6 +142,95 @@ class PezeshaService {
     }
   }
 
+  /// Uploads a statement PDF (M-Pesa or bank) to Firebase Storage and
+  /// returns its storage PATH, for use as *StatementPath in
+  /// submitStatementsForScoring.
+  ///
+  /// A path, deliberately, NOT a download URL: a Storage download URL
+  /// is a bearer token that works without auth for anyone who ever
+  /// sees it, which is the wrong shape for someone's complete
+  /// financial history. The Cloud Function reads the object by path
+  /// with the Admin SDK, so no such URL is ever minted — which in
+  /// turn lets storage.rules deny read to everyone (see the
+  /// pezesha_statements block there).
+  ///
+  /// Stored under pezesha_statements/{ownerType}/{uid}/{kind}_{ts}.pdf
+  /// — timestamped rather than overwritten, so a re-upload never
+  /// destroys the file MobiGas support might need to reference if a
+  /// scoring dispute comes up later.
+  ///
+  /// uid is read from the CURRENT signed-in user regardless of
+  /// ownerType, same as every other call in this file — a vendor
+  /// account and a customer account are never the same uid, so there
+  /// is no ambiguity about whose folder this lands in.
+  static Future<String> uploadStatementFile({
+    required String ownerType, // 'customer' | 'vendor'
+    required File file,
+    required String kind, // 'mpesa' | 'bank'
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      throw const PezeshaException('Please sign in again.');
+    }
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance
+          .ref('pezesha_statements/$ownerType/$uid/${kind}_$ts.pdf');
+      await ref.putFile(
+        file,
+        SettableMetadata(contentType: 'application/pdf'),
+      );
+      return ref.fullPath;
+    } catch (_) {
+      throw const PezeshaException(
+        'Could not upload your statement. Check your connection and try again.',
+      );
+    }
+  }
+
+  /// Submits an uploaded M-Pesa statement (required) plus an optional
+  /// bank statement for Pezesha to (re)score the borrower. Mirrors
+  /// getLoanOffer's return shape — null means no limit is available
+  /// yet, which is a normal, displayable outcome, not an error.
+  ///
+  /// Invalidates/refreshes the session cache for this ownerType on
+  /// success, same reasoning as applyLoan: a fresh scoring result
+  /// supersedes anything cached earlier this session.
+  ///
+  /// VERIFY: the Cloud Function name and exact param names below
+  /// aren't confirmed against Pezesha's real API yet — same caveat as
+  /// pezesha_loan_status_screen.dart's header comment. Update this
+  /// once confirmed on the Discovery Call.
+  static Future<PezeshaLoanOffer?> submitStatementsForScoring({
+    required String ownerType,
+    required String mpesaStatementPath,
+    required String mpesaStatementPhone,
+    required String mpesaStatementPasscode,
+    String? bankStatementPath,
+  }) async {
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('submitPezeshaStatements')
+          .call({
+            'ownerType': ownerType,
+            'mpesaStatementPath': mpesaStatementPath,
+            'mpesaStatementPhone': mpesaStatementPhone,
+            'mpesaStatementPasscode': mpesaStatementPasscode,
+            'bankStatementPath': ?bankStatementPath,
+          });
+      final data = result.data as Map;
+      final offer = data['available'] != true
+          ? null
+          : PezeshaLoanOffer.fromMap(
+              Map<String, dynamic>.from(data['offer'] as Map),
+            );
+      _offerCache[ownerType] = offer;
+      return offer;
+    } on FirebaseFunctionsException catch (e) {
+      throw PezeshaException(_friendlyError(e));
+    }
+  }
+
   /// Applies for a loan. loanType decides whose limit is used and where
   /// the money lands (see pezesha.ts header comment):
   ///   - 'vendor_stock': vendor is borrower + disbursement target
@@ -164,8 +256,8 @@ class PezeshaService {
           .call({
             'loanType': loanType,
             'amount': amount,
-            if (targetVendorId != null) 'targetVendorId': targetVendorId!,
-            if (orderId != null) 'orderId': orderId!,
+            'targetVendorId': ?targetVendorId,
+            'orderId': ?orderId,
           });
       final ownerType = loanType == 'vendor_stock' ? 'vendor' : 'customer';
       _offerCache.remove(ownerType);
