@@ -372,6 +372,36 @@ class FirestoreService {
       // before createOrder is called (loan approval happens first,
       // via PezeshaService.applyLoan / BnplCheckoutOption.onApproved).
       'loanId': order.loanId,
+      // ── Flexible payment: A MESSAGE TO THE VENDOR, NOT A LEDGER ──
+      // What the customer was SHOWN at checkout when they opted into
+      // this vendor's own published terms, frozen here so both sides
+      // are looking at the same numbers instead of two different
+      // recollections. The vendor app renders these; nothing else
+      // consumes them.
+      //
+      // Nothing reads these back to compute an outstanding balance.
+      // No scheduled function watches partialDueBy. There is
+      // deliberately no `partialSettled`/`partialPaidAt` written here
+      // or anywhere else, and the orders security rules permit neither
+      // party to write one — how and when the vendor actually collects
+      // is between the vendor and their customer, and the moment
+      // MobiGas records that, it is the ledger for a debt it is not
+      // party to. See the OrderModel.partialPayment block.
+      //
+      // All five are on coreFieldsUnchanged() in firestore.rules, so
+      // neither side can rewrite them once the order exists — a vendor
+      // cannot raise the balance after delivery, and a customer cannot
+      // lower the upfront figure the vendor was shown.
+      'partialPayment': order.partialPayment,
+      'partialUpfront': order.partialUpfront,
+      'partialBalance': order.partialBalance,
+      // Timestamp, not DateTime — Firestore stores the latter as a
+      // Timestamp anyway, but being explicit keeps this symmetrical
+      // with the `as Timestamp?` read in orderFromMap below.
+      'partialDueBy': order.partialDueBy == null
+          ? null
+          : Timestamp.fromDate(order.partialDueBy!),
+      'partialTerms': order.partialTerms,
       'pin': order.pin,
       'status': order.status.name,
       'riderName': order.riderName,
@@ -518,6 +548,16 @@ class FirestoreService {
       // placed today cost. Feeds OrderModel.customerTotal.
       deliveryFee: (data['deliveryFee'] ?? 0).toDouble(),
       loanId: data['loanId'],
+      // Flexible payment — false/0/null/'' for every order where the
+      // customer didn't opt in, and for every order predating the
+      // feature. Read back only so the vendor app can show the
+      // customer what they were shown; see createOrder above for why
+      // there is nothing here about whether any of it was paid.
+      partialPayment: data['partialPayment'] ?? false,
+      partialUpfront: (data['partialUpfront'] ?? 0).toDouble(),
+      partialBalance: (data['partialBalance'] ?? 0).toDouble(),
+      partialDueBy: (data['partialDueBy'] as Timestamp?)?.toDate(),
+      partialTerms: data['partialTerms'] ?? '',
       cancelledBy: data['cancelledBy'],
       pin: data['pin'] ?? '',
       status: OrderStatus.values.firstWhere(

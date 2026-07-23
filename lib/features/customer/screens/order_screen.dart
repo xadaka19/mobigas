@@ -27,6 +27,25 @@ class _OrderScreenState extends State<OrderScreen> {
   VendorModel? _selectedVendor;
   GasListing? _selectedListing;
 
+  /// The customer has ticked this vendor's flexible-payment option.
+  /// Off by default and reset by every selection change below — an
+  /// arrangement is with a SPECIFIC vendor on SPECIFIC terms, so it
+  /// cannot survive switching vendor, size, brand or product.
+  bool _usePartialPayment = false;
+
+  /// The split FROZEN at the moment the customer ticked the box.
+  ///
+  /// partialPaymentSplitFor() derives its due date from DateTime.now(),
+  /// so calling it again on the next rebuild yields a slightly later
+  /// date. Capturing it once means the figures stored on the order are
+  /// exactly the figures the customer was looking at when they agreed
+  /// to them, rather than whatever the arithmetic happened to produce
+  /// milliseconds before the write. Null while un-ticked, and null even
+  /// when ticked if the vendor publishes free-text terms rather than a
+  /// preset — there is nothing to compute in that case, and
+  /// partialPaymentNote carries the whole arrangement instead.
+  PartialPaymentSplit? _agreedSplit;
+
   // BNPL: generate the order id up front so the SAME id is attached
   // to the Pezesha loan at apply time and to the order at create
   // time — the loan's orderId must match the order that ends up
@@ -55,6 +74,13 @@ class _OrderScreenState extends State<OrderScreen> {
 
   bool get _isRefill => _selectedType == GasProductType.refill;
 
+  /// Clears any flexible-payment opt-in. Called from every selection
+  /// change — see _usePartialPayment's comment.
+  void _clearPartialPayment() {
+    _usePartialPayment = false;
+    _agreedSplit = null;
+  }
+
   void _selectType(GasProductType type) {
     setState(() {
       _selectedType = type;
@@ -62,6 +88,7 @@ class _OrderScreenState extends State<OrderScreen> {
       _selectedBrand = null;
       _selectedVendor = null;
       _selectedListing = null;
+      _clearPartialPayment();
     });
   }
 
@@ -71,6 +98,7 @@ class _OrderScreenState extends State<OrderScreen> {
       _selectedBrand = null;
       _selectedVendor = null;
       _selectedListing = null;
+      _clearPartialPayment();
     });
   }
 
@@ -79,6 +107,7 @@ class _OrderScreenState extends State<OrderScreen> {
       _selectedBrand = brand;
       _selectedVendor = null;
       _selectedListing = null;
+      _clearPartialPayment();
     });
   }
 
@@ -86,6 +115,17 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() {
       _selectedVendor = vendor;
       _selectedListing = listing;
+      _clearPartialPayment();
+    });
+  }
+
+  /// Ticking the flexible-payment box. Captures the split as shown at
+  /// this instant (see _agreedSplit) so what gets stored on the order
+  /// is what the customer actually read.
+  void _setPartialPayment(bool on, VendorModel vendor) {
+    setState(() {
+      _usePartialPayment = on;
+      _agreedSplit = on ? vendor.partialPaymentSplitFor(_orderTotal) : null;
     });
   }
 
@@ -139,6 +179,14 @@ class _OrderScreenState extends State<OrderScreen> {
       listing: _selectedListing!,
       paymentMethod: PaymentMethod.cash,
       orderId: _orderId,
+      // Passes the customer's choice and the exact figures they were
+      // shown through to the order, so the vendor sees the same thing
+      // before their rider sets off. MobiGas records what was
+      // displayed and nothing about whether it gets paid — see
+      // OrderProvider.placeOrder.
+      partialPayment: _usePartialPayment,
+      partialSplit: _agreedSplit,
+      partialTerms: _selectedVendor!.partialPaymentNote,
     );
 
     if (!mounted) return;
@@ -154,6 +202,11 @@ class _OrderScreenState extends State<OrderScreen> {
   /// (loanId in hand); create the order as bnpl with that loanId and
   /// the SAME _orderId the loan was applied against, then go to
   /// tracking — mirroring the cash path's tail.
+  ///
+  /// No flexible-payment fields here on purpose: Pezesha has already
+  /// paid the vendor in full, so there is no balance to arrange with
+  /// them. The BNPL section is also hidden once the customer ticks the
+  /// flexible-payment box, so the two can't be chosen together.
   Future<void> _placeBnplOrder(String loanId) async {
     final auth = context.read<AuthProvider>();
     final orders = context.read<OrderProvider>();
@@ -199,6 +252,16 @@ class _OrderScreenState extends State<OrderScreen> {
   /// should be computed against rather than the gas price alone.
   double get _orderTotal => _gasPrice + (_selectedVendor?.effectiveDeliveryFee ?? 0);
 
+  /// The selected vendor's flat delivery fee, and whether we actually
+  /// know what it is. deliveryPreferenceSet is the tri-state guard (see
+  /// VendorModel): a vendor who has never answered the delivery
+  /// question is NOT the same as one who chose free delivery, so the
+  /// checkout shows no delivery line at all for them rather than
+  /// promising free delivery on their behalf. effectiveDeliveryFee
+  /// returns 0 in both of those cases, which keeps _orderTotal honest.
+  bool get _deliveryFeeKnown => _selectedVendor?.deliveryPreferenceSet ?? false;
+  double get _deliveryFee => _selectedVendor?.effectiveDeliveryFee ?? 0;
+
   /// Currency follows the vendor being ordered from — set once at
   /// vendor onboarding from GPS, not a customer preference.
   String get _vendorCountry => _selectedVendor?.country ?? 'KE';
@@ -206,10 +269,10 @@ class _OrderScreenState extends State<OrderScreen> {
   /// Whether this customer has ordered from the selected vendor before.
   /// Only used to decide whether a vendor's flexible-payment note shows
   /// in full or greyed-out (when the vendor set partialRepeatOnly). It
-  /// gates the NOTE, never the order — a first-timer always orders at
-  /// full price regardless. "Before" counts any non-cancelled prior
-  /// order with this vendor; MobiGas isn't judging repayment, just
-  /// whether they're a returning customer.
+  /// gates the NOTE and the opt-in, never the order — a first-timer
+  /// always orders at full price regardless. "Before" counts any
+  /// non-cancelled prior order with this vendor; MobiGas isn't judging
+  /// repayment, just whether they're a returning customer.
   bool _hasOrderedFromSelectedVendor(OrderProvider orders) {
     final vid = _selectedVendor?.id;
     if (vid == null) return false;
@@ -865,10 +928,23 @@ class _OrderScreenState extends State<OrderScreen> {
               _feeRow(
                   '${_shortTypeLabel(_selectedListing?.productType ?? GasProductType.refill)} (${_selectedListing?.size})',
                   Currency.formatFor(_vendorCountry, _gasPrice)),
-              _feeRow('Extra fees', Currency.formatFor(_vendorCountry, 0)),
+              // BUG FIX: this row was hardcoded to "Extra fees 0" and
+              // the total below it to the gas price alone, so a vendor
+              // who charges for delivery had their fee silently dropped
+              // from checkout — while OrderModel.customerTotal (gas +
+              // delivery) and the flexible-payment split (computed on
+              // _orderTotal) both included it. Checkout said 1,100, the
+              // split said 575 + 575, and the order tile afterwards said
+              // 1,150. All three now read off _orderTotal.
+              if (_deliveryFeeKnown)
+                _feeRow(
+                    'Delivery',
+                    _deliveryFee > 0
+                        ? Currency.formatFor(_vendorCountry, _deliveryFee)
+                        : 'Free'),
               const Divider(height: 20, color: Colors.white24),
               _feeRow('Total to pay vendor',
-                  Currency.formatFor(_vendorCountry, _gasPrice),
+                  Currency.formatFor(_vendorCountry, _orderTotal),
                   isBold: true, valueColor: AppColors.orange),
             ],
           ),
@@ -911,7 +987,15 @@ class _OrderScreenState extends State<OrderScreen> {
         // "Check my limit" on the home card. BnplCheckoutSection does
         // not register here, so a customer who never opened that card
         // sees cash only. Renders nothing when there is no offer.
-        if (PezeshaConfig.isAvailableFor(_vendorCountry) &&
+        //
+        // Hidden entirely once the customer has ticked flexible
+        // payment: taking a Pezesha loan for an order they have just
+        // arranged to split with the vendor is the one combination
+        // nobody wants, and OrderProvider.placeOrder would drop the
+        // arrangement anyway (Pezesha pays the vendor in full, so
+        // there is no balance left to arrange).
+        if (!_usePartialPayment &&
+            PezeshaConfig.isAvailableFor(_vendorCountry) &&
             _selectedVendor != null &&
             _selectedListing != null)
           BnplCheckoutSection(
@@ -925,22 +1009,32 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
-  /// The selected vendor's flexible-payment terms. Shows an exact
-  /// computed split ("Pay X now, Y due by `<date>`") when the vendor
-  /// picked a structured preset, or falls back to their free-text
-  /// note verbatim when they wrote Custom terms — or when the vendor
-  /// is greyed out for a first-time customer under partialRepeatOnly.
-  /// Renders nothing when the vendor isn't offering flexible payment
-  /// at all. This is a NOTICEBOARD: MobiGas computes the arithmetic so
-  /// the customer sees a concrete number, but states plainly it isn't
-  /// part of the arrangement, sets no terms, and tracks no balance —
-  /// it never blocks the order, which is always payable in full above.
+  /// The selected vendor's flexible-payment terms, and the switch that
+  /// lets the customer say they intend to use them.
+  ///
+  /// Shows an exact computed split ("Pay X now, Y due by `<date>`")
+  /// when the vendor picked a structured preset, or falls back to their
+  /// free-text note verbatim when they wrote Custom terms — or greys
+  /// out entirely for a first-time customer under partialRepeatOnly.
+  /// Renders nothing when the vendor isn't offering flexible payment.
+  ///
+  /// Ticking the switch does exactly one thing: it records on the order
+  /// that the customer intends to take the vendor up on this, along
+  /// with the figures they were shown, so the vendor learns about it at
+  /// order time instead of at the door. MobiGas computes the arithmetic
+  /// and passes it on. It does not hold the money, split the payment,
+  /// track a balance, chase a due date, or take any position on whether
+  /// the arrangement is honoured — that is between the customer and the
+  /// vendor. The order is never blocked either way, and remains payable
+  /// in full at the total shown above.
   Widget _buildFlexiblePaymentNote() {
     final vendor = _selectedVendor;
     if (vendor == null || !vendor.acceptsPartialPayment) {
       return const SizedBox.shrink();
     }
-    final split = vendor.partialPaymentSplitFor(_orderTotal);
+    // Once ticked, show the FROZEN split rather than recomputing — the
+    // customer should keep seeing the same due date they agreed to.
+    final split = _agreedSplit ?? vendor.partialPaymentSplitFor(_orderTotal);
     final hasNote = vendor.partialPaymentNote.trim().isNotEmpty;
     if (split == null && !hasNote) {
       return const SizedBox.shrink();
@@ -957,7 +1051,10 @@ class _OrderScreenState extends State<OrderScreen> {
       decoration: BoxDecoration(
         color: AppColors.orange.withValues(alpha: gated ? 0.04 : 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.orange.withValues(alpha: 0.25)),
+        border: Border.all(
+            color: AppColors.orange
+                .withValues(alpha: _usePartialPayment ? 0.6 : 0.25),
+            width: _usePartialPayment ? 2 : 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1024,10 +1121,43 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
             ),
           if (!gated) ...[
+            const SizedBox(height: 12),
+            // THE OPT-IN. Without it nothing anywhere knows the
+            // customer intends to use these terms, and the vendor's
+            // rider turns up expecting the full amount.
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 2, 4, 2),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: AppColors.orange.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'I\'ll arrange this with the vendor',
+                      style:
+                          Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: AppColors.navy,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                    ),
+                  ),
+                  Switch(
+                    value: _usePartialPayment,
+                    activeTrackColor: AppColors.orange,
+                    onChanged: (v) => _setPartialPayment(v, vendor),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
-              'Arrange this directly with the vendor. MobiGas isn\'t part of '
-              'the arrangement and doesn\'t track any balance.',
+              'MobiGas passes this to the vendor but isn\'t party to the '
+              'arrangement and won\'t collect or chase the balance.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppColors.gray400,
                     fontSize: 10.5,
@@ -1129,7 +1259,11 @@ class _OrderScreenState extends State<OrderScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    _summaryRow('Payment', 'Cash / ${MobileMoney.primaryLabelFor(_vendorCountry)} on delivery'),
+                    _summaryRow(
+                        'Payment',
+                        _usePartialPayment
+                            ? 'Flexible payment with vendor'
+                            : 'Cash / ${MobileMoney.primaryLabelFor(_vendorCountry)} on delivery'),
                     _summaryRow(
                         'Product',
                         _shortTypeLabel(_selectedListing?.productType ??
@@ -1139,9 +1273,42 @@ class _OrderScreenState extends State<OrderScreen> {
                       _summaryRow('Brand', _selectedListing!.brand),
                     _summaryRow('Vendor', _selectedVendor?.businessName ?? ''),
                     const Divider(height: 24, color: AppColors.gray200),
-                    _summaryRow('Pay vendor on delivery',
-                        Currency.formatFor(_vendorCountry, _gasPrice),
+                    // Break the total out into gas + delivery only when
+                    // there IS a delivery fee — otherwise the single
+                    // total line is the whole story and an extra two
+                    // rows just add noise.
+                    if (_deliveryFee > 0) ...[
+                      _summaryRow('Gas price',
+                          Currency.formatFor(_vendorCountry, _gasPrice)),
+                      _summaryRow('Delivery',
+                          Currency.formatFor(_vendorCountry, _deliveryFee)),
+                    ] else if (_deliveryFeeKnown)
+                      _summaryRow('Delivery', 'Free'),
+                    // The order is worth the same either way — a
+                    // flexible arrangement changes when the customer
+                    // hands it over, not what it costs. Only the label
+                    // changes, so the total never reads as an amount
+                    // due at the door when it isn't.
+                    _summaryRow(
+                        _usePartialPayment
+                            ? 'Order total'
+                            : 'Pay vendor on delivery',
+                        Currency.formatFor(_vendorCountry, _orderTotal),
                         isBold: true, valueColor: AppColors.orange),
+                    // The arrangement the customer ticked, restated
+                    // where they're reviewing the order — the figures
+                    // they agreed to, not a second total.
+                    if (_usePartialPayment && _agreedSplit != null) ...[
+                      const Divider(height: 24, color: AppColors.gray200),
+                      _summaryRow(
+                          'Paying now',
+                          Currency.formatFor(
+                              _vendorCountry, _agreedSplit!.upfrontAmount)),
+                      _summaryRow(
+                          'Balance by ${_formatDate(_agreedSplit!.dueDate)}',
+                          Currency.formatFor(
+                              _vendorCountry, _agreedSplit!.balanceAmount)),
+                    ],
                     const Divider(height: 24, color: AppColors.gray200),
                     _summaryRow('Delivery to',
                         '${customer?.estate ?? ''}, ${customer?.area ?? ''}'),
@@ -1154,11 +1321,19 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        _infoCard(
-          icon: Icons.payments_outlined,
-          text:
-              'Have ${Currency.formatFor(_vendorCountry, _gasPrice)} ready (cash or ${MobileMoney.primaryLabelFor(_vendorCountry)} to the vendor). Only share your delivery PIN after you receive and pay for your gas.',
-        ),
+        if (_usePartialPayment)
+          _infoCard(
+            icon: Icons.handshake_outlined,
+            text: _agreedSplit != null
+                ? 'You\'ve chosen ${_selectedVendor?.businessName}\'s flexible payment — have ${Currency.formatFor(_vendorCountry, _agreedSplit!.upfrontAmount)} ready and settle the balance with them directly. We\'ll let them know before they set off. Only share your delivery PIN after you receive your gas.'
+                : 'You\'ve chosen ${_selectedVendor?.businessName}\'s flexible payment — settle it with them directly on their own terms. We\'ll let them know before they set off. Only share your delivery PIN after you receive your gas.',
+          )
+        else
+          _infoCard(
+            icon: Icons.payments_outlined,
+            text:
+                'Have ${Currency.formatFor(_vendorCountry, _orderTotal)} ready (cash or ${MobileMoney.primaryLabelFor(_vendorCountry)} to the vendor). Only share your delivery PIN after you receive and pay for your gas.',
+          ),
         if (_isRefill) ...[
           const SizedBox(height: 16),
           Container(
@@ -1215,10 +1390,16 @@ class _OrderScreenState extends State<OrderScreen> {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Text(label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.gray600,
-                  )),
+          // Flexible rather than a bare Text: the "Balance by
+          // dd/MM/yyyy" label is long enough to overflow beside its
+          // value on a narrow screen.
+          Flexible(
+            child: Text(label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.gray600,
+                    ),
+                overflow: TextOverflow.ellipsis),
+          ),
           const Spacer(),
           Flexible(
             child: Text(value,
@@ -1271,18 +1452,54 @@ class _OrderScreenState extends State<OrderScreen> {
                   ?.copyWith(color: AppColors.navy)),
           const SizedBox(height: 8),
           Text(
-              '${_selectedListing?.size} $typeLabel · ${Currency.formatFor(_vendorCountry, _gasPrice)} cash on delivery',
+              _usePartialPayment
+                  ? '${_selectedListing?.size} $typeLabel · ${Currency.formatFor(_vendorCountry, _orderTotal)} total'
+                  : '${_selectedListing?.size} $typeLabel · ${Currency.formatFor(_vendorCountry, _orderTotal)} cash on delivery',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
                   ?.copyWith(color: AppColors.gray600)),
+          if (_deliveryFee > 0) ...[
+            const SizedBox(height: 2),
+            Text(
+                'incl. ${Currency.formatFor(_vendorCountry, _deliveryFee)} delivery',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray400,
+                      fontSize: 11,
+                    )),
+          ],
           const SizedBox(height: 4),
           Text('from ${_selectedVendor?.businessName}',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.orange,
                     fontWeight: FontWeight.w600,
                   )),
+          if (_usePartialPayment) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: AppColors.orange.withValues(alpha: 0.25)),
+              ),
+              child: Text(
+                _agreedSplit != null
+                    ? 'Flexible payment: ${Currency.formatFor(_vendorCountry, _agreedSplit!.upfrontAmount)} now, balance ${Currency.formatFor(_vendorCountry, _agreedSplit!.balanceAmount)} by ${_formatDate(_agreedSplit!.dueDate)} — arranged directly with the vendor.'
+                    : 'Flexible payment — arranged directly with the vendor on their own terms.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.orangeDeep,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: isLoading ? null : _placeOrder,

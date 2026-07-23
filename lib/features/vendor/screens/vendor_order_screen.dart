@@ -49,10 +49,38 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
 
   bool get _isRefill =>
       widget.order.listing.productType == GasProductType.refill;
-  // Already includes the currency symbol for the order's country —
-  // every use site below just interpolates $_amount directly.
+
+  // BUG FIX: this was `widget.order.listing.price` — the GAS price,
+  // not what the customer owes. On an order from a vendor who charges
+  // for delivery, the customer is billed listing.price + deliveryFee
+  // (OrderModel.customerTotal, which is exactly what the customer app
+  // shows them at checkout and on their order tile), while every use
+  // site below — the header badge, "You receive", the Arrived screen,
+  // the completion screen, and worst of all the SMS/WhatsApp message
+  // handed to the rider — quoted the gas price alone. A KSh 50
+  // delivery fee meant the rider knocked on the door asking for KSh 50
+  // less than the customer was expecting to pay, every single time.
+  //
+  // customerTotal is deliberately NOT reduced when the customer has
+  // arranged flexible payment with this vendor: the order is worth what
+  // it is worth, and how it gets paid is the vendor's own arrangement.
+  // See _partialPaymentNotice below.
   String get _amount =>
+      Currency.formatFor(widget.order.country, widget.order.customerTotal);
+
+  /// The gas price on its own, and the delivery fee on its own — shown
+  /// as a breakdown wherever the vendor benefits from seeing why the
+  /// total is what it is. Only rendered when there IS a delivery fee;
+  /// a two-line breakdown of "gas + 0" is noise.
+  String get _gasAmount =>
       Currency.formatFor(widget.order.country, widget.order.listing.price);
+  String get _deliveryAmount =>
+      Currency.formatFor(widget.order.country, widget.order.deliveryFee);
+  bool get _hasDeliveryFee => widget.order.deliveryFee > 0;
+
+  /// dd/MM/yyyy, matching the format the customer saw at checkout.
+  String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
   @override
   void initState() {
@@ -251,25 +279,49 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
   /// Builds the rider handoff message — shared by SMS and WhatsApp.
   /// Riders aren't MobiGas app users, so this pre-fills the vendor's
   /// own SMS/WhatsApp with everything the rider needs: address,
-  /// directions, what to collect, and the live-tracking link.
+  /// directions, what the order is worth, and the live-tracking link.
+  ///
+  /// On a flexible-payment order this message deliberately does NOT
+  /// tell the rider a figure to collect. MobiGas does not know what the
+  /// vendor and customer settled on, is not party to it, and has no
+  /// business instructing someone else's rider on debt collection. It
+  /// states the order's value, notes that the customer asked for the
+  /// vendor's own flexible terms, and hands the decision back to the
+  /// vendor — who is the one sending this message in the first place
+  /// and can add whatever instruction they actually want.
   String _riderMessageBody() {
     final mapsLink = (_customerLat != null && _customerLng != null)
         ? 'https://www.google.com/maps/dir/?api=1&destination=$_customerLat,$_customerLng&travelmode=driving'
         : null;
-    final l = widget.order.listing;
+    final o = widget.order;
+    final l = o.listing;
     final item = l.brand.isNotEmpty
         ? '${l.brand} · ${l.size} ${l.productType.label}'
         : '${l.size} ${l.productType.label}';
     final body = StringBuffer()
-      ..writeln('MobiGas delivery for ${widget.order.customerName}');
-    if (widget.order.customerPhone.isNotEmpty) {
-      body.writeln('Customer phone: ${widget.order.customerPhone}');
+      ..writeln('MobiGas delivery for ${o.customerName}');
+    if (o.customerPhone.isNotEmpty) {
+      body.writeln('Customer phone: ${o.customerPhone}');
     }
     body
-      ..writeln('Deliver to: ${widget.order.customerArea}')
-      ..writeln('Item: $item')
-      ..write(
-          'Payment: customer pays $_amount (cash or mobile money to the vendor). Confirm payment is received before taking the PIN.');
+      ..writeln('Deliver to: ${o.customerArea}')
+      ..writeln('Item: $item');
+    if (_hasDeliveryFee) {
+      body.writeln('Order value: $_amount ($_gasAmount gas + '
+          '$_deliveryAmount delivery)');
+    } else {
+      body.writeln('Order value: $_amount');
+    }
+    if (o.partialPayment) {
+      body.write(
+          'NOTE: the customer asked to use your flexible payment terms on '
+          'this order. Collect whatever you have agreed with them, then '
+          'take the PIN.');
+    } else {
+      body.write(
+          'Payment: customer pays $_amount (cash or mobile money to the '
+          'vendor). Confirm payment is received before taking the PIN.');
+    }
     // ONE link, one instruction. The tracking page has the map AND a
     // "Navigate with Google Maps" button built in — sending a
     // separate raw Maps link alongside it just invites the rider to
@@ -398,7 +450,9 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
           ),
         ]),
         content: Text(
-            '${rider.isNotEmpty ? rider : 'Your rider'} is at ${widget.order.customerName}\'s location. Confirm payment is received, then move to the Arrived step to enter the PIN.',
+            widget.order.partialPayment
+                ? '${rider.isNotEmpty ? rider : 'Your rider'} is at ${widget.order.customerName}\'s location. Once you\'re satisfied with what was collected, move to the Arrived step to enter the PIN.'
+                : '${rider.isNotEmpty ? rider : 'Your rider'} is at ${widget.order.customerName}\'s location. Confirm payment is received, then move to the Arrived step to enter the PIN.',
             style: Theme.of(ctx)
                 .textTheme
                 .bodyMedium
@@ -713,6 +767,106 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
     }
   }
 
+  /// The customer opted into THIS VENDOR'S OWN published flexible-payment
+  /// terms at checkout. This box tells the vendor that, and shows the
+  /// exact figures the customer was shown, so both sides are looking at
+  /// the same numbers instead of two different recollections.
+  ///
+  /// That is the entire job. It is deliberately NOT a collection
+  /// instruction: it does not say "collect X", it does not appear in the
+  /// order's value anywhere, and there is no control here or anywhere
+  /// else to mark a balance received. MobiGas is not party to the
+  /// arrangement and does not track it — how and when the vendor
+  /// collects is between the vendor and their customer, and the vendor
+  /// is the only one who knows what they actually settled on.
+  ///
+  /// Renders nothing on a normal order.
+  Widget _partialPaymentNotice() {
+    final o = widget.order;
+    if (!o.partialPayment) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border:
+            Border.all(color: AppColors.warning.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.handshake_outlined,
+                color: AppColors.warning, size: 18),
+            const SizedBox(width: 8),
+            Text('Customer chose your flexible payment',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.warning,
+                      fontWeight: FontWeight.w700,
+                    )),
+          ]),
+          const SizedBox(height: 10),
+          if (o.hasPartialFigures)
+            Text(
+              'At checkout they were shown: pay '
+              '${Currency.formatFor(o.country, o.partialUpfront)} now, '
+              'balance of '
+              '${Currency.formatFor(o.country, o.partialBalance)}'
+              '${o.partialDueBy != null ? ' by ${_formatDate(o.partialDueBy!)}' : ''}.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w600,
+                    height: 1.45,
+                  ),
+            )
+          else if (o.partialTerms.trim().isNotEmpty)
+            Text(
+              'At checkout they were shown your terms: '
+              '"${o.partialTerms.trim()}"',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w600,
+                    height: 1.45,
+                  ),
+            )
+          else
+            Text(
+              'They asked to use the flexible payment terms on your '
+              'profile for this order.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w600,
+                    height: 1.45,
+                  ),
+            ),
+          if (o.hasPartialFigures && o.partialTerms.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('(${o.partialTerms.trim()})',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray400,
+                      fontSize: 11,
+                      height: 1.4,
+                    )),
+          ],
+          const SizedBox(height: 10),
+          Text(
+            'This order is still worth $_amount. What you collect at the '
+            'door, and when you collect the rest, is between you and your '
+            'customer — MobiGas is only passing on what they were shown, '
+            'and doesn\'t hold, split, or keep track of any of it.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.gray400,
+                  height: 1.45,
+                  fontSize: 11.5,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── STEP 1: PREPARE ──────────────────────────────────────────────
   Widget _buildPrepare() {
     return Column(
@@ -780,13 +934,27 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               widget.order.listing.brand.isNotEmpty
                   ? '${widget.order.listing.brand} · ${widget.order.listing.size} · ${widget.order.listing.productType.label}'
                   : '${widget.order.listing.size} · ${widget.order.listing.productType.label}'),
+          // Break the total down only when there IS a delivery fee —
+          // the vendor should be able to see why the figure below is
+          // more than their listed gas price, without three rows of
+          // arithmetic on every free-delivery order.
+          if (_hasDeliveryFee) ...[
+            _divider(),
+            _row(Icons.sell_outlined, 'Gas price', _gasAmount),
+            _divider(),
+            _row(Icons.local_shipping_outlined, 'Your delivery fee',
+                _deliveryAmount),
+          ],
           _divider(),
-          _row(Icons.payments_rounded, 'You receive',
+          _row(Icons.payments_rounded, 'Order value',
               '$_amount from customer on delivery'),
         ])),
         const SizedBox(height: 16),
-        _infoBox(Icons.payments_rounded,
-            'Confirm payment of $_amount is received (cash or mobile money to you) before the customer shares the PIN — the PIN completes the delivery.'),
+        if (widget.order.partialPayment)
+          _partialPaymentNotice()
+        else
+          _infoBox(Icons.payments_rounded,
+              'Confirm payment of $_amount is received (cash or mobile money to you) before the customer shares the PIN — the PIN completes the delivery.'),
         const SizedBox(height: 20),
         // Rider assignment
         _card(child: Column(
@@ -848,7 +1016,10 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                 ),
               ]),
               const SizedBox(height: 4),
-              Text('Send the delivery details to your rider',
+              Text(
+                  widget.order.partialPayment
+                      ? 'Send the delivery details to your rider — the message notes the flexible payment but leaves the amount to you'
+                      : 'Send the delivery details to your rider',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppColors.gray400, fontSize: 11)),
             ],
@@ -996,8 +1167,12 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                   ? '${widget.order.listing.brand} · ${widget.order.listing.size}'
                   : widget.order.listing.size),
           _divider(),
-          _row(Icons.payments_rounded, 'Payment',
-              '$_amount — confirm received before PIN'),
+          _row(
+              Icons.payments_rounded,
+              'Order value',
+              widget.order.partialPayment
+                  ? '$_amount — flexible payment arranged'
+                  : '$_amount — confirm received before PIN'),
           // BUG FIX: rider info was captured on the Prepare step and
           // then never shown again anywhere — the vendor had no way
           // to confirm who they'd actually assigned.
@@ -1007,6 +1182,10 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                 '${_riderNameController.text.trim()} · ${_riderPhoneController.text.trim()}'),
           ],
         ])),
+        if (widget.order.partialPayment) ...[
+          const SizedBox(height: 16),
+          _partialPaymentNotice(),
+        ],
         const SizedBox(height: 16),
         // Live map
         if (_vendorLat != null)
@@ -1105,8 +1284,16 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               textAlign: TextAlign.center),
         ])),
         const SizedBox(height: 16),
-        _infoBox(Icons.payments_rounded,
-            'Confirm payment of $_amount is received (cash or mobile money to you) FIRST — the customer\'s PIN completes the delivery.'),
+        // On a flexible-payment order MobiGas has no business telling
+        // the vendor that a specific amount must be in hand before the
+        // PIN — it doesn't know what they agreed. The PIN still means
+        // exactly what it always meant (the customer confirming they
+        // received their gas); when to ask for it is the vendor's call.
+        if (widget.order.partialPayment)
+          _partialPaymentNotice()
+        else
+          _infoBox(Icons.payments_rounded,
+              'Confirm payment of $_amount is received (cash or mobile money to you) FIRST — the customer\'s PIN completes the delivery.'),
         if (_isRefill) ...[
           const SizedBox(height: 12),
           _infoBox(Icons.swap_horiz_rounded,
@@ -1163,8 +1350,12 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
             const CircularProgressIndicator(color: AppColors.orange),
           ],
           const SizedBox(height: 12),
-          _row(Icons.payments_rounded, 'You collected',
-              '$_amount from customer'),
+          _row(
+              Icons.payments_rounded,
+              'Order value',
+              widget.order.partialPayment
+                  ? '$_amount — paid by your arrangement'
+                  : '$_amount from customer'),
         ])),
       ],
     );
@@ -1218,7 +1409,14 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
                           fontSize: 24,
                         ),
                   ),
-                  Text('Collected from the customer on delivery',
+                  // "Collected" would be a claim MobiGas can't make on a
+                  // flexible-payment order — it has no idea what actually
+                  // changed hands at the door, and saying so would imply
+                  // it was watching.
+                  Text(
+                      widget.order.partialPayment
+                          ? 'Order value — settled by your own arrangement with the customer'
+                          : 'Collected from the customer on delivery',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -1227,6 +1425,13 @@ class _VendorOrderScreenState extends State<VendorOrderScreen> {
               ),
             ),
           ]),
+          if (_hasDeliveryFee) ...[
+            _divider(),
+            _row(Icons.sell_outlined, 'Gas price', _gasAmount),
+            _divider(),
+            _row(Icons.local_shipping_outlined, 'Your delivery fee',
+                _deliveryAmount),
+          ],
           _divider(),
           _row(Icons.receipt_outlined, 'Order', widget.order.orderId),
           _divider(),

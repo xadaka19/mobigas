@@ -96,9 +96,20 @@ class OrderProvider extends ChangeNotifier {
   /// order share one id. When null a fresh id is generated here,
   /// preserving the old behaviour for cash callers that don't pass one.
   ///
+  /// [partialPayment], [partialSplit] and [partialTerms] record that the
+  /// customer opted into the VENDOR'S OWN published flexible-payment
+  /// terms at checkout, and carry the exact figures they were shown.
+  /// This is a message passed to the vendor so both sides see the same
+  /// numbers — not an instruction and not a debt MobiGas is recording.
+  /// Nothing here tracks whether any of it is paid; see the
+  /// OrderModel.partialPayment block for why there is no settlement
+  /// field anywhere in this codebase.
+  ///
   /// The 1% customer-finder fee still accrues on delivery
-  /// (confirmDelivery) for BOTH payment methods — financing changes who
-  /// the customer pays, not whether the vendor owes the platform fee.
+  /// (confirmDelivery) for BOTH payment methods, and is unaffected by a
+  /// flexible-payment arrangement — the vendor sold the same goods for
+  /// the same price, whatever they and the customer agreed about when
+  /// it changes hands. It is computed from listing.price as always.
   Future<void> placeOrder({
     required CustomerModel customer,
     required VendorModel vendor,
@@ -106,10 +117,27 @@ class OrderProvider extends ChangeNotifier {
     required PaymentMethod paymentMethod,
     String? orderId,
     String? loanId,
+    bool partialPayment = false,
+    PartialPaymentSplit? partialSplit,
+    String? partialTerms,
   }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
+
+    // bnpl and flexible payment are mutually exclusive, and the guard
+    // belongs here rather than only in the UI. On a bnpl order Pezesha
+    // has ALREADY paid the vendor the full amount at order time — there
+    // is no balance left for the customer to arrange with them, and a
+    // vendor shown "customer will pay you half now" on an order they
+    // have already been paid in full for would be actively misled.
+    //
+    // Belt and braces with the security rule: firestore.rules rejects a
+    // create where partialPayment is true against a vendor who doesn't
+    // offer it, and this rejects it against a payment method that can't
+    // have it.
+    final isPartial =
+        partialPayment && paymentMethod == PaymentMethod.cash;
 
     try {
       final order = OrderModel(
@@ -138,6 +166,9 @@ class OrderProvider extends ChangeNotifier {
         // GasListing.cashFinderFee): the delivery fee below is
         // deliberately outside it, because 1% is a cut of goods sold,
         // not of the vendor's cost to get the cylinder to the door.
+        // A flexible-payment arrangement doesn't touch it either — the
+        // sale happened at full price regardless of when the vendor
+        // collects it.
         finderFee: listing.cashFinderFee,
         // The vendor's flat delivery fee, read off their profile HERE
         // and frozen onto the order. effectiveDeliveryFee (not the raw
@@ -150,6 +181,18 @@ class OrderProvider extends ChangeNotifier {
         // Only a bnpl order carries a loan reference; a cash order
         // never does, even if a stray loanId were passed in.
         loanId: paymentMethod == PaymentMethod.bnpl ? loanId : null,
+        // What the customer was SHOWN at checkout, frozen. When the
+        // vendor publishes free-text terms instead of a preset there
+        // is no split to compute, so the amounts stay 0 and
+        // partialTerms carries the whole arrangement — the vendor app
+        // handles both shapes.
+        partialPayment: isPartial,
+        partialUpfront:
+            isPartial ? (partialSplit?.upfrontAmount ?? 0.0) : 0.0,
+        partialBalance:
+            isPartial ? (partialSplit?.balanceAmount ?? 0.0) : 0.0,
+        partialDueBy: isPartial ? partialSplit?.dueDate : null,
+        partialTerms: isPartial ? (partialTerms?.trim() ?? '') : '',
         pin: _generatePin(),
         status: OrderStatus.pending,
         createdAt: DateTime.now(),
@@ -160,7 +203,9 @@ class OrderProvider extends ChangeNotifier {
       // sends the push), so the client no longer writes FCM tokens or
       // notification fields onto the order — that update was being
       // rejected by the orders security rules and failing the whole
-      // placeOrder even though the order itself was created.
+      // placeOrder even though the order itself was created. That
+      // function is also what tells the vendor a flexible-payment
+      // arrangement was requested, before they accept.
       await FirestoreService.createOrder(order);
 
       _activeOrder = order;

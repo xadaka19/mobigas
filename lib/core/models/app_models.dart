@@ -94,6 +94,12 @@ extension GasProductTypeExt on GasProductType {
 // via getPezeshaLoanStatus/getPezeshaLoanHistory. Parsers still use
 // `orElse: () => PaymentMethod.cash`, so any legacy or unrecognized
 // Firestore value degrades to cash rather than throwing.
+//
+// A flexible-payment order is NOT a third value here and must never
+// become one. The customer still pays the vendor directly on
+// delivery — `cash` — they have simply arranged with that vendor to
+// do it in more than one instalment. See the OrderModel.partialPayment
+// block for why that distinction is load-bearing.
 enum PaymentMethod {
   cash, // Customer pays the vendor on delivery — cash or mobile money
   bnpl, // Pezesha pays the vendor; customer repays Pezesha directly
@@ -862,6 +868,74 @@ class OrderModel {
   /// are the source of truth if this ever needs reconciling).
   final String? loanId;
 
+  // ── Flexible payment: A MESSAGE, NOT A LEDGER ───────────────────
+  //
+  // The customer ticked the vendor's flexible-payment option at
+  // checkout. These five fields exist for ONE reason: so the vendor
+  // learns, at order time, that their customer intends to take them up
+  // on the terms the vendor themselves published — and so both sides
+  // are looking at the same numbers rather than two different
+  // recollections of them.
+  //
+  // What MobiGas does with them: shows them to the vendor, shows them
+  // to the customer, and stops.
+  //
+  // What MobiGas does NOT do, and what nothing here should ever be
+  // extended to do: hold the money, split the payment, tell a rider
+  // what to collect, compute what remains outstanding, remind anyone of
+  // a due date, mark a balance settled, or treat a missed balance as a
+  // default. HOW the vendor collects is between the vendor and the
+  // customer. There is deliberately no `partialSettled` /
+  // `partialPaidAt` / `balanceOutstanding` field here, and no security
+  // rule permitting one to be written (see the orders block in
+  // firestore.rules) — the moment one exists, MobiGas is the ledger for
+  // a debt it is not party to, and the disclaimer shown to the customer
+  // at checkout stops being true.
+  //
+  // Different thing entirely from PaymentMethod.bnpl, which IS a credit
+  // product — one Pezesha underwrites and collects and MobiGas merely
+  // introduces. paymentMethod stays `cash` on a flexible-payment order:
+  // the customer still pays the vendor directly, just not all at once.
+
+  /// The customer opted into this vendor's flexible-payment terms at
+  /// checkout. False for every order where they didn't, and for every
+  /// order placed before this field existed.
+  ///
+  /// Can only ever be true for a vendor whose own acceptsPartialPayment
+  /// is true — enforced at order-create time in firestore.rules rather
+  /// than only in the client, because the vendor app renders this as
+  /// something the vendor themselves offered.
+  final bool partialPayment;
+
+  /// The upfront figure the customer was shown when they opted in,
+  /// computed from the vendor's own preset against [customerTotal].
+  /// 0 when the vendor publishes free-text terms instead of a preset —
+  /// there is then no number to show, and [partialTerms] carries the
+  /// whole arrangement.
+  ///
+  /// A RECORD OF WHAT WAS DISPLAYED. Not an instruction, not an amount
+  /// due, not something to reconcile against.
+  final double partialUpfront;
+
+  /// The balance figure shown alongside [partialUpfront], on the same
+  /// terms and with the same caveat. 0 when there was no preset.
+  final double partialBalance;
+
+  /// The date the customer was shown for the balance, derived from the
+  /// vendor's own due-hours at order time. Null when there was no
+  /// preset, and for every order placed before this field existed.
+  ///
+  /// Nothing watches this date. No reminder fires from it, no status
+  /// changes because of it, and an order whose date has passed is not
+  /// overdue in any sense MobiGas recognises.
+  final DateTime? partialDueBy;
+
+  /// The vendor's own published note, verbatim as the customer read it
+  /// at checkout, frozen here so a vendor editing their profile next
+  /// week cannot change what this customer was told. Empty when the
+  /// vendor published a preset with no accompanying note.
+  final String partialTerms;
+
   /// 'customer' | 'vendor' | null — who cancelled this order. Both
   /// paths write status=cancelled, so this is the only way to tell
   /// "customer changed their mind" from "vendor declined the order"
@@ -891,6 +965,11 @@ class OrderModel {
     this.finderFee = 0.0,
     this.deliveryFee = 0.0,
     this.loanId,
+    this.partialPayment = false,
+    this.partialUpfront = 0.0,
+    this.partialBalance = 0.0,
+    this.partialDueBy,
+    this.partialTerms = '',
     this.cancelledBy,
   });
 
@@ -904,7 +983,23 @@ class OrderModel {
   /// interest/fee owed on a bnpl order is Pezesha's loan terms
   /// (offer.rate/interest/fee — see PezeshaLoanOffer), owed to Pezesha,
   /// and never added here — MobiGas still adds nothing of its own.
+  ///
+  /// ALSO unchanged by partialPayment, and that one matters most. A
+  /// flexible-payment order is worth exactly what any other order is
+  /// worth; the customer simply intends to hand it over in more than
+  /// one go, by arrangement with the vendor. Every surface that shows
+  /// what an order is WORTH — the vendor's header, the customer's
+  /// summary, the rider handoff message, the earnings screens — shows
+  /// THIS, never partialUpfront. Substituting the upfront figure would
+  /// be MobiGas quietly repricing a sale on the strength of a private
+  /// arrangement it is not part of.
   double get customerTotal => listing.price + deliveryFee;
+
+  /// True when there are concrete figures to show alongside the
+  /// flexible-payment note. False when the customer opted in against a
+  /// vendor's free-text terms, where [partialTerms] is the whole story.
+  bool get hasPartialFigures =>
+      partialPayment && (partialUpfront > 0 || partialBalance > 0);
 }
 
 enum OrderStatus {
