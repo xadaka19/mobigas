@@ -21,6 +21,36 @@ import 'package:mobigas/core/config/mobile_money.dart';
 import 'package:mobigas/core/config/vendor_requirements.dart';
 //import 'package:mobigas/features/vendor/widgets/country_confirmation.dart';
 
+/// One structured flexible-payment preset a vendor can pick in Step 0.
+/// Structured (percent + hours) rather than free text so the customer
+/// order screen can compute an exact upfront/balance split and due
+/// date (see VendorModel.partialPaymentSplitFor) instead of only
+/// displaying words. [hours] rather than days so a same-day term like
+/// "within 48 hours" doesn't need a separate unit.
+class _PartialPaymentPreset {
+  final String label;
+  final double percent;
+  final int hours;
+  const _PartialPaymentPreset(this.label, this.percent, this.hours);
+}
+
+/// The presets shown in the dropdown. Add more here (and nowhere
+/// else) to offer new terms — vendor_setup_screen matches saved
+/// percent/hours back to one of these on reopen, and falls back to
+/// _customPartialPreset when nothing matches (a legacy free-text note,
+/// or a preset that's since been removed from this list).
+const List<_PartialPaymentPreset> _partialPaymentPresets = [
+  _PartialPaymentPreset('50% now, balance within 3 days', 50, 72),
+  _PartialPaymentPreset('50% now, balance within 7 days', 50, 168),
+  _PartialPaymentPreset('30% now, balance within 5 days', 30, 120),
+  _PartialPaymentPreset('Full amount within 48 hours after delivery', 100, 48),
+];
+
+/// Sentinel for "none of the structured presets — vendor wrote their
+/// own terms". Kept separate from the preset list so it can never
+/// collide with a real label.
+const String _customPartialPreset = 'Custom — write your own';
+
 /// Which part of the vendor profile this screen instance edits.
 /// fullOnboarding is the original 4-step wizard, used only for a
 /// brand-new vendor who has nothing set up yet. Every other mode is a
@@ -124,6 +154,14 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
   late bool _acceptsPartialPayment;
   late TextEditingController _partialPaymentNoteController;
   late bool _partialRepeatOnly;
+  // Which dropdown option is selected — one of the labels in
+  // _partialPaymentPresets, or _customPartialPreset for free text.
+  late String _selectedPartialPreset;
+  // Structured terms behind the selected preset — null whenever
+  // _selectedPartialPreset is _customPartialPreset, since free text
+  // can't be turned into an exact split/due-date on the order screen.
+  double? _partialPaymentPercent;
+  int? _partialPaymentDueHours;
   String _paymentMethod = 'mpesa'; // mpesa, till, paybill, mtn, airtel, tigo
   late TextEditingController _tillController;
   late TextEditingController _paybillController;
@@ -312,6 +350,33 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
       text: d['partialPaymentNote'] ?? '',
     );
     _partialRepeatOnly = (d['partialRepeatOnly'] ?? false) == true;
+    // Structured partial-payment terms — match the saved percent/hours
+    // against the preset list so a returning vendor sees their choice
+    // pre-selected instead of landing on Custom every time. A vendor
+    // who saved free text before this dropdown existed (or whose
+    // saved terms no longer match any current preset) has null
+    // percent/hours here and correctly falls back to Custom, with
+    // their original note intact in the field above.
+    final savedPercent = (d['partialPaymentPercent'] as num?)?.toDouble();
+    final savedHours = (d['partialPaymentDueHours'] as num?)?.toInt();
+    _PartialPaymentPreset? matchedPreset;
+    if (savedPercent != null && savedHours != null) {
+      for (final p in _partialPaymentPresets) {
+        if (p.percent == savedPercent && p.hours == savedHours) {
+          matchedPreset = p;
+          break;
+        }
+      }
+    }
+    if (matchedPreset != null) {
+      _selectedPartialPreset = matchedPreset.label;
+      _partialPaymentPercent = matchedPreset.percent;
+      _partialPaymentDueHours = matchedPreset.hours;
+    } else {
+      _selectedPartialPreset = _customPartialPreset;
+      _partialPaymentPercent = null;
+      _partialPaymentDueHours = null;
+    }
     // Absent on every doc written before this feature shipped. The
     // form opens on "free" as the neutral default — but see the field
     // comment: until this screen is SAVED, Firestore still has no
@@ -791,6 +856,18 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             : '',
         'partialRepeatOnly':
             _acceptsPartialPayment && _partialRepeatOnly,
+        // Structured terms behind the note, when the vendor picked a
+        // preset rather than writing Custom text — this is what lets
+        // the customer order screen compute an exact upfront/balance
+        // split and due date instead of only showing words. Written
+        // as null (never omitted) whenever the toggle is off or the
+        // vendor chose Custom, so switching away from a structured
+        // preset actually clears the old numbers rather than leaving
+        // a stale split behind for the note that replaced it.
+        'partialPaymentPercent':
+            _acceptsPartialPayment ? _partialPaymentPercent : null,
+        'partialPaymentDueHours':
+            _acceptsPartialPayment ? _partialPaymentDueHours : null,
         'updatedAt': FieldValue.serverTimestamp(),
         'certificateUrl': certificateUrl,
         'epraCertificateUrl': docUrls['epraCertificateUrl'],
@@ -1314,7 +1391,7 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
             'Turn this on if you\'re open to arranging payment directly with '
             'a customer. Any arrangement is strictly between you and them — '
             'MobiGas only shows customers that you\'re open to it and '
-            'passes on your note below.',
+            'passes on the terms below.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: AppColors.gray400,
               fontSize: 11,
@@ -1323,41 +1400,105 @@ class _VendorSetupScreenState extends State<VendorSetupScreen> {
           ),
           if (_acceptsPartialPayment) ...[
             const SizedBox(height: 14),
-            TextFormField(
-              controller: _partialPaymentNoteController,
-              maxLength: VendorModel.partialPaymentNoteMaxLength,
-              maxLines: 3,
-              minLines: 2,
-              textCapitalization: TextCapitalization.sentences,
-              style: const TextStyle(color: AppColors.white, fontSize: 13),
-              decoration: InputDecoration(
-                hintText:
-                    'Tell customers how you\'d like to handle payment — '
-                    'e.g. how much upfront, when you\'d want the rest.',
-                hintStyle: const TextStyle(
-                  color: AppColors.gray600,
-                  fontSize: 12,
-                  height: 1.4,
-                ),
-                counterStyle: const TextStyle(
-                  color: AppColors.gray400,
-                  fontSize: 10,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: AppColors.white.withValues(alpha: 0.2),
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.orange),
-                ),
-                filled: true,
-                fillColor: AppColors.white.withValues(alpha: 0.05),
-                contentPadding: const EdgeInsets.all(12),
+            Text(
+              'Payment terms',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.gray400,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 6),
+            // Picking a preset also sets the structured percent/hours
+            // behind it, which is what lets the customer order screen
+            // show an exact "pay X now, Y due by <date>" instead of
+            // just this label. Custom clears those two — free text
+            // can't be turned into numbers, so the order screen falls
+            // back to showing the note verbatim for that case.
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.white.withValues(alpha: 0.2),
+                ),
+                color: AppColors.white.withValues(alpha: 0.05),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _selectedPartialPreset,
+                  dropdownColor: AppColors.navy,
+                  isExpanded: true,
+                  style: const TextStyle(color: AppColors.white, fontSize: 13),
+                  decoration: const InputDecoration(
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    border: InputBorder.none,
+                  ),
+                  items: [
+                    for (final p in _partialPaymentPresets)
+                      DropdownMenuItem(value: p.label, child: Text(p.label)),
+                    const DropdownMenuItem(
+                      value: _customPartialPreset,
+                      child: Text(_customPartialPreset),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _selectedPartialPreset = value;
+                      if (value == _customPartialPreset) {
+                        _partialPaymentPercent = null;
+                        _partialPaymentDueHours = null;
+                      } else {
+                        final preset = _partialPaymentPresets
+                            .firstWhere((p) => p.label == value);
+                        _partialPaymentPercent = preset.percent;
+                        _partialPaymentDueHours = preset.hours;
+                        _partialPaymentNoteController.text = value;
+                      }
+                    });
+                  },
+                ),
+              ),
+            ),
+            if (_selectedPartialPreset == _customPartialPreset) ...[
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _partialPaymentNoteController,
+                maxLength: VendorModel.partialPaymentNoteMaxLength,
+                maxLines: 3,
+                minLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                style: const TextStyle(color: AppColors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText:
+                      'Describe your own terms — e.g. how much upfront, '
+                      'when you\'d want the rest.',
+                  hintStyle: const TextStyle(
+                    color: AppColors.gray600,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                  counterStyle: const TextStyle(
+                    color: AppColors.gray400,
+                    fontSize: 10,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: AppColors.white.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.orange),
+                  ),
+                  filled: true,
+                  fillColor: AppColors.white.withValues(alpha: 0.05),
+                  contentPadding: const EdgeInsets.all(12),
+                ),
+              ),
+            ],
             const SizedBox(height: 4),
             InkWell(
               onTap: () =>

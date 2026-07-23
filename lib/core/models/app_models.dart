@@ -233,6 +233,22 @@ class GasListing {
   double get cashFinderFee => price * MobiGasFees.cashFinderFeeRate;
 }
 
+/// The upfront/balance split and due date computed from a vendor's
+/// STRUCTURED flexible-payment terms (percent + hours) for a given
+/// order total. Returned by [VendorModel.partialPaymentSplitFor] —
+/// see that method for when this is null instead.
+class PartialPaymentSplit {
+  final double upfrontAmount;
+  final double balanceAmount;
+  final DateTime dueDate;
+
+  const PartialPaymentSplit({
+    required this.upfrontAmount,
+    required this.balanceAmount,
+    required this.dueDate,
+  });
+}
+
 class VendorModel {
   final String id;
   final String businessName;
@@ -381,6 +397,22 @@ class VendorModel {
   /// blocked from buying, only from the flexible-payment note.
   final bool partialRepeatOnly;
 
+  /// Structured terms behind [partialPaymentNote], set only when the
+  /// vendor picked a preset in vendor_setup_screen rather than writing
+  /// free text. Null for every vendor who chose Custom, and for every
+  /// doc saved before this shipped — [partialPaymentSplitFor] returns
+  /// null in exactly those cases, so callers fall back to showing
+  /// [partialPaymentNote] verbatim. STILL a noticeboard, not a credit
+  /// product: MobiGas computes the arithmetic so the customer sees a
+  /// concrete number, but tracks no balance and is not a party to
+  /// whether it's actually honoured.
+  final double? partialPaymentPercent;
+
+  /// Hours from order time until the balance is due, behind the
+  /// selected preset. Paired with [partialPaymentPercent] — see that
+  /// field's comment.
+  final int? partialPaymentDueHours;
+
   /// This vendor's own code to share with others.
   final String referralCode;
   /// The referral code THEY entered at setup, if any — permanent.
@@ -440,6 +472,8 @@ class VendorModel {
     this.acceptsPartialPayment = false,
     this.partialPaymentNote = '',
     this.partialRepeatOnly = false,
+    this.partialPaymentPercent,
+    this.partialPaymentDueHours,
     this.referralCode = '',
     this.referredByCode,
     this.pezeshaId,
@@ -505,6 +539,8 @@ class VendorModel {
     bool? acceptsPartialPayment,
     String? partialPaymentNote,
     bool? partialRepeatOnly,
+    double? partialPaymentPercent,
+    int? partialPaymentDueHours,
     String? referralCode,
     String? referredByCode,
     String? pezeshaId,
@@ -563,6 +599,11 @@ class VendorModel {
           acceptsPartialPayment ?? this.acceptsPartialPayment,
       partialPaymentNote: partialPaymentNote ?? this.partialPaymentNote,
       partialRepeatOnly: partialRepeatOnly ?? this.partialRepeatOnly,
+      // Same "add only" nullable pattern as chargesDeliveryFee above.
+      partialPaymentPercent:
+          partialPaymentPercent ?? this.partialPaymentPercent,
+      partialPaymentDueHours:
+          partialPaymentDueHours ?? this.partialPaymentDueHours,
       referralCode: referralCode ?? this.referralCode,
       referredByCode: referredByCode ?? this.referredByCode,
       pezeshaId: pezeshaId ?? this.pezeshaId,
@@ -572,6 +613,30 @@ class VendorModel {
   /// Max length of [partialPaymentNote]. A short note, not a contract —
   /// enforced at the input field and worth clamping on read too.
   static const int partialPaymentNoteMaxLength = 200;
+
+  /// Computes the upfront amount, balance amount, and due date for
+  /// [orderTotal] using this vendor's STRUCTURED flexible-payment
+  /// terms — null whenever there aren't any (vendor wrote free-text
+  /// Custom terms, or hasn't set any at all), since there's nothing to
+  /// compute from plain words. Callers (order_screen) should fall back
+  /// to showing [partialPaymentNote] verbatim when this is null.
+  ///
+  /// [dueDate] is computed from `DateTime.now()`, matching when the
+  /// order is actually placed — a vendor's due-hours are relative to
+  /// the order, not to whenever this happens to be called, so avoid
+  /// caching a split object across a long-lived screen.
+  PartialPaymentSplit? partialPaymentSplitFor(double orderTotal) {
+    final percent = partialPaymentPercent;
+    final hours = partialPaymentDueHours;
+    if (percent == null || hours == null) return null;
+    final upfront = orderTotal * percent / 100;
+    final balance = orderTotal - upfront;
+    return PartialPaymentSplit(
+      upfrontAmount: upfront,
+      balanceAmount: balance,
+      dueDate: DateTime.now().add(Duration(hours: hours)),
+    );
+  }
 
   // ── Delivery getters ────────────────────────────────────────────
 

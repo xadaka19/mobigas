@@ -305,6 +305,19 @@ class FirestoreService {
       acceptsPartialPayment: data['acceptsPartialPayment'] ?? false,
       partialPaymentNote: data['partialPaymentNote'] ?? '',
       partialRepeatOnly: data['partialRepeatOnly'] ?? false,
+      // Structured terms behind the note above — set only when the
+      // vendor picked one of vendor_setup_screen's presets rather than
+      // writing free-text Custom terms. `?.toDouble()` / `?.toInt()`
+      // on a `num?` (rather than `?? 0` collapsing to a number) is
+      // what preserves null for "vendor wrote Custom" or "never set
+      // any terms" — VendorModel.partialPaymentSplitFor relies on
+      // both being null in exactly those cases to know there's
+      // nothing to compute, and fall back to showing partialPaymentNote
+      // verbatim instead.
+      partialPaymentPercent:
+          (data['partialPaymentPercent'] as num?)?.toDouble(),
+      partialPaymentDueHours:
+          (data['partialPaymentDueHours'] as num?)?.toInt(),
       referralCode: data['referralCode'] ?? '',
       referredByCode: data['referredByCode'],
       // Written by registerPezeshaBorrower (functions/src/pezesha.ts)

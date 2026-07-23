@@ -193,6 +193,12 @@ class _OrderScreenState extends State<OrderScreen> {
 
   double get _gasPrice => _selectedListing?.price ?? 0;
 
+  /// Gas price plus the selected vendor's flat delivery fee (0 if they
+  /// deliver free or haven't set a preference) — the actual amount the
+  /// customer owes for this order, and what a partial-payment split
+  /// should be computed against rather than the gas price alone.
+  double get _orderTotal => _gasPrice + (_selectedVendor?.effectiveDeliveryFee ?? 0);
+
   /// Currency follows the vendor being ordered from — set once at
   /// vendor onboarding from GPS, not a customer preference.
   String get _vendorCountry => _selectedVendor?.country ?? 'KE';
@@ -211,6 +217,13 @@ class _OrderScreenState extends State<OrderScreen> {
       (o) => o.vendorId == vid && o.status != OrderStatus.cancelled,
     );
   }
+
+  /// dd/MM/yyyy — matches the date format Kenyan/Ugandan/Tanzanian
+  /// customers already read on receipts and statements. Manual
+  /// formatting rather than intl's DateFormat since this is the only
+  /// place in the screen that needs one.
+  String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
   String _typeDescription(GasProductType t) {
     switch (t) {
@@ -912,18 +925,24 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
-  /// The selected vendor's flexible-payment note, shown verbatim — or
-  /// greyed with a returning-customer message when the vendor limited it
-  /// to repeat customers and this is a first order. Renders nothing when
-  /// the vendor isn't offering it. This is a NOTICEBOARD: MobiGas shows
-  /// the vendor's own words and states plainly it isn't part of the
-  /// arrangement. It sets no terms, tracks no balance, and never blocks
-  /// the order — a first-time customer still buys at full price above.
+  /// The selected vendor's flexible-payment terms. Shows an exact
+  /// computed split ("Pay X now, Y due by `<date>`") when the vendor
+  /// picked a structured preset, or falls back to their free-text
+  /// note verbatim when they wrote Custom terms — or when the vendor
+  /// is greyed out for a first-time customer under partialRepeatOnly.
+  /// Renders nothing when the vendor isn't offering flexible payment
+  /// at all. This is a NOTICEBOARD: MobiGas computes the arithmetic so
+  /// the customer sees a concrete number, but states plainly it isn't
+  /// part of the arrangement, sets no terms, and tracks no balance —
+  /// it never blocks the order, which is always payable in full above.
   Widget _buildFlexiblePaymentNote() {
     final vendor = _selectedVendor;
-    if (vendor == null ||
-        !vendor.acceptsPartialPayment ||
-        vendor.partialPaymentNote.trim().isEmpty) {
+    if (vendor == null || !vendor.acceptsPartialPayment) {
+      return const SizedBox.shrink();
+    }
+    final split = vendor.partialPaymentSplitFor(_orderTotal);
+    final hasNote = vendor.partialPaymentNote.trim().isNotEmpty;
+    if (split == null && !hasNote) {
       return const SizedBox.shrink();
     }
 
@@ -958,18 +977,52 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            gated
-                ? 'This vendor offers flexible payment to returning customers. '
-                    'Order at full price now — it may be available on your '
-                    'next order with them.'
-                : vendor.partialPaymentNote.trim(),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: gated ? AppColors.gray600 : AppColors.navy,
-                  fontSize: 12,
-                  height: 1.45,
-                ),
-          ),
+          if (gated)
+            Text(
+              'This vendor offers flexible payment to returning customers. '
+              'Order at full price now — it may be available on your '
+              'next order with them.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.gray600,
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+            )
+          else if (split != null) ...[
+            // Structured preset — show the exact numbers rather than
+            // making the customer do the arithmetic on the note.
+            Text(
+              'Pay ${Currency.formatFor(vendor.country, split.upfrontAmount)} now, '
+              'balance of ${Currency.formatFor(vendor.country, split.balanceAmount)} '
+              'due by ${_formatDate(split.dueDate)}.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+            ),
+            if (hasNote) ...[
+              const SizedBox(height: 4),
+              Text(
+                '(${vendor.partialPaymentNote.trim()})',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray600,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+              ),
+            ],
+          ] else
+            // Custom free-text terms — nothing to compute, show as-is.
+            Text(
+              vendor.partialPaymentNote.trim(),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.navy,
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+            ),
           if (!gated) ...[
             const SizedBox(height: 8),
             Text(
