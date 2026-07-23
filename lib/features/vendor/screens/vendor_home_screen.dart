@@ -214,6 +214,12 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     return '${km.toStringAsFixed(1)}km away';
   }
 
+  /// dd/MM/yyyy — the same format the customer read at checkout, so the
+  /// due date the vendor sees is character-for-character the one their
+  /// customer agreed to.
+  static String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
   /// Null when either side's coordinates aren't available yet (vendor
   /// hasn't pinned a location during setup, or — for an older order —
   /// the customer coordinates weren't captured). Returning null lets
@@ -1487,6 +1493,114 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     );
   }
 
+  /// BUG FIX: this card had no idea the flexible-payment option
+  /// existed. A customer could opt into the vendor's own published
+  /// terms at checkout and the vendor would see a plain "Collect KSh
+  /// 1,150 from the customer on delivery" — and find out at the door,
+  /// after the cylinder was already on the bike. The whole point of
+  /// recording the arrangement is that the vendor learns about it
+  /// BEFORE they tap Accept, so this renders in place of the collect
+  /// line, not after it.
+  ///
+  /// Note what it does NOT say: "collect 575". MobiGas has no idea what
+  /// this vendor and this customer actually settled on — only what the
+  /// customer was shown at checkout, which is what it repeats. The
+  /// order's value stays the full amount everywhere else on this card
+  /// and in the earnings totals. How and when the balance is collected
+  /// is the vendor's own business, and there is nothing anywhere in
+  /// this app to mark it settled.
+  Widget _partialPaymentNotice(OrderModel order, _Payout payout) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.handshake_outlined,
+                size: 15,
+                color: AppColors.warning,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Customer chose your flexible payment',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.warning,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (order.hasPartialFigures)
+            Text(
+              'At checkout they were shown: pay '
+              '${Currency.formatFor(order.country, order.partialUpfront)} now, '
+              'balance of '
+              '${Currency.formatFor(order.country, order.partialBalance)}'
+              '${order.partialDueBy != null ? ' by ${_formatDate(order.partialDueBy!)}' : ''}.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+                height: 1.4,
+              ),
+            )
+          else
+            Text(
+              order.partialTerms.trim().isNotEmpty
+                  ? 'At checkout they were shown your terms: '
+                        '"${order.partialTerms.trim()}"'
+                  : 'They asked to use the flexible payment terms on your '
+                        'profile for this order.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          if (order.hasPartialFigures &&
+              order.partialTerms.trim().isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(
+              '(${order.partialTerms.trim()})',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.gray600,
+                fontSize: 10.5,
+                height: 1.35,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(
+            'Order value ${Currency.formatFor(order.country, order.customerTotal)}'
+            '${order.deliveryFee > 0 ? ', including your ${Currency.formatFor(order.country, order.deliveryFee)} delivery fee' : ''}'
+            '${payout.value.isEmpty ? '' : ' — cash, or ${payout.label} ${payout.value}'}. '
+            'What you collect at the door, and when you collect the rest, '
+            'is between you and your customer. MobiGas passed this on and '
+            'doesn\'t track it.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.gray600,
+              fontSize: 10.5,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _orderCard(OrderModel order) {
     final isPending = order.status == OrderStatus.pending;
     final isAccepted = order.status == OrderStatus.accepted;
@@ -1550,17 +1664,25 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                   ),
                 ),
                 const SizedBox(width: 8),
+                // The chip said "Pay on delivery" on every order,
+                // including one the customer has arranged to pay in
+                // two goes — the first thing the vendor's eye lands on
+                // and the last thing that should be wrong.
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: AppColors.navy,
+                    color: order.partialPayment
+                        ? AppColors.warning
+                        : AppColors.navy,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    'Pay on delivery',
+                    order.partialPayment
+                        ? 'Flexible payment'
+                        : 'Pay on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppColors.white,
                       fontSize: 9,
@@ -1569,11 +1691,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  order.orderId,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.gray400,
-                    fontSize: 10,
+                Flexible(
+                  child: Text(
+                    order.orderId,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray400,
+                      fontSize: 10,
+                    ),
                   ),
                 ),
               ],
@@ -1736,33 +1861,40 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                   ),
                 ),
                 const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.navy.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    // customerTotal, NOT listing.price — it is gas plus
-                    // this vendor's own flat delivery fee, and this line
-                    // is the number they physically collect at the door.
-                    // Showing the gas price alone would have them
-                    // under-collecting their own delivery charge on
-                    // every single order.
-                    payout.value.isEmpty
-                        ? 'Collect ${Currency.formatFor(order.country, order.customerTotal)} from the customer on delivery (cash or ${payout.label} to you).${order.deliveryFee > 0 ? ' Includes your ${Currency.formatFor(order.country, order.deliveryFee)} delivery fee.' : ''}'
-                        : 'Collect ${Currency.formatFor(order.country, order.customerTotal)} from the customer on delivery — cash, or ${payout.label} ${payout.value}.${order.deliveryFee > 0 ? ' Includes your ${Currency.formatFor(order.country, order.deliveryFee)} delivery fee.' : ''}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.navy,
-                      fontSize: 11,
-                      height: 1.4,
+                // On a flexible-payment order the "Collect X" line is
+                // replaced, not supplemented — leaving both would have
+                // MobiGas instructing a figure AND disclaiming it in
+                // the same card.
+                if (order.partialPayment)
+                  _partialPaymentNotice(order, payout)
+                else
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.navy.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      // customerTotal, NOT listing.price — it is gas plus
+                      // this vendor's own flat delivery fee, and this line
+                      // is the number they physically collect at the door.
+                      // Showing the gas price alone would have them
+                      // under-collecting their own delivery charge on
+                      // every single order.
+                      payout.value.isEmpty
+                          ? 'Collect ${Currency.formatFor(order.country, order.customerTotal)} from the customer on delivery (cash or ${payout.label} to you).${order.deliveryFee > 0 ? ' Includes your ${Currency.formatFor(order.country, order.deliveryFee)} delivery fee.' : ''}'
+                          : 'Collect ${Currency.formatFor(order.country, order.customerTotal)} from the customer on delivery — cash, or ${payout.label} ${payout.value}.${order.deliveryFee > 0 ? ' Includes your ${Currency.formatFor(order.country, order.deliveryFee)} delivery fee.' : ''}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.navy,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 16),
                 if (isPending) ...[
                   Row(
@@ -1942,6 +2074,20 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                     context,
                   ).textTheme.bodySmall?.copyWith(color: AppColors.gray400),
                 ),
+                // A delivered flexible-payment order may still have a
+                // balance outstanding between the vendor and their
+                // customer. MobiGas doesn't know and doesn't track it —
+                // this is a marker so the vendor can recognise which
+                // deliveries had an arrangement, nothing more.
+                if (order.partialPayment)
+                  Text(
+                    'Flexible payment arranged',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.warning,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
               ],
             ),
           ),

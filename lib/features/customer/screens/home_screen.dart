@@ -70,6 +70,12 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
     return _loadedLat != c.latitude || _loadedLng != c.longitude;
   }
 
+  /// dd/MM/yyyy — the same format the customer read at checkout and
+  /// sees on the tracking screen, so a due date never appears in two
+  /// different shapes across the app.
+  static String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
   /// Starts the order stream as soon as we have a customer, and
   /// (re)loads vendors whenever real coordinates land — on cold start,
   /// or the moment the customer pins their location from the profile
@@ -846,12 +852,38 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
-                        ?.copyWith(fontSize: 14, color: AppColors.navy)),
-                Text('${order.orderId} · Pay on delivery',
+                        ?.copyWith(fontSize: 14, color: AppColors.navy),
+                    overflow: TextOverflow.ellipsis),
+                // BUG FIX: this line was hardcoded to "Pay on delivery"
+                // for every order, including one where the customer had
+                // opted into the vendor's flexible-payment terms at
+                // checkout — the app telling them, on the screen they
+                // land on straight afterwards, the opposite of what they
+                // just agreed to.
+                Text(
+                    '${order.orderId} · '
+                    '${order.partialPayment ? 'Flexible payment' : 'Pay on delivery'}',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
-                        ?.copyWith(color: AppColors.gray400)),
+                        ?.copyWith(color: AppColors.gray400),
+                    overflow: TextOverflow.ellipsis),
+                // The figures the customer agreed to, so the tile
+                // doesn't leave the total below looking like an amount
+                // due all at once. Nothing here counts down to the due
+                // date or tracks whether the balance was paid — MobiGas
+                // isn't party to the arrangement; this is the customer's
+                // own record of what they chose.
+                if (order.hasPartialFigures)
+                  Text(
+                      'Pay ${Currency.formatFor(order.country, order.partialUpfront)} now'
+                      '${order.partialDueBy != null ? ' · balance by ${_formatDate(order.partialDueBy!)}' : ''}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.orangeDeep,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                      overflow: TextOverflow.ellipsis),
                 // Only when there was one. Says why the total above is
                 // more than the gas price the customer chose, without
                 // adding a row to every free-delivery order.
@@ -871,7 +903,10 @@ class _HomeScreenState extends State<HomeScreen> with PromoPopupMixin {
               // customerTotal = gas + delivery. Already correct here
               // before this feature (delivery was simply always 0), so
               // this line needed no change — it picks the fee up the
-              // moment OrderModel carries one.
+              // moment OrderModel carries one. It stays the ORDER'S
+              // VALUE on a flexible-payment order too: the split is
+              // spelled out on its own line above rather than by
+              // quietly showing a smaller number here.
               Text(Currency.formatFor(order.country, order.customerTotal),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontSize: 14,

@@ -246,6 +246,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     );
   }
 
+  /// dd/MM/yyyy — the same format the customer read at checkout.
+  String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -385,9 +389,114 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     );
   }
 
+  /// The flexible-payment arrangement the customer opted into at
+  /// checkout, restated here.
+  ///
+  /// BUG FIX: this screen had no idea the option existed. A customer
+  /// who chose "pay 575 now, balance in 7 days" on the order screen
+  /// landed here and was told to pay the full 1,150 before revealing
+  /// their PIN — the app contradicting, one screen later, the thing
+  /// they had just agreed to.
+  ///
+  /// Shows the figures they were shown and stops. MobiGas is not party
+  /// to the arrangement: nothing here tracks the balance, counts down
+  /// to the due date, or treats a passed date as anything at all.
+  Widget _partialPaymentNotice(OrderModel order) {
+    if (!order.partialPayment) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.orange.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.orange.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.handshake_outlined,
+                  size: 16, color: AppColors.orange),
+              const SizedBox(width: 8),
+              Text('Flexible payment',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.orangeDeep,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      )),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (order.hasPartialFigures)
+            Text(
+              'Pay ${Currency.formatFor(order.country, order.partialUpfront)} '
+              'to ${order.vendorName} on delivery, balance of '
+              '${Currency.formatFor(order.country, order.partialBalance)}'
+              '${order.partialDueBy != null ? ' by ${_formatDate(order.partialDueBy!)}' : ''}.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+            )
+          else
+            Text(
+              order.partialTerms.trim().isNotEmpty
+                  ? order.partialTerms.trim()
+                  : 'You arranged flexible payment with ${order.vendorName} '
+                      'for this order.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+            ),
+          if (order.hasPartialFigures &&
+              order.partialTerms.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('(${order.partialTerms.trim()})',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.gray600,
+                      fontSize: 11,
+                      height: 1.4,
+                    )),
+          ],
+          const SizedBox(height: 8),
+          Text(
+            'Settle this directly with the vendor. MobiGas passed it on '
+            'but isn\'t party to the arrangement and won\'t collect or '
+            'chase the balance.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.gray400,
+                  fontSize: 10.5,
+                  height: 1.4,
+                  fontStyle: FontStyle.italic,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBottomCard() {
     final order = _order;
     if (order == null) return const SizedBox.shrink();
+
+    // On a flexible-payment order the PIN instruction can't name a
+    // single figure to hand over — the customer agreed to hand over
+    // part of it now and the rest later, by their own arrangement.
+    // The PIN itself means exactly what it always meant: the customer
+    // confirming they received their gas.
+    final pinInstruction = order.partialPayment
+        ? (order.hasPartialFigures
+            ? 'Pay the vendor ${Currency.formatFor(order.country, order.partialUpfront)} as you arranged (cash or ${MobileMoney.primaryLabelFor(order.country)}), then show this PIN'
+            : 'Pay the vendor as you arranged with them, then show this PIN')
+        : 'Pay the vendor ${Currency.formatFor(order.country, order.customerTotal)} first (cash or ${MobileMoney.primaryLabelFor(order.country)}), then show this PIN';
 
     return Container(
       decoration: BoxDecoration(
@@ -445,6 +554,12 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
+                  // The order's VALUE, unchanged by the arrangement —
+                  // a flexible-payment order is worth what it's worth,
+                  // the customer just hands it over in more than one
+                  // go. Only the label below changes, so this figure
+                  // never reads as an amount due at the door when it
+                  // isn't.
                   Text(
                     Currency.formatFor(order.country, order.customerTotal),
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -453,7 +568,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                         ),
                   ),
                   Text(
-                    'Pay on delivery',
+                    order.partialPayment ? 'Order total' : 'Pay on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.gray400,
                           fontSize: 10,
@@ -466,6 +581,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           const SizedBox(height: 20),
           const Divider(color: AppColors.gray200),
           const SizedBox(height: 16),
+          _partialPaymentNotice(order),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(16),
@@ -521,7 +637,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Pay the vendor ${Currency.formatFor(order.country, order.customerTotal)} first (cash or ${MobileMoney.primaryLabelFor(order.country)}), then show this PIN',
+                  pinInstruction,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.gray400,
                         fontSize: 11,
