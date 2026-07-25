@@ -9,6 +9,15 @@
 // target (their own till/paybill) — see applyPezeshaLoan in
 // functions/src/pezesha.ts.
 //
+// ── FEE LOCK ────────────────────────────────────────────────────────
+// A fee-locked vendor (VendorLock.isLocked) can't take NEW financing —
+// the server refuses applyPezeshaLoan's vendor_stock branch. So when
+// locked, "Check your limit" and "Improve my limit" are replaced by a
+// notice pointing at the fees banner. "View my loans" stays available
+// even when locked: the Play lending-visibility requirement is about
+// EXISTING loans, and a fee lock must not hide a loan a vendor already
+// has.
+//
 // ── WHO OWNS THE FLOW ───────────────────────────────────────────────
 // The CARD owns the sheet -> upload -> sheet cycle, not the sheet.
 // The sheet can't run it: opening the upload screen means closing the
@@ -33,6 +42,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:mobigas/core/config/currency.dart';
+import 'package:mobigas/core/access/vendor_lock.dart';
 import 'package:mobigas/core/services/pezesha_service.dart';
 import 'package:mobigas/features/bnpl/pezesha_loan_status_screen.dart';
 import 'package:mobigas/features/bnpl/pezesha_statement_upload_screen.dart';
@@ -58,6 +68,9 @@ class VendorPezeshaStockLoanCard extends StatefulWidget {
 class _VendorPezeshaStockLoanCardState
     extends State<VendorPezeshaStockLoanCard> {
   String get _country => (widget.vendorData?['country'] as String?) ?? 'KE';
+
+  bool get _locked =>
+      VendorLock.isLocked(widget.vendorData ?? const <String, dynamic>{});
 
   /// Contact number on file, pre-filled into the statement form so the
   /// vendor isn't retyping what MobiGas already knows. Deliberately
@@ -119,6 +132,7 @@ class _VendorPezeshaStockLoanCardState
   Widget build(BuildContext context) {
     if (widget.vendorId.isEmpty) return const SizedBox.shrink();
     final country = _country;
+    final locked = _locked;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -146,32 +160,61 @@ class _VendorPezeshaStockLoanCardState
             ],
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Check your limit and get funds sent straight to your account '
-            'to restock — through our finance partner Pezesha.',
-            style: TextStyle(
+          Text(
+            locked
+                ? 'Restocking finance through our partner Pezesha. Clear '
+                    'your platform fees to unlock it.'
+                : 'Check your limit and get funds sent straight to your '
+                    'account to restock — through our finance partner '
+                    'Pezesha.',
+            style: const TextStyle(
                 color: Colors.white70, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _orange,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+          if (locked)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              onPressed: _openLimitSheet,
-              child: const Text('Check your limit',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+              child: const Row(
+                children: [
+                  Icon(Icons.lock_outline_rounded,
+                      color: Colors.white70, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Clear your platform fees to unlock stock financing.',
+                      style: TextStyle(
+                          color: Colors.white70, fontSize: 12, height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: _openLimitSheet,
+                child: const Text('Check your limit',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
             ),
-          ),
           const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Always available — even when fee-locked — so a vendor can
+              // always see an existing loan's status (Play visibility).
               TextButton(
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.white70,
@@ -189,17 +232,21 @@ class _VendorPezeshaStockLoanCardState
                     style:
                         TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
               ),
-              const SizedBox(width: 8),
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  minimumSize: const Size(0, 36),
+              // "Improve my limit" is a NEW-borrowing action — hidden
+              // while locked, same as the main CTA above.
+              if (!locked) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white70,
+                    minimumSize: const Size(0, 36),
+                  ),
+                  onPressed: _openStatementUpload,
+                  child: const Text('Improve my limit',
+                      style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w700)),
                 ),
-                onPressed: _openStatementUpload,
-                child: const Text('Improve my limit',
-                    style:
-                        TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-              ),
+              ],
             ],
           ),
         ],

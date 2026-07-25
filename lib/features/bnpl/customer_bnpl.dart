@@ -28,6 +28,16 @@
 //     into the section) since a caller that already has a
 //     freshly-fetched offer in hand can still render it directly.
 //
+//     BUG FIX: this used to apply for a loan of listing.price alone,
+//     while the cash path bills orderTotal (gas price + the vendor's
+//     delivery fee) — for any vendor charging delivery, Pezesha
+//     disbursed less than the vendor was actually owed, and nothing
+//     told the customer they still owed the delivery fee separately
+//     in cash on top of a loan they were told covered "the order".
+//     Both widgets now take an explicit deliveryFee (default 0) and
+//     apply for / display / limit-check against listing.price +
+//     deliveryFee throughout — see orderTotal below.
+//
 // All three call PezeshaService (core/services/pezesha_service.dart).
 // MobiGas never shows a repayment flow anywhere — Pezesha collects
 // directly from the customer, off-app.
@@ -311,6 +321,11 @@ class BnplCheckoutSection extends StatefulWidget {
   final String country;
   final String orderId;
 
+  /// The vendor's delivery fee for this order (0 if free or unknown —
+  /// see OrderScreen._deliveryFee). Added to listing.price to get the
+  /// actual amount owed for the order; see file header BUG FIX note.
+  final double deliveryFee;
+
   /// Called after a successful loan application, so the caller can
   /// proceed to create the order with paymentMethod = bnpl and this
   /// loanId attached (OrderModel.loanId) BEFORE calling createOrder.
@@ -322,6 +337,7 @@ class BnplCheckoutSection extends StatefulWidget {
     required this.listing,
     required this.country,
     required this.orderId,
+    this.deliveryFee = 0,
     required this.onApproved,
   });
 
@@ -369,6 +385,7 @@ class _BnplCheckoutSectionState extends State<BnplCheckoutSection> {
       country: widget.country,
       offer: _offer!,
       orderId: widget.orderId,
+      deliveryFee: widget.deliveryFee,
       onApproved: widget.onApproved,
     );
   }
@@ -389,6 +406,13 @@ class BnplCheckoutOption extends StatefulWidget {
   final PezeshaLoanOffer offer;
   final String orderId;
 
+  /// The vendor's delivery fee for this order (0 if free or unknown).
+  /// orderTotal below is listing.price + this — the loan is applied
+  /// for, limit-checked against, and displayed as THIS amount, not
+  /// listing.price alone, so it actually covers what the vendor is
+  /// owed. See file header BUG FIX note.
+  final double deliveryFee;
+
   /// Called after a successful loan application, so the caller can
   /// proceed to create the order with paymentMethod = bnpl and this
   /// loanId attached.
@@ -401,6 +425,7 @@ class BnplCheckoutOption extends StatefulWidget {
     required this.country,
     required this.offer,
     required this.orderId,
+    this.deliveryFee = 0,
     required this.onApproved,
   });
 
@@ -412,7 +437,13 @@ class _BnplCheckoutOptionState extends State<BnplCheckoutOption> {
   bool _submitting = false;
   String? _error;
 
-  bool get _withinLimit => widget.listing.price <= widget.offer.amount;
+  /// Gas price + delivery fee — what the vendor is actually owed for
+  /// this order, and so what the loan needs to cover. Mirrors
+  /// OrderScreen._orderTotal exactly; keep the two in sync if that
+  /// calculation ever changes (e.g. taxes, platform fees added later).
+  double get _orderTotal => widget.listing.price + widget.deliveryFee;
+
+  bool get _withinLimit => _orderTotal <= widget.offer.amount;
 
   Future<void> _confirm() async {
     setState(() {
@@ -422,7 +453,7 @@ class _BnplCheckoutOptionState extends State<BnplCheckoutOption> {
     try {
       final loanId = await PezeshaService.applyLoan(
         loanType: 'customer_bnpl',
-        amount: widget.listing.price,
+        amount: _orderTotal,
         targetVendorId: widget.vendor.id,
         orderId: widget.orderId,
       );
@@ -473,12 +504,24 @@ class _BnplCheckoutOptionState extends State<BnplCheckoutOption> {
           ),
           const SizedBox(height: 6),
           Text(
-            '${Currency.formatFor(widget.country, widget.listing.price)} '
+            // Was widget.listing.price — silently excluded delivery
+            // fee from both what's displayed and what's actually
+            // financed. Now the same figure the cash step calls
+            // "Total to pay vendor".
+            '${Currency.formatFor(widget.country, _orderTotal)} '
             'over ${widget.offer.duration} days. Loan provided by Pezesha — '
             'you repay Pezesha directly, not MobiGas.',
             style: const TextStyle(
                 color: Colors.black54, fontSize: 12, height: 1.4),
           ),
+          if (widget.deliveryFee > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Includes ${Currency.formatFor(widget.country, widget.deliveryFee)} delivery.',
+              style: const TextStyle(
+                  color: Colors.black45, fontSize: 11, height: 1.4),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!,

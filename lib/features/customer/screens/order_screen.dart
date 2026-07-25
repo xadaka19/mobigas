@@ -1003,6 +1003,13 @@ class _OrderScreenState extends State<OrderScreen> {
             listing: _selectedListing!,
             country: _vendorCountry,
             orderId: _orderId,
+            // BUG FIX: was missing — BnplCheckoutSection defaulted to
+            // 0 delivery fee, so a loan was applied for listing.price
+            // alone while the cash path bills _orderTotal (gas price +
+            // delivery). _deliveryFee is the same value _buildCashInfoStep
+            // already shows in the "Delivery" row above, and the same
+            // one _orderTotal is computed from — just threaded through.
+            deliveryFee: _deliveryFee,
             onApproved: _placeBnplOrder,
           ),
       ],

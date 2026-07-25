@@ -159,7 +159,17 @@ class MobiGasFees {
   static const double cashFinderFeeRate = 0.01;
   // When a vendor's unpaid fees reach this amount (KES), they are
   // automatically hidden from customers until they settle.
-  static const double vendorFeeLockThreshold = 500;
+  // new — KES-500 equivalent per market. KE is the real number;
+// UG/TZ are a POLICY threshold, not an FX conversion, so pick a
+// sensible round local figure rather than chasing the live rate.
+static const Map<String, double> _feeLockThresholds = {
+  'KE': 500,      // KES
+  'UG': 14600,     // UGX — PLACEHOLDER, set your value
+  'TZ': 10214,    // TZS — PLACEHOLDER, set your value
+};
+
+static double thresholdFor(String country) =>
+    _feeLockThresholds[country] ?? _feeLockThresholds['KE']!;
 }
 
 /// Referral reward rates are NOT hardcoded here — they live in
@@ -718,7 +728,7 @@ class VendorModel {
   /// platform fees reached the threshold. Unlocks automatically when
   /// admin records payment and feesOwed drops below the threshold.
   bool get isLockedForFees =>
-      feesOwed >= MobiGasFees.vendorFeeLockThreshold;
+      feesOwed >= MobiGasFees.thresholdFor(country);
 
   /// Vendor can appear to customers and receive orders. isVerified is
   /// checked separately at every call site today (order_screen.dart,

@@ -9,6 +9,7 @@ import 'package:mobigas/core/theme/app_theme.dart';
 import 'package:mobigas/core/models/app_models.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/config/mobile_money.dart';
+import 'package:mobigas/core/access/vendor_lock.dart';
 
 /// ⚠️ FILL THESE IN before shipping — the paybill MobiGas collects
 /// platform fees on IN KENYA (manual fallback alongside STK Push).
@@ -77,8 +78,7 @@ class VendorFeesBanner extends StatelessWidget {
         final feesOwed = (data['feesOwed'] ?? 0.0).toDouble();
         final country = (data['country'] as String?) ?? 'KE';
         final isSuspended = data['isSuspended'] ?? false;
-        final locked = isSuspended ||
-            feesOwed >= MobiGasFees.vendorFeeLockThreshold;
+        final locked = VendorLock.isLocked(data);
 
         if (feesOwed <= 0 && !isSuspended) return const SizedBox.shrink();
 
@@ -145,7 +145,7 @@ class VendorFeesBanner extends StatelessWidget {
                       Text(
                         locked
                             ? 'Pay ${Currency.formatFor(country, feesOwed)} now to resume receiving orders. Tap for payment details.'
-                            : 'Customer-finder fee (1%) on your cash orders. Orders pause automatically at ${Currency.formatFor(country, MobiGasFees.vendorFeeLockThreshold)} — tap to pay now.',
+                            : 'Customer-finder fee (1%) on your cash orders. Orders pause automatically at ${Currency.formatFor(country, MobiGasFees.thresholdFor(country))} — tap to pay now.',
                         style:
                             Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: textColor,
@@ -622,7 +622,7 @@ class _FeeSheetState extends State<_FeeSheet> {
               Text(
                 'MobiGas charges a 1% customer-finder fee on cash orders we bring you. '
                 'Credit orders are not charged this fee. '
-                'If unpaid fees reach ${Currency.formatFor(widget.country, MobiGasFees.vendorFeeLockThreshold)}, '
+                'If unpaid fees reach ${Currency.formatFor(widget.country, MobiGasFees.thresholdFor(widget.country))}, '
                 'your shop is hidden from customers until you pay. '
                 'It reappears automatically once your payment is recorded.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
