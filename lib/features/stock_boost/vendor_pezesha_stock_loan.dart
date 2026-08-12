@@ -44,6 +44,7 @@ import 'package:flutter/material.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/access/vendor_lock.dart';
 import 'package:mobigas/core/services/pezesha_service.dart';
+import 'package:mobigas/core/services/supplier_service.dart';
 import 'package:mobigas/features/bnpl/pezesha_loan_status_screen.dart';
 import 'package:mobigas/features/bnpl/pezesha_statement_upload_screen.dart';
 
@@ -255,11 +256,15 @@ class _VendorPezeshaStockLoanCardState
   }
 }
 
-enum _SheetState { checking, unavailable, available, applying, success, error }
+enum _SheetState { checking, unavailable, available, success, error }
+
+// The `available` state is a short wizard: pick the amount, then the
+// supplier + how they're paid, then confirm and apply.
+enum _Step { amount, supplier, confirm }
 
 /// Pops `true` to ask the CARD to open the statement flow — see the
 /// "who owns the flow" note in the file header. It never pushes that
-/// screen itself.
+/// screen itself. Pops `false` once an application has completed.
 class _StockLoanSheet extends StatefulWidget {
   final String country;
   final String? initialPhone;
@@ -272,9 +277,20 @@ class _StockLoanSheet extends StatefulWidget {
 
 class _StockLoanSheetState extends State<_StockLoanSheet> {
   _SheetState _state = _SheetState.checking;
+  _Step _step = _Step.amount;
+
   PezeshaLoanOffer? _offer;
-  String? _message;
+  String? _message; // inline validation / error text
   final _amountCtrl = TextEditingController();
+
+  // Supplier selection.
+  bool _loadingSuppliers = false;
+  String? _supplierError;
+  List<Supplier> _suppliers = const [];
+  Supplier? _supplier;
+  SupplierPaymentMethod? _method;
+
+  bool _applying = false;
 
   @override
   void initState() {
@@ -288,9 +304,6 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
     super.dispose();
   }
 
-  /// Hands control back to the card, which closes this sheet, pushes
-  /// the statement screen, and reopens a fresh sheet if a limit comes
-  /// back.
   void _requestStatementUpload() => Navigator.of(context).pop(true);
 
   Future<void> _checkLimit() async {
@@ -302,16 +315,13 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
       if (offer == null) {
         setState(() {
           _state = _SheetState.unavailable;
-          // Leads with the action, not the refusal — see the matching
-          // comment in customer_bnpl.dart. A vendor with no Pezesha
-          // history gets "no limit" on their first check by default;
-          // the statement is what changes that, so it goes first.
           _message = 'Pezesha needs your M-Pesa statement to work out '
               'your limit. It takes about a minute.';
         });
       } else {
         setState(() {
           _state = _SheetState.available;
+          _step = _Step.amount;
           _offer = offer;
           _amountCtrl.text = offer.amount.toStringAsFixed(0);
         });
@@ -331,28 +341,101 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
     }
   }
 
-  Future<void> _apply() async {
+  double? get _amount {
+    final v = double.tryParse(_amountCtrl.text.trim());
+    if (v == null || v <= 0) return null;
+    return v;
+  }
+
+  // amount -> supplier: validate the amount, then load the directory.
+  Future<void> _goToSupplier() async {
     final offer = _offer;
     if (offer == null) return;
-    final amount = double.tryParse(_amountCtrl.text.trim());
-    if (amount == null || amount <= 0 || amount > offer.amount) {
+    final amount = _amount;
+    if (amount == null || amount > offer.amount) {
       setState(() => _message =
           'Enter an amount up to your limit of '
           '${Currency.formatFor(widget.country, offer.amount)}.');
       return;
     }
-
     setState(() {
-      _state = _SheetState.applying;
+      _message = null;
+      _step = _Step.supplier;
+    });
+    if (_suppliers.isEmpty) await _loadSuppliers();
+  }
+
+  Future<void> _loadSuppliers() async {
+    setState(() {
+      _loadingSuppliers = true;
+      _supplierError = null;
+    });
+    try {
+      final list = await SupplierService.forCountry(widget.country);
+      if (!mounted) return;
+      setState(() {
+        _suppliers = list;
+        _loadingSuppliers = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingSuppliers = false;
+        _supplierError =
+            'Could not load suppliers. Check your connection and try again.';
+      });
+    }
+  }
+
+  void _selectSupplier(Supplier s) {
+    final payable = s.paymentMethods.where((m) => m.isPayable).toList();
+    setState(() {
+      _supplier = s;
+      // Auto-select when there's exactly one payable method.
+      _method = payable.length == 1 ? payable.first : null;
+      _message = null;
+    });
+  }
+
+  void _goToConfirm() {
+    if (_supplier == null || _method == null) {
+      setState(() => _message = 'Choose a supplier and how they\'re paid.');
+      return;
+    }
+    setState(() {
+      _message = null;
+      _step = _Step.confirm;
+    });
+  }
+
+  Future<void> _apply() async {
+    final offer = _offer;
+    final supplier = _supplier;
+    final method = _method;
+    final amount = _amount;
+    if (offer == null ||
+        supplier == null ||
+        method == null ||
+        amount == null ||
+        amount > offer.amount) {
+      return;
+    }
+    setState(() {
+      _applying = true;
       _message = null;
     });
     try {
       await PezeshaService.applyLoan(
         loanType: 'vendor_stock',
         amount: amount,
+        supplierId: supplier.id,
+        paymentMethodId: method.id,
       );
       if (!mounted) return;
-      setState(() => _state = _SheetState.success);
+      setState(() {
+        _applying = false;
+        _state = _SheetState.success;
+      });
       Future.delayed(const Duration(seconds: 2), () {
         // pop(false), not pop(true) — a completed application must not
         // read as "open the statement flow" to the card above.
@@ -361,13 +444,13 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
     } on PezeshaException catch (e) {
       if (!mounted) return;
       setState(() {
-        _state = _SheetState.available;
+        _applying = false;
         _message = e.message;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _state = _SheetState.available;
+        _applying = false;
         _message = 'Could not submit your application. Try again.';
       });
     }
@@ -384,8 +467,6 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Grab handle so a short error/empty state reads as an
-            // intentional sheet, not a stray box at the screen edge.
             Center(
               child: Container(
                 width: 40,
@@ -418,180 +499,462 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
           ),
         );
       case _SheetState.unavailable:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_message ?? '',
-                style: const TextStyle(
-                    color: Colors.black54, fontSize: 13, height: 1.4)),
-            const SizedBox(height: 8),
-            // What they'll need, before they tap — see the matching
-            // comment in customer_bnpl.dart.
-            const Text(
-              'You\'ll need your M-Pesa statement as a PDF (6 or 12 '
-              'months) and the password Safaricom sent with it — '
-              'request both on *334#.',
-              style:
-                  TextStyle(color: Colors.black45, fontSize: 12, height: 1.4),
+        return _buildUnavailable();
+      case _SheetState.error:
+        return _buildError();
+      case _SheetState.success:
+        return _buildSuccess();
+      case _SheetState.available:
+        switch (_step) {
+          case _Step.amount:
+            return _buildAmountStep();
+          case _Step.supplier:
+            return _buildSupplierStep();
+          case _Step.confirm:
+            return _buildConfirmStep();
+        }
+    }
+  }
+
+  Widget _radioDot(bool selected) {
+    return Container(
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+            color: selected ? _orange : Colors.black38, width: 2),
+      ),
+      child: selected
+          ? Center(
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration:
+                    const BoxDecoration(shape: BoxShape.circle, color: _orange),
+              ),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildUnavailable() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(_message ?? '',
+            style: const TextStyle(
+                color: Colors.black54, fontSize: 13, height: 1.4)),
+        const SizedBox(height: 8),
+        const Text(
+          'You\'ll need your M-Pesa statement as a PDF (6 or 12 '
+          'months) and the password Safaricom sent with it — '
+          'request both on *334#.',
+          style: TextStyle(color: Colors.black45, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _requestStatementUpload,
+            icon: const Icon(Icons.upload_file_rounded, size: 18),
+            label: const Text('Upload my statement'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _orange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _requestStatementUpload,
-                icon: const Icon(Icons.upload_file_rounded, size: 18),
-                label: const Text('Upload my statement'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _orange,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildError() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_message ?? 'Something went wrong. Please try again.',
+            style: const TextStyle(
+                color: Colors.black87, fontSize: 13, height: 1.4)),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton(
+            onPressed: _checkLimit,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _orange,
+              side: const BorderSide(color: _orange),
+            ),
+            child: const Text('Retry'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSuccess() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.green),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text('Order placed — Pezesha is paying your supplier '
+                  'directly.'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 32),
+              foregroundColor: _orange,
+            ),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => PezeshaLoanStatusScreen(
+                  ownerType: 'vendor',
+                  country: widget.country,
                 ),
               ),
             ),
-          ],
-        );
-      case _SheetState.error:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_message ?? 'Something went wrong. Please try again.',
-                style: const TextStyle(
-                    color: Colors.black87, fontSize: 13, height: 1.4)),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton(
-                onPressed: _checkLimit,
+            child: const Text('View my loans',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // A small "< Back   Step x of 3" row atop the supplier/confirm steps so
+  // the wizard reads as a sequence, not three loose screens.
+  Widget _stepBar(int index, VoidCallback onBack) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          InkWell(
+            onTap: _applying ? null : onBack,
+            borderRadius: BorderRadius.circular(6),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.chevron_left_rounded, size: 18, color: _navy),
+                  Text('Back',
+                      style: TextStyle(
+                          color: _navy,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+          ),
+          const Spacer(),
+          Text('Step $index of 3',
+              style: const TextStyle(color: Colors.black38, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAmountStep() {
+    final offer = _offer!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'You qualify for up to '
+          '${Currency.formatFor(widget.country, offer.amount)}, '
+          'repaid over ${offer.duration} days.',
+          style: const TextStyle(color: _navy, fontSize: 13, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _amountCtrl,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: 'How much do you need?',
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        if (_message != null) ...[
+          const SizedBox(height: 8),
+          Text(_message!,
+              style: const TextStyle(color: Colors.red, fontSize: 12)),
+        ],
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _goToSupplier,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _orange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: const Text('Next: choose supplier'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 32),
+              foregroundColor: _orange,
+            ),
+            onPressed: _requestStatementUpload,
+            child: const Text('Improve my limit',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSupplierStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _stepBar(2, () => setState(() => _step = _Step.amount)),
+        if (_loadingSuppliers)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(color: _orange),
+            ),
+          )
+        else if (_supplierError != null)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_supplierError!,
+                  style: const TextStyle(color: Colors.black87, fontSize: 13)),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: _loadSuppliers,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: _orange,
                   side: const BorderSide(color: _orange),
                 ),
                 child: const Text('Retry'),
               ),
+            ],
+          )
+        else if (_suppliers.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'No approved suppliers for your area yet. Please check back '
+              'soon.',
+              style: TextStyle(color: Colors.black54, fontSize: 13),
             ),
-          ],
-        );
-      case _SheetState.success:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: Colors.green),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text('Loan approved — funds are on their way to your '
-                      'account.'),
-                ),
-              ],
+          )
+        else ...[
+          const Text('Where are you restocking from?',
+              style: TextStyle(
+                  color: _navy, fontSize: 14, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: _suppliers.map(_buildSupplierTile).toList(),
+              ),
             ),
+          ),
+          if (_message != null) ...[
             const SizedBox(height: 8),
-            // Bonus shortcut — the card itself has a standing "View my
-            // loans" link that works whether or not this sheet was ever
-            // opened, so this one is just convenience for anyone
-            // already looking at this exact moment, before the sheet
-            // auto-closes below.
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 32),
-                  foregroundColor: _orange,
-                ),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => PezeshaLoanStatusScreen(
-                      ownerType: 'vendor',
-                      country: widget.country,
+            Text(_message!,
+                style: const TextStyle(color: Colors.red, fontSize: 12)),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _goToConfirm,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _orange,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Next: review'),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSupplierTile(Supplier s) {
+    final selected = _supplier?.id == s.id;
+    final payable = s.paymentMethods.where((m) => m.isPayable).toList();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        border: Border.all(
+            color: selected ? _orange : Colors.black12,
+            width: selected ? 1.5 : 1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => _selectSupplier(s),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  _radioDot(selected),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(s.name,
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: _navy)),
+                        if (s.brands.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(s.brands.join(', '),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.black54)),
+                        ],
+                      ],
                     ),
                   ),
-                ),
-                child: const Text('View my loans',
+                ],
+              ),
+            ),
+          ),
+          // Payment method: shown only once the supplier is selected.
+          // A single method is auto-picked and shown as a plain line; two
+          // or more are offered as a choice.
+          if (selected && payable.length == 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(44, 0, 12, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Paid via ${payable.first.label}',
                     style:
-                        TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                        const TextStyle(fontSize: 12, color: Colors.black54)),
               ),
             ),
-          ],
-        );
-      case _SheetState.available:
-      case _SheetState.applying:
-        final offer = _offer!;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'You qualify for up to '
-              '${Currency.formatFor(widget.country, offer.amount)}, '
-              'repaid over ${offer.duration} days.',
-              style: const TextStyle(color: _navy, fontSize: 13, height: 1.4),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _amountCtrl,
-              enabled: _state != _SheetState.applying,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'How much do you need?',
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          if (selected && payable.length > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(44, 0, 12, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: payable.map((m) {
+                  final msel = _method?.id == m.id;
+                  return InkWell(
+                    onTap: () => setState(() => _method = m),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          _radioDot(msel),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(m.label,
+                                style: const TextStyle(fontSize: 13)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
-            if (_message != null) ...[
-              const SizedBox(height: 8),
-              Text(_message!,
-                  style: const TextStyle(color: Colors.red, fontSize: 12)),
-            ],
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _state == _SheetState.applying ? null : _apply,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _orange,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: _state == _SheetState.applying
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('Apply now'),
-              ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConfirmStep() {
+    final offer = _offer!;
+    final supplier = _supplier!;
+    final method = _method!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _stepBar(3, () => setState(() => _step = _Step.supplier)),
+        _confirmRow('Amount', Currency.formatFor(widget.country, _amount!)),
+        _confirmRow('Supplier', supplier.name),
+        _confirmRow('Paid via', method.label),
+        const SizedBox(height: 8),
+        Text(
+          'Pezesha pays ${supplier.name} directly for your stock. You repay '
+          'Pezesha over ${offer.duration} days on the schedule they '
+          'provide — MobiGas does not collect repayments.',
+          style: const TextStyle(
+              color: Colors.black45, fontSize: 11, height: 1.35),
+        ),
+        if (_message != null) ...[
+          const SizedBox(height: 8),
+          Text(_message!,
+              style: const TextStyle(color: Colors.red, fontSize: 12)),
+        ],
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _applying ? null : _apply,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _orange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            const SizedBox(height: 8),
-            // A vendor who already has a limit may still want a bigger
-            // one — the deck's flow (567 -> 570, 70,500 -> 78,500) is
-            // exactly this case, not just the zero-limit one.
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 32),
-                  foregroundColor: _orange,
-                ),
-                onPressed: _state == _SheetState.applying
-                    ? null
-                    : _requestStatementUpload,
-                child: const Text('Improve my limit',
-                    style:
-                        TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'You repay Pezesha directly according to the schedule they '
-              'provide — MobiGas does not collect repayments.',
-              style: TextStyle(color: Colors.black45, fontSize: 11, height: 1.3),
-            ),
-          ],
-        );
-    }
+            child: _applying
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Text('Place order'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _confirmRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(label,
+                style: const TextStyle(color: Colors.black54, fontSize: 13)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(
+                    color: _navy, fontSize: 13, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 }

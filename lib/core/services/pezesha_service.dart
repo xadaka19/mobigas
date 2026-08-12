@@ -249,6 +249,9 @@ class PezeshaService {
     required double amount,
     String? targetVendorId,
     String? orderId,
+    String? supplierId,
+    String? paymentMethodId,
+    String? invoicePath,
   }) async {
     try {
       final result = await FirebaseFunctions.instance
@@ -258,6 +261,9 @@ class PezeshaService {
             'amount': amount,
             'targetVendorId': ?targetVendorId,
             'orderId': ?orderId,
+            'supplierId': ?supplierId,
+            'paymentMethodId': ?paymentMethodId,
+            'invoicePath': ?invoicePath,
           });
       final ownerType = loanType == 'vendor_stock' ? 'vendor' : 'customer';
       _offerCache.remove(ownerType);
