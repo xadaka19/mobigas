@@ -6,6 +6,7 @@ import 'package:mobigas/core/providers/auth_provider.dart';
 import 'package:mobigas/core/providers/order_provider.dart';
 import 'package:mobigas/core/providers/vendor_provider.dart';
 import 'package:mobigas/flavors/flavor_config.dart';
+import 'package:mobigas/core/widgets/vendor_loan_fee_lock_screen.dart';
 
 class MobiGasApp extends StatelessWidget {
   const MobiGasApp({super.key});
@@ -23,6 +24,9 @@ class MobiGasApp extends StatelessWidget {
         theme: AppTheme.theme,
         routerConfig: AppRouter.router,
         debugShowCheckedModeBanner: false,
+        builder: (context, child) => VendorLoanFeeLockGate(
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
   }

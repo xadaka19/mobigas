@@ -312,6 +312,12 @@ class VendorModel {
   /// Accumulated unpaid customer-finder fees (KES).
   final double feesOwed;
 
+  /// Accumulated unpaid MobiGas Facilitation Fee (1% of any Pezesha
+  /// vendor_stock loan, charged the moment Pezesha confirms
+  /// disbursement). Separate from feesOwed on purpose -- see
+  /// isLoanFeeLocked below and functions/src/loanFeeLock.ts for why.
+  final double loanFeeOwed;
+
   /// Suspended by admin for unpaid platform fees — receives NO orders
   /// until cleared.
   final bool isSuspended;
@@ -468,6 +474,7 @@ class VendorModel {
     required this.distance,
     required this.deliveryTime,
     this.feesOwed = 0.0,
+    this.loanFeeOwed = 0.0,
     this.isSuspended = false,
     this.chargesDeliveryFee,
     this.deliveryFee = 0.0,
@@ -535,6 +542,7 @@ class VendorModel {
     String? distance,
     String? deliveryTime,
     double? feesOwed,
+    double? loanFeeOwed,
     bool? isSuspended,
     bool? chargesDeliveryFee,
     double? deliveryFee,
@@ -583,6 +591,7 @@ class VendorModel {
       distance: distance ?? this.distance,
       deliveryTime: deliveryTime ?? this.deliveryTime,
       feesOwed: feesOwed ?? this.feesOwed,
+      loanFeeOwed: loanFeeOwed ?? this.loanFeeOwed,
       isSuspended: isSuspended ?? this.isSuspended,
       // Nullable by design (see the tri-state block above), so `??`
       // here can only ever ADD an answer, never clear one back to
@@ -729,6 +738,13 @@ class VendorModel {
   /// admin records payment and feesOwed drops below the threshold.
   bool get isLockedForFees =>
       feesOwed >= MobiGasFees.thresholdFor(country);
+
+  /// Locked out of the ENTIRE app (not just order visibility) because
+  /// a MobiGas Facilitation Fee is owed on a disbursed loan. No
+  /// threshold, unlike isLockedForFees above -- any amount > 0 locks,
+  /// immediately, because this is a single known charge rather than an
+  /// accumulating balance. See VendorLoanFeeLockScreen.
+  bool get isLoanFeeLocked => loanFeeOwed > 0;
 
   /// Vendor can appear to customers and receive orders. isVerified is
   /// checked separately at every call site today (order_screen.dart,

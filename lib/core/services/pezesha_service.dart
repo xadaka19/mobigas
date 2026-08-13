@@ -188,6 +188,32 @@ class PezeshaService {
     }
   }
 
+  /// Uploads a stock-order invoice image to Firebase Storage and returns
+  /// its storage PATH (not a download URL — same reasoning as
+  /// uploadStatementFile). Stored under stock_invoices/{uid}/{ts}.jpg.
+  /// Unlike a statement this file is RETAINED as productive-use evidence,
+  /// so it is never deleted after the loan.
+  static Future<String> uploadInvoiceFile({required File file}) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      throw const PezeshaException('Please sign in again.');
+    }
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ref =
+          FirebaseStorage.instance.ref('stock_invoices/$uid/$ts.jpg');
+      await ref.putFile(
+        file,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+      return ref.fullPath;
+    } catch (_) {
+      throw const PezeshaException(
+        'Could not upload the invoice. Check your connection and try again.',
+      );
+    }
+  }
+
   /// Submits an uploaded M-Pesa statement (required) plus an optional
   /// bank statement for Pezesha to (re)score the borrower. Mirrors
   /// getLoanOffer's return shape — null means no limit is available

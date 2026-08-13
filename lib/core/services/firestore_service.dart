@@ -270,6 +270,7 @@ class FirestoreService {
       distance: data['distance'] ?? '',
       deliveryTime: data['deliveryTime'] ?? '30–45 min',
       feesOwed: (data['feesOwed'] ?? 0.0).toDouble(),
+      loanFeeOwed: (data['loanFeeOwed'] ?? 0.0).toDouble(),
       isSuspended: data['isSuspended'] ?? false,
       // DELIBERATELY NOT `data['chargesDeliveryFee'] ?? false`. The
       // model's field is nullable and the three states are distinct:

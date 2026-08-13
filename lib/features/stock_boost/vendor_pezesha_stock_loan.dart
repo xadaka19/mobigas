@@ -40,7 +40,10 @@
 //    straight there right after applying — that sheet auto-closes 2s
 //    after showing, so this is a bonus shortcut, not the only way in.
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobigas/core/config/currency.dart';
 import 'package:mobigas/core/access/vendor_lock.dart';
 import 'package:mobigas/core/services/pezesha_service.dart';
@@ -50,6 +53,19 @@ import 'package:mobigas/features/bnpl/pezesha_statement_upload_screen.dart';
 
 const _navy = Color(0xFF0D1B40);
 const _orange = Color(0xFFF97316);
+
+// At/above this amount (per country) attaching the supplier's invoice
+// to a stock-loan order is REQUIRED; below it, optional. Mirrored
+// server-side in stockInvoiceThresholdFor() in functions/src/pezesha.ts
+// — keep the two maps in sync. UG/TZ are placeholders to confirm.
+const Map<String, num> _stockInvoiceThresholds = {
+  'KE': 50000,
+  'UG': 1500000,
+  'TZ': 1000000,
+};
+
+num _stockInvoiceThresholdFor(String country) =>
+    _stockInvoiceThresholds[country.toUpperCase()] ?? 50000;
 
 class VendorPezeshaStockLoanCard extends StatefulWidget {
   final String vendorId;
@@ -165,9 +181,9 @@ class _VendorPezeshaStockLoanCardState
             locked
                 ? 'Restocking finance through our partner Pezesha. Clear '
                     'your platform fees to unlock it.'
-                : 'Check your limit and get funds sent straight to your '
-                    'account to restock — through our finance partner '
-                    'Pezesha.',
+                : 'Check your limit and restock through our finance '
+                    'partner Pezesha — funds go straight to your chosen '
+                    'supplier.',
             style: const TextStyle(
                 color: Colors.white70, fontSize: 13, height: 1.4),
           ),
@@ -292,6 +308,11 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
 
   bool _applying = false;
 
+  // Invoice (productive-use evidence): required at/above the
+  // per-country threshold, optional below.
+  String? _invoicePath;
+  bool _invoiceUploading = false;
+
   @override
   void initState() {
     super.initState();
@@ -408,6 +429,43 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
     });
   }
 
+  bool get _invoiceRequired =>
+      (_amount ?? 0) >= _stockInvoiceThresholdFor(widget.country);
+
+  Future<void> _pickInvoice() async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+        maxWidth: 2000,
+      );
+      if (picked == null) return;
+      setState(() {
+        _invoiceUploading = true;
+        _message = null;
+      });
+      final path =
+          await PezeshaService.uploadInvoiceFile(file: File(picked.path));
+      if (!mounted) return;
+      setState(() {
+        _invoicePath = path;
+        _invoiceUploading = false;
+      });
+    } on PezeshaException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _invoiceUploading = false;
+        _message = e.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _invoiceUploading = false;
+        _message = 'Could not attach the invoice. Try again.';
+      });
+    }
+  }
+
   Future<void> _apply() async {
     final offer = _offer;
     final supplier = _supplier;
@@ -420,6 +478,11 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
         amount > offer.amount) {
       return;
     }
+    if (_invoiceRequired && _invoicePath == null) {
+      setState(() => _message =
+          'Attach the supplier invoice to place an order this size.');
+      return;
+    }
     setState(() {
       _applying = true;
       _message = null;
@@ -430,6 +493,7 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
         amount: amount,
         supplierId: supplier.id,
         paymentMethodId: method.id,
+        invoicePath: _invoicePath,
       );
       if (!mounted) return;
       setState(() {
@@ -900,6 +964,8 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
         _confirmRow('Amount', Currency.formatFor(widget.country, _amount!)),
         _confirmRow('Supplier', supplier.name),
         _confirmRow('Paid via', method.label),
+        const SizedBox(height: 12),
+        _buildInvoiceSection(),
         const SizedBox(height: 8),
         Text(
           'Pezesha pays ${supplier.name} directly for your stock. You repay '
@@ -917,7 +983,7 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: _applying ? null : _apply,
+            onPressed: (_applying || _invoiceUploading) ? null : _apply,
             style: ElevatedButton.styleFrom(
               backgroundColor: _orange,
               foregroundColor: Colors.white,
@@ -934,6 +1000,83 @@ class _StockLoanSheetState extends State<_StockLoanSheet> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildInvoiceSection() {
+    final required = _invoiceRequired;
+    final attached = _invoicePath != null;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6F7FB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.receipt_long_rounded, size: 18, color: _navy),
+              const SizedBox(width: 8),
+              const Text('Supplier invoice',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: _navy)),
+              const SizedBox(width: 6),
+              Text(required ? '(required)' : '(optional)',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: required ? Colors.red : Colors.black45)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (attached)
+            Row(
+              children: [
+                const Icon(Icons.check_circle_rounded,
+                    size: 18, color: Colors.green),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Invoice attached',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.black87)),
+                ),
+                TextButton(
+                  onPressed: _invoiceUploading ? null : _pickInvoice,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                    foregroundColor: _orange,
+                  ),
+                  child: const Text('Replace',
+                      style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w700)),
+                ),
+              ],
+            )
+          else
+            OutlinedButton.icon(
+              onPressed: _invoiceUploading ? null : _pickInvoice,
+              icon: _invoiceUploading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: _orange),
+                    )
+                  : const Icon(Icons.attach_file_rounded, size: 18),
+              label: Text(
+                  _invoiceUploading ? 'Uploading…' : 'Attach a photo'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _orange,
+                side: const BorderSide(color: _orange),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
